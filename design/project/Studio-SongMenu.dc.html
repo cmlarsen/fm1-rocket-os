@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO song menu</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SONGS" state="stop" bpm="124" pos="1.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 28px; display: flex; flex-direction: column; gap: 2px; opacity: 0.25">
+<div class="list-row"><span class="m" style="font-size: 14px">Night Drive</span></div>
+<div class="list-row on"><span class="m" style="font-size: 14px">Sunday Dub</span></div>
+<div class="list-row"><span class="m" style="font-size: 14px">Acid Test</span></div>
+</div>
+<div class="dlg" style="top: 40px; height: 170px; padding: 8px 6px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px 6px">
+<span class="m">Sunday Dub</span>
+<span class="s" style="color: var(--mid)">5 roles · 3 takes</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="list-row"><span class="m" style="font-size: 14px">Open</span><span class="kc">SEL</span></div>
+<div class="list-row"><span class="m" style="font-size: 14px">Copy</span><span class="s" style="color: var(--mid)">as Sunday Dub 2</span></div>
+<div class="list-row on"><span class="m" style="font-size: 14px">Rename</span><span class="s">›</span></div>
+<div class="list-row"><span class="m" style="font-size: 14px; color: var(--rec)">Delete</span><span class="s" style="color: var(--mid)">hold</span></div>
+</div>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">SELECT</span>row</div>
+<div class="hint"><span class="kc">SEL</span>do it</div>
+<div class="hint"><span class="kc">HOME</span>close</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="none" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LIVE pads, recording a take</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="TAKE" state="rec" bpm="124" pos="41.2" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 24px"><dc-import name="Knobs" spec="FILTER|LP 62|20|bi,hot,rec;SPACE|30%|30|rec;ECHO|0%|0|;DRIVE|12%|12|" hint-size="240px,48px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 74px"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|l,p,.,.,.|l,s,l,.,.,.,.|p,l,.,.,.|l,.,." focus="2" progress="35" hint-size="240px,140px"></dc-import></div>
+<div class="foot">
+<div class="hint" style="color: var(--rec); font-weight: 600"><span class="breath" style="width: 7px; height: 7px; border-radius: 4px; background: var(--rec)"></span>REC 2:14</div>
+<div class="hint"><span class="kc rec">REC</span>stop</div>
+</div>
+<div style="position: absolute; inset: 0; border: 2px solid var(--rec); border-radius: 2px; pointer-events: none"></div>
+</div>
+</div>
+<dc-import name="Keys" leds="pdd....dp...dsd....pd...d.." labels="A,B,C,D,E,F,G,A,B,C,D,E,A,B,C,D,E,F,G,A,B,C,D,E,A,B,C" zones="roles" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

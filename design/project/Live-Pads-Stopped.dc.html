@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LIVE pads, stopped</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="PADS" state="stop" bpm="124" pos="1.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 24px"><dc-import name="Knobs" spec="FILTER|OFF|50|bi;SPACE|24%|24|;ECHO|0%|0|;DRIVE|12%|12|" hint-size="240px,48px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 74px"><dc-import name="PadGrid" grid="l,l,l,.,.,.,.|l,l,.,.,.|l,l,l,.,.,.,.|l,l,.,.,.|l,.,." focus="0" progress="0" hint-size="240px,140px"></dc-import></div>
+<div class="foot">
+<div class="hint">tap a pad to start</div>
+<div class="hint"><span class="kc">SCL</span>play</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="ddd....dd...ddd....dd...d.." labels="A,B,C,D,E,F,G,A,B,C,D,E,A,B,C,D,E,F,G,A,B,C,D,E,A,B,C" zones="roles" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

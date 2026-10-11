@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LIVE punch FX layer</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="FX" state="play" bpm="124" pos="22.4" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 24px"><dc-import name="Knobs" spec="FILTER|OFF|50|bi;SPACE|24%|24|;ECHO|0%|0|;DRIVE|12%|12|" hint-size="240px,48px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 76px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{fx}}" as="f" hint-placeholder-count="6">
+<div class="cell" style="height: 56px; padding: 0 2px; text-align: center; background: {{f.bg}}; color: {{f.fg}}; font-size: 11px; line-height: 12px; letter-spacing: 0.3px"><span style="display: block; width: 100%; text-align: center">{{f.label}}</span></div>
+</sc-for>
+</div>
+<div class="foot">
+<div class="hint">tap: latch · hold: moment</div>
+<div class="hint"><span class="kc">HOME</span>+<span class="kc">FX</span>reset</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="ddododddddd..d.d.d..d.d..d." labels="R8,M,R16,M,TAPE,M,DIVE,ECHO,M,FRZ,M,,,M,,M,,M,,,M,,M,,,M," zones="custom" zoneText="FX HELD · FIRST 6 LOWER KEYS = PUNCH FX · UPPER KEYS = ROLE MUTES" zoneColor="var(--theme)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const names = ['REPEAT 1/8', 'REPEAT 1/16', 'TAPE STOP', 'FILTER DIVE', 'ECHO THROW', 'FREEZE'];
+    const fx = names.map((label, i) => {
+      if (i === 1) return { label, bg: 'var(--theme)', fg: 'var(--ink)' };
+      if (i === 2) return { label, bg: 'var(--accent)', fg: 'var(--ink)' };
+      return { label, bg: 'var(--surf)', fg: 'var(--text)' };
+    });
+    return { fx };
+  }
+}
+</script>
+</body>
+</html>

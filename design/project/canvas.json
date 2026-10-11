@@ -1,0 +1,357 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-11T02:30:00Z"
+  },
+  "title": "FM-1 Rocket OS Screens",
+  "launch": {
+    "view": "canvas",
+    "page": "live"
+  },
+  "pages": [
+    {
+      "id": "live",
+      "name": "LIVE mode"
+    },
+    {
+      "id": "studio",
+      "name": "STUDIO mode"
+    },
+    {
+      "id": "system",
+      "name": "System overlays"
+    },
+    {
+      "id": "components",
+      "name": "Tokens & parts"
+    }
+  ],
+  "boards": {
+    "Live-Enter.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 1 \u00b7 Enter (hold PLAY)"
+    },
+    "Live-Pads-Stopped.dc.html": {
+      "x": 560,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 2 \u00b7 Pads, stopped"
+    },
+    "Main.dc.html": {
+      "x": 1120,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 3 \u00b7 Pads, playing + queued"
+    },
+    "Live-Pads-Recording.dc.html": {
+      "x": 1680,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 4 \u00b7 Pads, recording a take"
+    },
+    "Live-Play.dc.html": {
+      "x": 2240,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 5 \u00b7 Play layer (SCL)"
+    },
+    "Live-FX.dc.html": {
+      "x": 0,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 6 \u00b7 Punch FX (six, FX held)"
+    },
+    "Live-Assign.dc.html": {
+      "x": 560,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 7 \u00b7 Assign keys (in LIVE SETUP)"
+    },
+    "Live-ClearTake.dc.html": {
+      "x": 1120,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 8 \u00b7 Clear take (hold REC)"
+    },
+    "Live-Setup.dc.html": {
+      "x": 1680,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 9 \u00b7 Live setup (EDIT)"
+    },
+    "Live-Takes.dc.html": {
+      "x": 2240,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "live",
+      "title": "LIVE 10 \u00b7 The take (one per song)"
+    },
+    "Studio-Song.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 1 \u00b7 Song home"
+    },
+    "Studio-EmptyClip.dc.html": {
+      "x": 560,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 2 \u00b7 Empty slot"
+    },
+    "Studio-ClipSteps.dc.html": {
+      "x": 1120,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 3 \u00b7 Clip editor, notes"
+    },
+    "Studio-ClipDrums.dc.html": {
+      "x": 1680,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 4 \u00b7 Clip editor, drums"
+    },
+    "Studio-ClipSettings.dc.html": {
+      "x": 2240,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 5 \u00b7 Clip settings"
+    },
+    "Studio-Sounds.dc.html": {
+      "x": 0,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 6 \u00b7 Sound browser"
+    },
+    "Studio-Songs.dc.html": {
+      "x": 560,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 7 \u00b7 Songs"
+    },
+    "Studio-NewSong.dc.html": {
+      "x": 1120,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 8 \u00b7 New song"
+    },
+    "Studio-ClearClip.dc.html": {
+      "x": 1680,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 9 \u00b7 Clear clip (hold)"
+    },
+    "Studio-Undo.dc.html": {
+      "x": 2240,
+      "y": 752,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 10 \u00b7 Undo toast"
+    },
+    "Sys-Shift.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "system",
+      "title": "SYSTEM 1 \u00b7 HOME held: cheat sheet"
+    },
+    "Sys-Help.dc.html": {
+      "x": 560,
+      "y": 0,
+      "w": 480,
+      "h": 632,
+      "page": "system",
+      "title": "SYSTEM 2 \u00b7 Help card (GLO + button)"
+    },
+    "Tokens.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 700,
+      "page": "components",
+      "title": "Tokens \u00b7 palette, roles, type, LEDs"
+    },
+    "Keys.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 480,
+      "h": 140,
+      "page": "components",
+      "title": "Part \u00b7 Keys + LEDs + zones"
+    },
+    "Header.dc.html": {
+      "x": 1080,
+      "y": 260,
+      "w": 240,
+      "h": 24,
+      "page": "components",
+      "title": "Part \u00b7 Header (1:1)"
+    },
+    "Knobs.dc.html": {
+      "x": 1080,
+      "y": 404,
+      "w": 240,
+      "h": 48,
+      "page": "components",
+      "title": "Part \u00b7 K1\u2013K4 cards (1:1)"
+    },
+    "PadGrid.dc.html": {
+      "x": 1080,
+      "y": 572,
+      "w": 240,
+      "h": 140,
+      "page": "components",
+      "title": "Part \u00b7 Role \u00d7 clip grid (1:1)"
+    },
+    "Studio-SongMenu.dc.html": {
+      "x": 0,
+      "y": 1504,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 11 \u00b7 Song menu (EDIT on a song)"
+    },
+    "Studio-Rename.dc.html": {
+      "x": 560,
+      "y": 1504,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 12 \u00b7 Rename (name entry)"
+    },
+    "Studio-DeleteSong.dc.html": {
+      "x": 1120,
+      "y": 1504,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 13 \u00b7 Delete song (hold)"
+    },
+    "Studio-CopyClip.dc.html": {
+      "x": 1680,
+      "y": 1504,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 14 \u00b7 Copy clip (hold + tap)"
+    },
+    "Studio-ClipMotion.dc.html": {
+      "x": 2240,
+      "y": 1504,
+      "w": 480,
+      "h": 632,
+      "page": "studio",
+      "title": "STUDIO 15 \u00b7 Clip editor, motion page"
+    }
+  },
+  "order": [
+    "Live-Enter.dc.html",
+    "Live-Pads-Stopped.dc.html",
+    "Main.dc.html",
+    "Live-Pads-Recording.dc.html",
+    "Live-Play.dc.html",
+    "Live-FX.dc.html",
+    "Live-Assign.dc.html",
+    "Live-ClearTake.dc.html",
+    "Live-Setup.dc.html",
+    "Live-Takes.dc.html",
+    "Studio-Song.dc.html",
+    "Studio-EmptyClip.dc.html",
+    "Studio-ClipSteps.dc.html",
+    "Studio-ClipDrums.dc.html",
+    "Studio-ClipSettings.dc.html",
+    "Studio-Sounds.dc.html",
+    "Studio-Songs.dc.html",
+    "Studio-NewSong.dc.html",
+    "Studio-ClearClip.dc.html",
+    "Studio-Undo.dc.html",
+    "Studio-SongMenu.dc.html",
+    "Studio-Rename.dc.html",
+    "Studio-DeleteSong.dc.html",
+    "Studio-CopyClip.dc.html",
+    "Studio-ClipMotion.dc.html",
+    "Sys-Shift.dc.html",
+    "Sys-Help.dc.html",
+    "Tokens.dc.html",
+    "Keys.dc.html",
+    "Header.dc.html",
+    "Knobs.dc.html",
+    "PadGrid.dc.html"
+  ],
+  "notes": {
+    "liveTitle": {
+      "x": 0,
+      "y": -300,
+      "text": "LIVE mode: hold PLAY to enter or leave \u00b7 SCL flips Pads / Play \u00b7 REC records the take",
+      "kind": "title1",
+      "maxW": 2720,
+      "page": "live"
+    },
+    "studioTitle": {
+      "x": 0,
+      "y": -300,
+      "text": "STUDIO mode: build the song, roles and clips",
+      "kind": "title1",
+      "maxW": 2720,
+      "page": "studio"
+    },
+    "systemTitle": {
+      "x": 0,
+      "y": -300,
+      "text": "System overlays: shift sheet and help cards",
+      "kind": "title1",
+      "maxW": 1040,
+      "page": "system"
+    },
+    "compTitle": {
+      "x": 0,
+      "y": -300,
+      "text": "Tokens and shared parts (from Felucca GREY)",
+      "kind": "title1",
+      "maxW": 1560,
+      "page": "components"
+    }
+  },
+  "designSystems": []
+}

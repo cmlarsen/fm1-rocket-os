@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FM-1 keys with LEDs</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 480px; display: flex; flex-direction: column; gap: 4px; font-family: 'Inter Tight', system-ui, sans-serif">
+<div class="keys" role="img" aria-label="FM-1 keyboard: 11 upper keys in groups 3-2-3-2-1, 16 lower keys, LED state per key">
+<sc-for list="{{keys}}" as="k" hint-placeholder-count="27">
+<div class="pill" style="left: {{k.x}}px; top: {{k.y}}px; height: {{k.h}}px">
+<div class="led {{k.cls}}"></div>
+<span class="klbl">{{k.label}}</span>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{showZones}}" hint-placeholder-val="{{true}}">
+<div class="zones">
+<sc-for list="{{zones}}" as="z" hint-placeholder-count="5">
+<div class="zone" style="left: {{z.x}}px; width: {{z.w}}px; background: {{z.bg}}">{{z.label}}</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"leds":{"editor":"text","default":"ddddddddddddddddddddddddddd"},"labels":{"editor":null,"default":""},"zones":{"editor":"enum","options":["roles","none","custom"],"default":"roles"},"zoneText":{"editor":null,"default":""},"zoneColor":{"editor":null,"default":"#cccccc"},"$preview":{"width":480,"height":140}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const leds = (this.props.leds ?? 'ddddddddddddddddddddddddddd').padEnd(27, '.');
+    const labels = (this.props.labels ?? '').split(',');
+    const blackSemis = [1, 3, 5, 8, 10];
+    const map = { '.': '', 'd': 'd', 'o': 'o', 'f': 'o blink', 's': 'o slow', 'p': 'o pulse', 'r': 'r', 'R': 'r breath', 'b': 'd breath' };
+    const keys = [];
+    let wi = 0;
+    for (let i = 0; i < 27; i++) {
+      const semi = i % 12;
+      const black = blackSemis.indexOf(semi) >= 0;
+      const cls = map[leds[i]] ?? '';
+      const label = (labels[i] ?? '').trim();
+      if (black) {
+        keys.push({ x: wi * 30 - 12, y: 6, h: 48, cls, label });
+      } else {
+        keys.push({ x: wi * 30 + 3, y: 62, h: 50, cls, label });
+        wi++;
+      }
+    }
+    const mode = this.props.zones ?? 'roles';
+    let zones = [];
+    if (mode === 'roles') {
+      zones = [
+        { x: 1, w: 118, bg: 'var(--drum)', label: 'DRUMS' },
+        { x: 121, w: 88, bg: 'var(--bass)', label: 'BASS' },
+        { x: 211, w: 118, bg: 'var(--lead)', label: 'LEAD' },
+        { x: 331, w: 88, bg: 'var(--chord)', label: 'CHORDS' },
+        { x: 421, w: 58, bg: 'var(--fx)', label: 'NOISE/FX' }
+      ];
+    } else if (mode === 'custom') {
+      zones = [{ x: 1, w: 478, bg: this.props.zoneColor ?? '#cccccc', label: this.props.zoneText ?? '' }];
+    }
+    return { keys, zones, showZones: mode !== 'none' };
+  }
+}
+</script>
+</body>
+</html>

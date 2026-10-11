@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO new song</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="NEW SONG" state="stop" bpm="124" pos="1.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 28px; display: flex; flex-direction: column; gap: 4px">
+<div class="card" style="height: 44px; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between">
+<div style="display: flex; justify-content: space-between"><span class="m">Empty</span><span class="s" style="color: var(--mid)">5 roles, no clips</span></div>
+<div style="display: flex; gap: 2px"><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--drum-t)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--bass-t)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--lead-t)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--chord-t)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--fx-t)"></span></div>
+</div>
+<div class="card" style="height: 44px; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; background: var(--sel); color: var(--ink)">
+<div style="display: flex; justify-content: space-between"><span class="m">Starter</span><span class="s">beat + bass ready</span></div>
+<div style="display: flex; gap: 2px"><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--drum)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--bass)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--lead-t)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--chord-t)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--fx-t)"></span></div>
+</div>
+<div class="card" style="height: 44px; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between">
+<div style="display: flex; justify-content: space-between"><span class="m">Copy current</span><span class="s" style="color: var(--mid)">Night Drive</span></div>
+<div style="display: flex; gap: 2px"><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--drum)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--bass)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--lead)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--chord)"></span><span style="flex: 1; height: 4px; border-radius: 2px; background: var(--fx)"></span></div>
+</div>
+</div>
+<div style="position: absolute; left: 4px; right: 4px; top: 176px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px">
+<div class="list-row card"><span class="s" style="color: var(--mid)">K1 tempo</span><span class="m num" style="color: var(--theme)">120</span></div>
+<div class="list-row card"><span class="s" style="color: var(--mid)">K2 key</span><span class="m" style="color: var(--theme)">A min</span></div>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">SEL</span>create</div>
+<div class="hint">current song is saved</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="none" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

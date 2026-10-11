@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO sound browser</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SOUND" state="play" bpm="124" pos="10.1" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 28px; display: flex; gap: 3px">
+<span class="chip" style="height: 20px; padding: 0 8px; background: var(--lead); color: var(--ink)">LEAD</span>
+<span class="chip" style="height: 20px; padding: 0 8px; background: var(--surf); color: var(--mid)">ALL</span>
+<span class="chip" style="height: 20px; padding: 0 8px; background: var(--surf); color: var(--mid)">MY SOUNDS</span>
+</div>
+<div style="position: absolute; left: 4px; right: 4px; top: 54px; display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div class="{{r.cls}}">
+<span class="m" style="font-size: 14px">{{r.name}}</span>
+<span class="s cap" style="font-size: 10px; font-weight: 600; letter-spacing: 0.4px; color: {{r.ec}}">{{r.engine}}</span>
+</div>
+</sc-for>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">PRESETS</span>browse</div>
+<div class="hint"><span class="kc">SEL</span>use</div>
+<div class="hint"><span class="kc">EDIT</span>deep</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..............o............" zones="custom" zoneText="KEYS AUDITION THE HIGHLIGHTED SOUND" zoneColor="var(--lead)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const data = [
+      ['Glass Bell', 'FM6'], ['Tine EP', 'FM6'], ['Saw Lead', 'Analog'],
+      ['Hollow Pluck', 'Phys'], ['DX Brass', 'FM6'], ['Square Lead', 'Analog']
+    ];
+    const rows = data.map(([name, engine], i) => ({
+      name, engine,
+      cls: i === 0 ? 'list-row on' : 'list-row',
+      ec: i === 0 ? 'var(--ink)' : 'var(--mid)'
+    }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

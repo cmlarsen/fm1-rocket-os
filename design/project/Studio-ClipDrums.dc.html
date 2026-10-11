@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO clip editor, drums</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="DRUM A" state="play" bpm="124" pos="9.3" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 24px"><dc-import name="Knobs" spec="LANE|SD|20|hot;VEL|100|80|;CHANCE|100%|100|;RATCH|1×|0|" hint-size="240px,48px"></dc-import></div>
+<div style="position: absolute; left: 3px; right: 3px; top: 75px; height: 116px; border-radius: 6px; background: var(--surf)">
+<sc-for list="{{lanes}}" as="l" hint-placeholder-count="8">
+<div style="position: absolute; left: 2px; right: 2px; top: {{l.y}}px; height: 12px; border-radius: 2px; background: {{l.bg}}"></div>
+<span style="position: absolute; left: 4px; top: {{l.ty}}px; font-size: 9px; line-height: 12px; font-weight: 600; color: {{l.lc}}">{{l.name}}</span>
+<sc-for list="{{l.cells}}" as="c" hint-placeholder-count="16">
+<div style="position: absolute; top: {{c.y}}px; left: {{c.x}}px; width: 10px; height: 10px; border-radius: 2px; background: {{c.bg}}"></div>
+</sc-for>
+</sc-for>
+<div style="position: absolute; top: 2px; bottom: 2px; width: 13px; left: {{playX}}px; background: var(--accent); opacity: 0.14"></div>
+</div>
+<div class="foot">
+<div class="hint">white keys: steps</div>
+<div class="hint">black keys: lanes</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds=".d.o.d.od.d..d.ddd...o....." labels="1,BD,2,SD,3,CP,4,5,CH,6,OH,7,8,TM,9,RC,10,CB,11,12,,13,,14,15,,16" zones="custom" zoneText="DRUM GRID · WHITE = STEPS 1–16 · BLACK = LANE" zoneColor="var(--drum)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pat = {
+      BD: [0, 4, 8, 10, 12], SD: [4, 12], CP: [12], CH: [0, 2, 4, 6, 8, 10, 12, 14],
+      OH: [6, 14], TM: [15], RC: [], CB: [10]
+    };
+    const names = ['BD', 'SD', 'CP', 'CH', 'OH', 'TM', 'RC', 'CB'];
+    const lanes = names.map((name, i) => {
+      const y = 2 + i * 14;
+      const sel = name === 'SD';
+      const cells = Array.from({ length: 16 }, (_, s) => ({
+        x: 24 + s * 13 + 1, y: y + 1,
+        bg: pat[name].indexOf(s) >= 0 ? 'var(--drum)' : (s % 4 === 0 ? 'var(--dim)' : 'var(--raise)')
+      }));
+      return { name, y, ty: y, cells, bg: sel ? 'var(--drum-t)' : 'transparent', lc: sel ? 'var(--drum)' : 'var(--mid)' };
+    });
+    return { lanes, playX: 24 + 9 * 13 };
+  }
+}
+</script>
+</body>
+</html>

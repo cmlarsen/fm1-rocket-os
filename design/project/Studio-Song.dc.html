@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO song home</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SONG" state="play" bpm="124" pos="9.1" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div class="card" style="position: absolute; left: 3px; right: 3px; top: 27px; height: 44px; padding: 5px 7px; display: flex; justify-content: space-between">
+<div style="display: flex; flex-direction: column">
+<span class="m">Night Drive</span>
+<span class="s" style="color: var(--mid)">C minor · 5 roles</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-end">
+<span class="m" style="color: var(--bass)">BASS B</span>
+<span class="s" style="color: var(--mid)">2 bars · loop</span>
+</div>
+</div>
+<div style="position: absolute; left: 0; top: 74px"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|p,c,.,.,.|l,p,l,.,.,.,.|l,l,.,.,.|l,.,." focus="1" progress="40" hint-size="240px,140px"></dc-import></div>
+<div class="foot">
+<div class="hint"><span class="kc">SEQ</span>edit</div>
+<div class="hint"><span class="kc">EDIT</span>sound</div>
+<div class="hint"><span class="kc">PLAY</span>hold: live</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="custom" zoneText="KEYS PLAY BASS · ALGO MOVES THE CURSOR" zoneColor="var(--bass)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

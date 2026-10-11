@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design tokens</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1000px; height: 700px; box-sizing: border-box; padding: 40px; background: #161616; color: #e6e6e6; font-family: 'Inter Tight', system-ui, sans-serif; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">Palette · Felucca GREY</h2>
+<p style="margin: 0; font-size: 13px; color: #a8a8a8">Five stored colours, the rest derived by Felucca's fixed blends (gen_ui_palettes.py). Other Felucca palettes swap in through fm1.css.</p>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{pal}}" as="p" hint-placeholder-count="14">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="height: 40px; border-radius: 6px; background: {{p.v}}; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12)"></div>
+<span style="font-size: 12px; font-weight: 600">{{p.n}}</span>
+<span style="font-size: 11px; color: #a8a8a8">{{p.use}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">Role colours (new, on top of the palette)</h2>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{roles}}" as="r" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="height: 40px; border-radius: 6px; background: {{r.c}}; display: flex; align-items: center; justify-content: center; color: #0e0e0e; font-size: 13px; font-weight: 600">{{r.n}}</div>
+<div style="height: 20px; border-radius: 6px; background: {{r.t}}; display: flex; align-items: center; justify-content: center; color: {{r.c}}; font-size: 11px; font-weight: 600">tint</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">Type · Inter Tight (Felucca sizes)</h2>
+<div style="display: flex; align-items: baseline; gap: 20px">
+<span style="font-size: 56px; font-weight: 600; letter-spacing: -0.6px">LEAD</span>
+<span style="font-size: 30px; font-weight: 500">Glass Bell</span>
+<span style="font-size: 24px; font-weight: 400; color: #a8a8a8">C minor</span>
+</div>
+<span style="font-size: 12px; color: #a8a8a8">shown at 2×: L 28 px / 600 · M 15 px / 500 · S 12 px / 400 on device</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">Clip cell states (screen)</h2>
+<div style="display: flex; gap: 14px; flex-wrap: wrap">
+<sc-for list="{{cells}}" as="c" hint-placeholder-count="8">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px">
+<div class="{{c.cls}}" style="width: 48px; height: 48px; border-radius: 8px; font-size: 22px; background: {{c.bg}}; color: {{c.fg}}; border: {{c.border}}">{{c.l}}</div>
+<span style="font-size: 12px; text-align: center">{{c.n}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">Key LED states (hardware)</h2>
+<div style="display: flex; gap: 14px; flex-wrap: wrap; padding: 14px; border-radius: 10px; background: #3b3436">
+<sc-for list="{{leds}}" as="l" hint-placeholder-count="7">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 64px">
+<div class="pill" style="position: relative; height: 50px"><div class="led {{l.cls}}"></div></div>
+<span style="font-size: 12px; text-align: center; color: #f0e8ea">{{l.n}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1000,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pal = [
+      ['BG', '#0e0e0e', 'ground'], ['SURF', '#242424', 'cards'], ['TEXT', '#cccccc', 'body'], ['THEME', '#e8e8e8', 'values'],
+      ['ACCENT', '#ffffff', 'the one hot thing'], ['MID', '#939393', 'labels'], ['DIM', '#5e5e5e', 'inactive'],
+      ['LINE', '#303030', 'tracks'], ['SEL', '#bcbcbc', 'selection'], ['RAISE', '#383838', 'chips'], ['KEY', '#a2a2a2', 'keycaps'],
+      ['INK', '#0e0e0e', 'text on fills'], ['REC', '#ff4848', 'record'], ['TINT', '#1d1d1d', 'faint area']
+    ].map(([n, v, use]) => ({ n, v, use }));
+    const roles = [
+      ['DRUMS', 'var(--drum)', 'var(--drum-t)'], ['BASS', 'var(--bass)', 'var(--bass-t)'], ['LEAD', 'var(--lead)', 'var(--lead-t)'],
+      ['CHORDS', 'var(--chord)', 'var(--chord-t)'], ['FX', 'var(--fx)', 'var(--fx-t)']
+    ].map(([n, c, t]) => ({ n, c, t }));
+    const cells = [
+      ['empty', 'cell empty', 'transparent', 'var(--dim)', '', '1px dashed var(--dim)'],
+      ['loaded', 'cell', 'var(--bass-t)', 'var(--bass)', 'A', 'none'],
+      ['queued', 'cell blink', 'var(--bass-t)', 'var(--bass)', 'B', '2px solid var(--bass)'],
+      ['playing', 'cell', 'var(--bass)', 'var(--ink)', 'A', 'none'],
+      ['stopping', 'cell slow', 'var(--bass)', 'var(--ink)', 'A', 'none'],
+      ['recording', 'cell pulse', 'var(--rec)', 'var(--ink)', 'C', 'none'],
+      ['cursor', 'cell', 'var(--bass-t)', 'var(--bass)', 'B', '2px solid var(--accent)'],
+      ['new here', 'cell', 'transparent', 'var(--accent)', '+', '2px solid var(--accent)']
+    ].map(([n, cls, bg, fg, l, border]) => ({ n, cls, bg, fg, l, border }));
+    const leds = [
+      ['off · empty', ''], ['dim · loaded', 'd'], ['on · held', 'o'], ['fast blink · queued', 'o blink'],
+      ['pulse · playing', 'o pulse'], ['slow · stopping', 'o slow'], ['red · recording', 'r breath']
+    ].map(([n, cls]) => ({ n, cls }));
+    return { pal, roles, cells, leds };
+  }
+}
+</script>
+</body>
+</html>
