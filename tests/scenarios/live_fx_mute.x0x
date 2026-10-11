@@ -1,0 +1,38 @@
+# T10i review: a live mute is performance state, not song state. Mute a role in the FX layer, leave
+# LIVE stopped, let the autosave write the song, reboot, and nothing is muted.
+wait 300
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+# mute BASS in the FX layer
+press FX
+wait 30
+tapkey 17
+expect fxmute1 1
+expect songrolemute1 0         # the live mute never touches the song
+release FX
+wait 30
+# leave LIVE (long PLAY)
+press PLAY
+wait 700
+release PLAY
+wait 60
+expect mode 0
+expect fxmute1 0
+# dirty the song with a clip edit so the autosave has something to write, then let it run
+tap SEQ
+spin K1 16
+tap HOME
+wait 6000
+expect songdirty 0
+expect songwrites >0
+expect songrolemute1 0
+# reboot: the stored song carried no mute, and the engine starts unmuted
+reboot
+expect songloaded 1
+expect fxmute1 0
+expect songrolemute1 0
+dump live_fx_mute.json

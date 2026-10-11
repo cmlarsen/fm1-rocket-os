@@ -11,6 +11,7 @@
 #include "../dsp/fastmath.h"
 #include "../dsp/eng_fm6.h"
 #include "../dsp/eng_noise.h"
+#include "../dsp/perform.h"
 
 #define POOL X0X_POOL
 
@@ -33,6 +34,9 @@ static drum808_t d808 POOL;
 static bass303_t b303[NBASS] POOL;
 static fxbus_t fx POOL;
 static master_t mst;
+/* T10i: the punch FX state (~32.3 KiB) lives in the shared pool. perform_process() runs on the
+ * master stereo signal after the mix and before the output stage. */
+static perform_t perf POOL;
 /* T3: the delay line is 1.0 s (was 2.0 s, 88,200) — the RAM plan in architecture.md frees
  * 88,200 B for the LIVE song and clip engine. fxbus's delay time halves itself to fit dlen,
  * so the longest synced delay is now 1.0 s (check the POOL numbers in reports/T3.md). */
@@ -56,6 +60,54 @@ void engine_motion_reset(void) { mot_release_req = 1; }   /* lanes changed under
  * the sequencer's own flags) consistent without touching DSP state from the main loop. */
 static volatile uint8_t all_off_req;
 void engine_all_off(void) { all_off_req = 1; }
+
+/* ---- T10i: the punch FX ------------------------------------------------ */
+/* Engage/release/reset arrive from the main loop and reach the ISR through perform's own ring.
+ * engine_perform_tick() runs each UI frame: it keeps perform's echo base in step with the
+ * project's delay settings and, when the throw changes, drives X0X's fxbus delay with the same
+ * three engine_set() calls the FX page uses (T_MIX MX_DLY on every part, T_FX FX_DL_FDBK/TIME). */
+static uint8_t echo_base_valid, echo_base_bs, echo_base_bf, echo_base_bt;
+static uint8_t echo_applied;                 /* the throw is engaged in the engine */
+
+void engine_perform_engage(int fx, int latch) { perform_engage(&perf, fx, latch); }
+void engine_perform_release(int fx) { perform_release(&perf, fx); }
+void engine_perform_reset(void) { perform_reset(&perf); }
+void engine_perform_echo_throw(int on) { perform_echo_throw(&perf, on); }
+int engine_perform_latched(int fx) { return perform_latched(&perf, fx); }
+
+void engine_perform_tick(void)
+{
+    perform_echo_t t;
+    uint8_t bs = 0, bf = 52, bt = 7;
+    int p;
+    if (mot_base_snd) {
+        bs = mot_base_snd->v[T_MIX][PART_909][MX_DLY];
+        bf = mot_base_snd->v[T_FX][0][FX_DL_FDBK];
+        bt = mot_base_snd->v[T_FX][0][FX_DL_TIME];
+    }
+    if (!echo_base_valid || bs != echo_base_bs || bf != echo_base_bf || bt != echo_base_bt) {
+        echo_base_valid = 1;
+        echo_base_bs = bs;
+        echo_base_bf = bf;
+        echo_base_bt = bt;
+        perform_echo_base(&perf, bs, bf, bt);
+    }
+    if (!perform_echo_targets(&perf, &t))
+        return;
+    if (t.on && !echo_applied) {                      /* the throw: override the delay send / feedback / time */
+        for (p = 0; p < ENG_NPARTS; p++)
+            engine_set(T_MIX, p, MX_DLY, t.send);
+        engine_set(T_FX, 0, FX_DL_FDBK, t.fdbk);
+        engine_set(T_FX, 0, FX_DL_TIME, t.time);
+        echo_applied = 1;
+    } else if (!t.on && echo_applied) {               /* release: back to the project's own delay */
+        for (p = 0; p < ENG_NPARTS; p++)
+            engine_set(T_MIX, p, MX_DLY, mot_base_snd ? mot_base_snd->v[T_MIX][p][MX_DLY] : 0);
+        engine_set(T_FX, 0, FX_DL_FDBK, bf);
+        engine_set(T_FX, 0, FX_DL_TIME, bt);
+        echo_applied = 0;
+    }                                                 /* an initial on=0 target is not a change: ignore */
+}
 
 /* overload guard: past the CPU (a block over 92%, or 85% on average) the two 303s drop their
  * oversampling (~12% of the CPU: a little aliasing on bright notes), the 808's voices end at
@@ -908,6 +960,7 @@ void engine_render(int32_t *out_lr, uint32_t n)
 {
     static float out_l[256], out_r[256];
     uint32_t done = 0, i;
+    uint32_t perf_g8 = PERFORM_NO_GRID, perf_g16 = PERFORM_NO_GRID;   /* T10i */
     float vol = (float)plat_master() / 4096.0f;
     int p;
     if (n > 256u)
@@ -939,6 +992,8 @@ void engine_render(int32_t *out_lr, uint32_t n)
         }
         PROF_ADD(PR_SEQ, pt);
     }
+    if (live_bridge_active() && live_bridge_transport_playing())
+        live_bridge_grid(&perf_g8, &perf_g16);        /* T10i: the grid at the block's first frame */
     if (live_bridge_active()) {
         live_ctx_t c;
         live_sink_t sink;
@@ -968,6 +1023,11 @@ void engine_render(int32_t *out_lr, uint32_t n)
         all_off_now();                                  /* T5i: transport stop releases FM6/NOISE/303s */
     }
     mot_playing = seq.playing;
+    /* T10i: the punch FX on the master stereo signal, after the mix (fxbus_process_st, in
+     * render_sub) and before the output stage (master_process_st). The grid distances were taken
+     * at the block's first frame, so a repeat captures its slice on the exact grid sample. */
+    perform_set_tempo(&perf, live_bridge_bpm_x10());
+    perform_process(&perf, out_l, out_r, n, perf_g8, perf_g16);
     {
         PROF_T(pt);
         master_process_st(&mst, out_l, out_r, (int)n, vol);
@@ -1024,6 +1084,7 @@ void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t
     fm6_bank_boot();
     fxbus_init(&fx, dly_buf, DLY_LEN);
     master_init(&mst);
+    perform_init(&perf);                              /* T10i: the punch FX */
     seq_init(&seq, patterns);
     seq.song = song;
     motion_init(&mot, lanes);

@@ -1,0 +1,93 @@
+# T10i: the LIVE punch FX layer. FX held (or double-tapped) turns the first six lower keys into
+# the six punches and the upper keys into role mutes; a tap latches, a hold is momentary; HOME+FX
+# resets every effect; leaving LIVE releases every effect and clears every mute.
+wait 300
+# T7a: build a 909 pattern and a 303 line in the classic pages, then seed the song's clips from them.
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+# enter LIVE and start the transport with two clips playing.
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+expect layer 0
+tapkey 0
+tapkey 7
+tap PLAY
+wait-bar 2
+expect liveclip0 0
+expect liveclip1 7
+
+# --- FX held opens the layer; the six cells are drawn (LIVE 6) ---
+press FX
+wait 30
+expect fxlayer 1
+expect key 0 1
+events live_fx_events.txt
+wav live_fx.wav
+
+# --- tap latches: repeat 1/8 ---
+tapkey 0
+expect fxlatch0 1
+expect key 0 2
+# --- hold is momentary: tape stop (bright while held, dim after) ---
+key 2 down
+wait 350
+expect key 2 2
+expect fxlatch2 0
+shot live_fx.png
+key 2 up
+wait 40
+expect fxlatch2 0
+expect key 2 1
+# --- releasing FX returns to the layer underneath; a latched effect stays on ---
+release FX
+wait 40
+expect fxlayer 0
+expect fxlatch0 1
+
+# --- HOME + FX resets every effect ---
+press HOME
+press FX
+wait 40
+release FX
+release HOME
+wait 40
+expect fxlatch0 0
+expect fxlatch1 0
+expect fxlatch2 0
+
+# --- the upper keys mute roles, through the clip engine ---
+press FX
+wait 30
+expect fxlayer 1
+tapkey 17
+expect fxmute1 1
+expect songrolemute1 0
+expect key 17 2
+tapkey 17
+expect fxmute1 0
+expect key 17 1
+# --- leaving LIVE clears one latched effect and one mute ---
+tapkey 1
+tapkey 16
+expect fxlatch1 1
+expect fxmute0 1
+release FX
+wait 40
+wavstop
+eventsstop
+dump live_fx.json
+press PLAY
+wait 700
+release PLAY
+wait 60
+expect mode 0
+expect fxmute0 0
+expect fxlatch1 0

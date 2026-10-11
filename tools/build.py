@@ -42,7 +42,7 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 # the DSP, the sequencer and the audio engine: separate units at -O2
 O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/fxbus.c", "dsp/master.c",
-            "dsp/fm6_core.c", "dsp/fm6_vbank.c", "dsp/eng_fm6.c", "dsp/eng_noise.c",
+            "dsp/fm6_core.c", "dsp/fm6_vbank.c", "dsp/eng_fm6.c", "dsp/eng_noise.c", "dsp/perform.c",
             "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c",
             "app/live_bridge.c", "app/song_io.c", "app/song_templates.c"]
 # the new core modules live at the repo root's core/, not under firmware/src
