@@ -42,6 +42,7 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 # the DSP, the sequencer and the audio engine: separate units at -O2
 O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/fxbus.c", "dsp/master.c",
+            "dsp/fm6_core.c", "dsp/fm6_vbank.c", "dsp/eng_fm6.c", "dsp/eng_noise.c",
             "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
@@ -130,7 +131,8 @@ def generate():
     GEN.mkdir(parents=True, exist_ok=True)
     tools = SRC / "tools"
     cmds = [[tools / "gen_font.py", GEN / "felucca_font.h"],
-            [tools / "gen_drum_samples.py", GEN / "x0x_drum_samples.h"]]
+            [tools / "gen_drum_samples.py", GEN / "x0x_drum_samples.h"],
+            [tools / "gen_fm6_patches.py", GEN / "fm6_patches.h"]]
     procs = [subprocess.Popen([sys.executable, *map(str, c)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True) for c in cmds]
     failed = []
