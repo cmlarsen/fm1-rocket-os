@@ -1,7 +1,19 @@
+# fm1-rocket-os
+
+fm1-rocket-os is **work in progress**: custom firmware for the M-VAVE FM-1 that turns it into a
+standalone clip-launching performance instrument. The plan, design and decisions are in
+[docs/README.md](docs/README.md).
+
+It forks **[X0X](https://github.com/charlesvestal/fm1-x0x) by Charles Vestal**, which itself forks
+**[Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (@kurogedelic), Hügelton
+Instruments**. Everything below is X0X's own README, kept as the base's documentation.
+
+---
+
 # X0X for the M-VAVE FM-1
 
-X0X turns the M-VAVE FM-1 into a groovebox: a **909**, an **808**, two **303s** with an acid line
-generator, and a **breakbeat player**, all playing at once. Each part can play its own pattern,
+X0X turns the M-VAVE FM-1 into a groovebox: a **909**, an **808** and two **303s** with an acid line
+generator, all playing at once. Each part can play its own pattern,
 you can string patterns into a song, and you can record knob moves. Everything runs in stereo,
 with a shared reverb and tape delay and a punchy master compressor. Over USB, the FM-1 is both a
 MIDI device and an audio input, with no driver needed.
@@ -28,7 +40,6 @@ The factory sound is set up for big beat, so it should make noise the moment you
 | 909 | 11 voices: modelled kick, snare, toms, rim and clap, with sampled hats and cymbals | [9W9](https://github.com/athousanddetails/schwung-9W9) (samples from ER-99) |
 | 808 | 11 tracks, including the 808's tom/conga, rim/claves and clap/maracas switches | [8W8](https://github.com/athousanddetails/schwung-8W8) |
 | 303 A and B | Open303 with Devilfish-style ranges, each with a TB-3PO line generator | [schwung-303](https://github.com/charlesvestal/schwung-303), [schwung-tb3po](https://github.com/charlesvestal/schwung-tb3po) |
-| Break | A loop cut into eight slices and rearranged as it plays | [BB Gen](https://github.com/mestela/schwung-breakbeat) |
 
 Each part has its own step length (up to 64 steps) and rate, so parts can drift against each
 other. Pattern changes wait for the end of the bar, and patterns can be chained.
@@ -36,20 +47,6 @@ other. Pattern changes wait for the end of the bar, and patterns can be chained.
 X0X is a fork of [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (Hügelton
 Instruments). It keeps Felucca's foundations (the hardware layer, USB, the update loader, the web
 installer and the storage) and replaces the instrument on top.
-
-## Your own breaks
-
-X0X doesn't ship with any recorded breaks, only two loops played by its own 909. You can load
-your own into the FM-1's three sample slots, which hold about nine one-bar loops in total.
-The [break loops page](https://charlesvestal.github.io/fm1-x0x/breaks/) does it from Chrome or
-Edge (drop the files, press Upload); from the command line:
-
-```
-tools/upload_breaks.py --bars amen.wav think.wav ...   # take one bar of each and upload them
-tools/upload_breaks.py --dry-run OUTDIR ...            # see what fits, without the FM-1
-```
-
-Recorded breaks belong to whoever made them and aren't covered by this project's licence.
 
 ## Building and testing
 
@@ -67,9 +64,8 @@ X0X is tested before it reaches the FM-1.
 ## Licence and credits
 
 X0X is GPL-3.0-only, like Felucca, 9W9, 8W8 and schwung-tb3po. Open303 (by Robin Schmidt) is
-MIT. BB Gen is ported from mestela's schwung-breakbeat with the author's permission. The 909's
-hi-hat, ride and crash samples come from ER-99 (Matthew Cieplak, GPL-3.0). The fonts are Barlow
-Semi Condensed and Terminus (SIL OFL 1.1).
+MIT. The 909's hi-hat, ride and crash samples come from ER-99 (Matthew Cieplak, GPL-3.0). The
+fonts are Barlow Semi Condensed and Terminus (SIL OFL 1.1).
 
 Felucca's own assets that aren't under its GPL (the icon set, the panel photo and the Hügelton
 drum pack) aren't part of this fork.

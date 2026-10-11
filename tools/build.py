@@ -41,7 +41,7 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 # build (-ffp-contract=off) computes the same samples
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 # the DSP, the sequencer and the audio engine: separate units at -O2
-O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/breaks.c", "dsp/fxbus.c", "dsp/master.c",
+O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/fxbus.c", "dsp/master.c",
             "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
@@ -126,7 +126,7 @@ def tc_all(*cmds):
 
 
 def generate():
-    """generated headers: the font (Felucca's), the 909's samples and tables, the break bank"""
+    """generated headers: the font (Felucca's) and the 909's samples and tables"""
     GEN.mkdir(parents=True, exist_ok=True)
     tools = SRC / "tools"
     cmds = [[tools / "gen_font.py", GEN / "felucca_font.h"],
@@ -140,16 +140,6 @@ def generate():
             failed.append(c[0].name)
     if failed:
         raise SystemExit(f"build: {', '.join(failed)} failed")
-    # the BREAK part's built-in bank: the 909-rendered loops (no recordings), or, opt-in,
-    # one-bar WAVs from X0X_BREAK_BANK (made by tools/import_breaks.py; not in this tree)
-    bank = os.environ.get("X0X_BREAK_BANK")
-    cmd = ([sys.executable, str(tools / "gen_break_bank.py"), bank, str(GEN / "x0x_break_bank.h")] if bank
-           else ["sh", str(tools / "gen_builtin_break.sh"), str(GEN)])
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    sys.stdout.write(r.stdout)
-    if r.returncode:
-        sys.stderr.write(r.stderr)
-        raise SystemExit("build: break bank failed")
 
 
 # ---- update loader

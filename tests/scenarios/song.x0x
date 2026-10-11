@@ -46,7 +46,7 @@ shot s03_song.png
 # SONG mode on (page 2, knob 4); play from bar 1
 # MODE: the SONG screen's list (its page has REPEAT there now)
 tap SEL
-turn SELECT 7
+turn SELECT 6
 turn ALGO 1
 tap HOME
 expect songon 1
@@ -68,7 +68,7 @@ expect songpos 1
 expect mute 0
 tap PLAY
 tap SEL
-turn SELECT 7
+turn SELECT 6
 turn ALGO -1
 tap HOME
 expect songon 0

@@ -4,13 +4,13 @@
 /* X0X's subset of Felucca's editor protocol (web/EDITOR_PROTOCOL.md):
  *   F0 7D 46 4C cmd args.. F7
  * INFO (1), PING (25) and the sample-slot commands SMP_BEGIN .. SMP_INFO (11..15), so
- * tools/fm1_sample_upload.py loads break loops into the three slots unchanged. The
+ * tools/fm1_sample_upload.py loads user samples into the three slots unchanged. The
  * parameter / preset / track commands are Felucca's instrument and are not answered. */
 #define ED_HDR0 0x7D
 #define ED_HDR1 0x46
 #define ED_HDR2 0x4C
 enum { ED_INFO = 1, ED_SMP_BEGIN = 11, ED_SMP_WRITE, ED_SMP_END, ED_SMP_ERASE, ED_SMP_INFO, ED_SMP_READ, ED_PING = 25 };
-#define ED_READ_MAX 224u                     /* X0X: SMP_READ's bytes a frame (the break page draws the slots) */
+#define ED_READ_MAX 224u                     /* X0X: SMP_READ's bytes a frame (a page draws the slots) */
 
 static uint8_t ed_out[288];
 static uint32_t ed_n;
@@ -66,7 +66,6 @@ static int ed_smp_erase(uint32_t k, uint32_t all)
     uint32_t i, took;
     int rc = 0;
     usr_nz[k] = 0;
-    engine_brk_loops();                               /* nothing may read the slot now */
     for (i = 0; i < (all ? SMP_USER_SIZE / 0x1000u : 1u) && !rc; i++) {
         audio_silence();
         rc = fl_erase4k(ed_smp_slot(k) + i * 0x1000u, &took);
@@ -90,7 +89,6 @@ static int ed_smp_end(uint32_t k, const uint8_t *a, uint32_t na)
         return 4;
     ed_smp_inval(k);
     smp_user_scan(k);
-    engine_brk_loops();
     return usr_nz[k] ? 0 : 5;
 }
 

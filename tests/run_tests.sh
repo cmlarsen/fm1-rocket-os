@@ -47,7 +47,7 @@ run motion sh -c "$CC $W -o $OUT/motion_test tests/host/motion_test.c firmware/s
 run drum-pan sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/drum_pan_test tests/host/drum_pan_test.c firmware/src/dsp/drum909.c firmware/src/dsp/drum808.c -lm && $OUT/drum_pan_test"
 run stereo sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/stereo_test tests/host/stereo_test.c firmware/src/dsp/master.c firmware/src/dsp/fxbus.c -lm && $OUT/stereo_test"
 run master sh -c "$CC $W -Wno-double-promotion -o $OUT/master_test tests/host/master_test.c firmware/src/dsp/master.c -lm && $OUT/master_test"
-for t in drum909 drum808 bass303 breaks; do
+for t in drum909 drum808 bass303; do
     [ -f "tests/host/run_$t.sh" ] && run "$t" sh "tests/host/run_$t.sh"
 done
 run storage sh -c "$CC -O2 -o $OUT/storage_test tests/storage_test.c && $OUT/storage_test"
@@ -62,18 +62,15 @@ if [ -f build/x0x.fwsc ]; then
         $CC -o $OUT/ldr_test tests/ldr_test.c && $OUT/ldr_test $OUT/old.fwsc build/x0x.fwsc"
     fi
     run installer python3 tests/install_test.py
+    run check-loader python3 tests/check_loader_test.py build/x0x.fwsc
 else
     echo "  skip update-path tests (no build/x0x.fwsc: run ./build.sh)"
 fi
-run upload-images sh -c "python3 tests/host/make_test_loops.py build/test_loops && \
-    python3 tools/upload_breaks.py --dry-run build/test_upload build/test_loops/loop*.wav"
-command -v node >/dev/null 2>&1 && run breaks-web node web/test_breaks.mjs   # the browser uploader: upload_breaks.py's bytes
 run host-build sh host/build_host.sh
 if command -v emcc >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then   # the browser build, when it can be built
     printf 'wav emu_ref.wav\nwait 500\ntapkey b0\ntapkey w0\ntapkey w8\ntap PLAY\nwait 2960\nwavstop\n' > build/host/emu_ref.x0x
     run emu sh -c "sh web/emu/build.sh >/dev/null 2>&1 && build/host/x0x_host build/host/emu_ref.x0x build/host >/dev/null && \
         node tests/host/emu_test.mjs build/emu/x0x.wasm build/host/emu_ref.wav"
-    run emu-slots node tests/host/emu_slots_test.mjs build/emu/x0x.wasm build/test_loops/loop1.wav
 fi
 for s in tests/scenarios/*.x0x; do
     n=$(basename "$s" .x0x)

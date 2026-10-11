@@ -271,7 +271,6 @@ static void fm1_main(void)
 {
     int32_t knob = 512 * 16;
     uint32_t last_frame = 0, k;
-    uint8_t last_pat = 0xFF;
     {
         uint32_t f = irq_save();
         flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
@@ -286,7 +285,7 @@ static void fm1_main(void)
     lcd_init();
     palette_set(1);
     draw_text_box(0, 96, 240, &FONT_M, "X0X", C_HI, 1);
-    draw_text_box(0, 134, 240, &FONT_S, "909 808 303 303 BREAK", C_GRAY, 1);
+    draw_text_box(0, 134, 240, &FONT_S, "909 808 303 303", C_GRAY, 1);
     if (x0x_dbg.magic != DBG_MAGIC) {
         memset(&x0x_dbg, 0, sizeof x0x_dbg);
         x0x_dbg.magic = DBG_MAGIC;
@@ -321,7 +320,6 @@ static void fm1_main(void)
     seq.bpm = (float)proj.set.bpm_x10 / 10.0f;
     seq.accent_q7 = proj.set.accent_q7;
     project_apply_io();                             /* clock and notes out, the MIDI channels, the output */
-    engine_brk_loops();
     plat_cpu2_set(1);                               /* the second core: at power-on, before the audio and the
                                                      * timers, as Melodee starts it (started later, it does not
                                                      * reach its entry); if it does not answer, one core */
@@ -399,10 +397,6 @@ static void fm1_main(void)
 #if X0X_CDC
         cdc_task();
 #endif
-        if (seq.ppat[TRK_BRK] != last_pat) {        /* the break's new pattern may name other loops */
-            last_pat = seq.ppat[TRK_BRK];
-            engine_brk_loops();
-        }
         if (fm1_ms - last_frame >= 16u) {           /* ~60 frames/s at most; input in between */
             last_frame = fm1_ms;
             x0x_dbg.ui_frames++;

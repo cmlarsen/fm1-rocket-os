@@ -9,7 +9,7 @@
  * Felucca's canvas and blitted only when its pixels changed: SPI time is the scarce thing.
  *
  * Keys: F3..G5; the 16 white keys are steps (HOME: patterns), the 11 black keys a drum
- * machine's tracks or the break's slice pads (HOME: part mutes). */
+ * machine's tracks (HOME: part mutes). */
 #include "x0x.h"
 #include "../dsp/fastmath.h"
 #include "../dsp/master.h"
@@ -23,10 +23,9 @@ static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
 enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, NVIEWS };
 static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ"};
-static const uint16_t PART_COL[NPARTS] = {RGB(255, 150, 40), RGB(255, 72, 64), RGB(130, 240, 90), RGB(70, 205, 255),
-                                          RGB(214, 120, 255)};
-static const char *const PART_N[NPARTS] = {"909", "808", "303A", "303B", "BREAK"};
-static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B", "BRK"};   /* 4 chars: lane labels */
+static const uint16_t PART_COL[NPARTS] = {RGB(255, 150, 40), RGB(255, 72, 64), RGB(130, 240, 90), RGB(70, 205, 255)};
+static const char *const PART_N[NPARTS] = {"909", "808", "303A", "303B"};
+static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4 chars: lane labels */
 
 /* overlays drawn over the main area */
 enum { O_NONE, O_LIST, O_ASK };
@@ -48,11 +47,9 @@ typedef struct {
     uint32_t step_t0;                  /* when the held 303 step went down: a tap toggles, a hold does not */
     uint8_t step_preview;              /* the held step is sounding (only while stopped) */
     uint8_t step_created;              /* the press turned the held step on (its release keeps it) */
-    int8_t brk_held;                   /* BREAK: the white key (16th) held, -1 none */
     int8_t hold_step;                  /* a drum machine: the step (white key) held, -1 none */
-    uint8_t hold_created, hold_used;   /* drums / BREAK: the press turned the step on; a knob or a slice used it */
+    uint8_t hold_created, hold_used;   /* the press turned the step on; a knob used it */
     uint32_t hold_t0;                  /* when it went down (a tap takes an old step off) */
-    uint16_t brk_pinkeys;              /* BREAK: black keys used to give a held step its slice (their release is not live) */
     uint8_t gen_stale[NBASS];          /* TB-3PO's knobs changed since the line was written */
     uint32_t btn, keys, btn_used;
     int8_t chain_first;
@@ -75,8 +72,6 @@ typedef struct {
     uint8_t help;                      /* the help card on screen: its button + 1, 0 none */
     uint32_t down_t[NB];               /* when each button went down */
     uint32_t turn_t;                   /* the last encoder turn */
-    uint8_t outline[232];              /* the break loop's outline */
-    uint8_t outline_ok, outline_slot;
     uint8_t song_sel;                  /* the SONG screen's bar */
 } ui_t;
 static ui_t ui;
@@ -174,8 +169,8 @@ static void say(const char *a, const char *b)
 }
 
 /* =============================================================== param refs === */
-enum { R_NONE, R_ENG, R_SWING, R_DLEN, R_DRATE, R_BLEN, R_BRATE, R_BDIR, R_BTRANS, R_GEN, R_BRKSET,
-       R_BRKSLOT, R_TEMPO, R_ACCENT, R_CLKOUT, R_NOTEOUT, R_PALETTE, R_KEYLED, R_KEYSOUND, R_AUTOSAVE, R_ACT, R_SBAR, R_SPAT, R_SMODE,
+enum { R_NONE, R_ENG, R_SWING, R_DLEN, R_DRATE, R_BLEN, R_BRATE, R_BDIR, R_BTRANS, R_GEN,
+       R_TEMPO, R_ACCENT, R_CLKOUT, R_NOTEOUT, R_PALETTE, R_KEYLED, R_KEYSOUND, R_AUTOSAVE, R_ACT, R_SBAR, R_SPAT, R_SMODE,
        R_SLEN, R_STALLS, R_HDR, R_TAPE, R_MIDICH, R_OUTLOUD, R_SREP, R_BATT };   /* R_TAPE: FX's one-knob TAPE (DIGI .. worn tape) */          /* R_HDR: a list's section header (a = its group), never selected */
 typedef struct { uint8_t kind, a, b, c; } pref_t;
 #define PR(k, a, b, c) ((pref_t){(k), (a), (b), (c)})
@@ -210,8 +205,7 @@ static const x0x_param_t ACT_P[] = {
 };
 static const x0x_param_t STALLS_P = {"STALLS", 1, 0, ONOFF_N};
 static const x0x_param_t MIDICH_P[NPARTS] = {   /* 0 = OFF (no notes in or out), 1-16 */
-    {"909 MIDI CH", 16, 10, 0}, {"808 MIDI CH", 16, 11, 0}, {"303A MIDI CH", 16, 2, 0}, {"303B MIDI CH", 16, 3, 0},
-    {"BREAK MIDI CH", 16, 4, 0}};
+    {"909 MIDI CH", 16, 10, 0}, {"808 MIDI CH", 16, 11, 0}, {"303A MIDI CH", 16, 2, 0}, {"303B MIDI CH", 16, 3, 0}};
 static const char *const OUT_N[] = {"NORMAL", "LOUD"};
 static const x0x_param_t OUT_P = {"OUTPUT", 1, 0, OUT_N};
 static const x0x_param_t SREP_P = {"REPEAT", 7, 0, 0};    /* the bar plays 1-8 times */
@@ -220,9 +214,10 @@ static const x0x_param_t BATT_P = {"BATTERY", 5, 0, BATT_N};   /* read only (pla
 static const char *const MODE_N[] = {"PATTERN", "SONG"};
 static const x0x_param_t SONG_P[] = {
     {"909", NPAT - 1, 0, 0}, {"808", NPAT - 1, 0, 0}, {"303A", NPAT - 1, 0, 0}, {"303B", NPAT - 1, 0, 0},
-    {"BREAK", NPAT - 1, 0, 0},
     {"MODE", 1, 0, MODE_N}, {"LENGTH", NSONG, 0, 0},
 };
+#define SONG_P_MODE NPARTS               /* SONG_P[MODE]: the parts, then the mode and the length */
+#define SONG_P_LEN (NPARTS + 1)
 
 /* the song's bar k exists from here on: a new bar repeats the one before (the first: what plays) */
 static void song_fill(int k)
@@ -247,7 +242,6 @@ static const x0x_param_t *pref_desc(pref_t r)
     switch (r.kind) {
     case R_ENG: return engine_param(r.a, r.b, r.c);
     case R_GEN: return &GEN_P[r.c % NGEN];
-    case R_BRKSET: return breaks_param(r.c);
     case R_SWING: return &SEQ_P[SQ_SWING];
     case R_DLEN: return &SEQ_P[SQ_DLEN];
     case R_DRATE: return &SEQ_P[SQ_DRATE];
@@ -255,12 +249,6 @@ static const x0x_param_t *pref_desc(pref_t r)
     case R_BRATE: return &SEQ_P[SQ_BRATE];
     case R_BDIR: return &SEQ_P[SQ_BDIR];
     case R_BTRANS: return &SEQ_P[SQ_BTRANS];
-    case R_BRKSLOT: {
-        static x0x_param_t d = {"LOOP", 0, 0, 0};
-        d.max = (uint8_t)(engine_brk_nslots() - 1);
-        d.names = engine_brk_slot_names();
-        return &d;
-    }
     case R_TEMPO: return &SEQ_P[SQ_TEMPO];
     case R_ACCENT: return &SEQ_P[SQ_ACCENT];
     case R_CLKOUT: return &SEQ_P[SQ_CLK];
@@ -276,12 +264,12 @@ static const x0x_param_t *pref_desc(pref_t r)
         return &d;
     }
     case R_SPAT: return &SONG_P[r.a % NPARTS];
-    case R_SMODE: return &SONG_P[5];
+    case R_SMODE: return &SONG_P[SONG_P_MODE];
     case R_MIDICH: return &MIDICH_P[r.a % NPARTS];
     case R_OUTLOUD: return &OUT_P;
     case R_SREP: return &SREP_P;
     case R_BATT: return &BATT_P;
-    case R_SLEN: return &SONG_P[6];
+    case R_SLEN: return &SONG_P[SONG_P_LEN];
     case R_STALLS: return &STALLS_P;
     case R_TAPE: {
         static const x0x_param_t d = {"TAPE", 127, 72, 0};
@@ -316,8 +304,6 @@ static int pref_get(pref_t r)
         default: return g->mutate_bars;
         }
     }
-    case R_BRKSET: return p->brk.set[r.c];
-    case R_BRKSLOT: return r.a ? p->brk.slot_b : p->brk.slot_a;
     case R_TEMPO: return (int)(seq.bpm + 0.5f) - 20;
     case R_ACCENT: return seq.accent_q7;
     case R_CLKOUT: return seq.send_clock;
@@ -385,15 +371,6 @@ static void pref_set(pref_t r, int v)
             ui.gen_stale[r.a] = 1;
         break;
     }
-    case R_BRKSET: p->brk.set[r.c] = (uint8_t)v; break;
-    case R_BRKSLOT:
-        if (r.a)
-            p->brk.slot_b = (uint8_t)v;
-        else
-            p->brk.slot_a = (uint8_t)v;
-        engine_brk_loops();
-        ui.outline_ok = 0;
-        break;
     case R_TEMPO: seq.bpm = (float)(v + 20); break;
     case R_ACCENT: seq.accent_q7 = (uint8_t)v; break;
     case R_CLKOUT: seq.send_clock = (uint8_t)v; break;
@@ -462,7 +439,6 @@ static int in_pattern(pref_t r)
 {
     switch (r.kind) {
     case R_SWING: case R_DLEN: case R_DRATE: case R_BLEN: case R_BRATE: case R_BDIR: case R_BTRANS: case R_GEN:
-    case R_BRKSET: case R_BRKSLOT:
         return 1;
     default:
         return 0;
@@ -475,8 +451,7 @@ static const char *pref_name(pref_t r)
     static const char *const MIXN[NPARTS][MX_NPARAMS] = {{"909", "909 RV", "909 DL", "909 PAN"},
                                                          {"808", "808 RV", "808 DL", "808 PAN"},
                                                          {"303 A", "A REV", "A DLY", "A PAN"},
-                                                         {"303 B", "B REV", "B DLY", "B PAN"},
-                                                         {"BREAK", "BRK RV", "BRK DL", "BRK PAN"}};
+                                                         {"303 B", "B REV", "B DLY", "B PAN"}};
     static const char *const PATN[6][2] = {{"909 LEN", "808 LEN"}, {"909 RATE", "808 RATE"}, {"A LEN", "B LEN"},
                                            {"A RATE", "B RATE"}, {"A DIR", "B DIR"}, {"A TRANSP", "B TRANSP"}};
     static const char *const CHN[MX_NPARAMS] = {"LEVEL", "REV", "DLY", "PAN"};
@@ -505,15 +480,11 @@ static const char *pref_name(pref_t r)
         default: break;
         }
     }
-    if (r.kind == R_BRKSET && r.c == BRK_BCHANCE)
-        return "B CHANCE";
     if (r.kind == R_ENG && (r.a == T_909 || r.a == T_808) && r.b < NDRUM && ui.view == V_MIX && ui.overlay == O_LIST) {
         static char t[24];                             /* MIX's list: whose track ("909 BD LEVEL") */
         put_s(put_s(put_s(put_s(t, r.a == T_909 ? "909 " : "808 "), engine_voice_name(r.a, r.b)), " "), d ? d->name : "");
         return t;
     }
-    if (r.kind == R_BRKSLOT)
-        return r.a ? "LOOP B" : "LOOP A";
     return d ? d->name : "";
 }
 
@@ -623,7 +594,6 @@ static void pref_value_of(pref_t r, int v, char *num, char *unit)
             put_s(unit, "%");
         }
         return;
-    case R_BRKSET: put_i(num, v); put_s(unit, "%"); return;
     case R_TEMPO: put_i(num, v + 20); put_s(unit, "bpm"); return;
     case R_SBAR: put_i(num, v + 1); return;
     case R_SPAT: num[0] = 'P'; put_i(num + 1, v + 1); return;
@@ -752,17 +722,8 @@ static void build_pages(void)
         pg_grp = GR_PAT;
         if (is_drum())
             add_page("SEQUENCE", PR(R_DLEN, p, 0, 0), PR(R_DRATE, p, 0, 0), NONE, NONE);   /* (the swing: HOME's, all parts') */
-        else if (is_303())
+        else
             add_page("SEQUENCE", PR(R_BLEN, b, 0, 0), PR(R_BRATE, b, 0, 0), PR(R_BDIR, b, 0, 0), PR(R_BTRANS, b, 0, 0));
-        else {
-            add_page("GROOVE", PR(R_BRKSET, 0, 0, BRK_COMPLEX), PR(R_BRKSET, 0, 0, BRK_ANCHOR),
-                     PR(R_BRKSET, 0, 0, BRK_ROLL), PR(R_BRKSET, 0, 0, BRK_FILL));
-            add_page("RETRIG", PR(R_BRKSET, 0, 0, BRK_R2), PR(R_BRKSET, 0, 0, BRK_R3), PR(R_BRKSET, 0, 0, BRK_R4),
-                     PR(R_BRKSET, 0, 0, BRK_R8));
-            more(PR(R_BRKSET, 0, 0, BRK_PHRASE));
-            more(PR(R_BRKSET, 0, 0, BRK_ALEN));
-            more(PR(R_BRKSET, 0, 0, BRK_BLEN));
-        }
         break;
     case V_PART:                                       /* the part's sound */
         if (is_drum()) {
@@ -783,11 +744,6 @@ static void build_pages(void)
             more(PR(R_ENG, T_303, b, BASS303_VOLUME));
             more(PR(R_ENG, T_303, b, BASS303_DRVTYPE));
             more(PR(R_ENG, T_303, b, BASS303_ACCDEC));
-        } else {
-            pg_grp = GR_PAT;                           /* (its groove and retrigs: SEQ) */
-            add_page("LOOPS", PR(R_BRKSLOT, 0, 0, 0), PR(R_BRKSLOT, 1, 0, 0), PR(R_BRKSET, 0, 0, BRK_BCHANCE),
-                     PR(R_ENG, T_BRK, 0, 1));
-            more(PR(R_ENG, T_BRK, 0, 0));
         }
         break;
     case V_GEN:
@@ -836,8 +792,7 @@ static void build_pages(void)
     case V_SONG:
         add_page("BAR", PR(R_SBAR, 0, 0, 0), PR(R_SPAT, PART_909, 0, 0), PR(R_SPAT, PART_808, 0, 0),
                  PR(R_SPAT, PART_303A, 0, 0));
-        add_page("BAR", PR(R_SBAR, 0, 0, 0), PR(R_SPAT, PART_303B, 0, 0), PR(R_SPAT, PART_BRK, 0, 0),
-                 PR(R_SREP, 0, 0, 0));
+        add_page("BAR", PR(R_SBAR, 0, 0, 0), PR(R_SPAT, PART_303B, 0, 0), NONE, PR(R_SREP, 0, 0, 0));
         break;
     default: break;
     }
@@ -978,8 +933,6 @@ static int part_used(const pattern_t *pt, int part)
                 return 1;
         return 0;
     }
-    if (part == PART_BRK)
-        return pt->brk.steps != 0;
     for (s = 0; s < NSTEPS; s++)
         if (bstep_gate(&pt->bass[part - NKIT].step[s]) != G_REST)
             return 1;
@@ -988,7 +941,7 @@ static int part_used(const pattern_t *pt, int part)
 
 static int pattern_used(const pattern_t *pt)
 {
-    int v, s, used = pt->brk.steps != 0;
+    int v, s, used = 0;
     for (v = 0; v < NDRUM; v++)
         used |= sm_any(pt->drum[0].hit[v]) | sm_any(pt->drum[1].hit[v]);
     for (s = 0; s < NSTEPS; s++)
@@ -1020,10 +973,8 @@ static int copy_part(int dst, int src, int part)
         d->drum[part] = a->drum[part];
         if (part == PART_909)
             d->swing = a->swing;                      /* the 909 is the bar: its groove goes with it */
-    } else if (part < PART_BRK)
+    } else
         d->bass[part - NKIT] = a->bass[part - NKIT];
-    else
-        d->brk = a->brk;
     clear_lanes(dst, part);
     for (k = 0; k < NLANE; k++) {                     /* a copy lands on pattern dst: never copied again */
         const lane_t *l = &proj.arr.lane[k];
@@ -1050,13 +1001,9 @@ static void clear_part(pattern_t *p, int part)
                 p->drum[part].hit[i][w] = 0;
             p->drum[part].accent[w] = 0;
         }
-    } else if (part < PART_BRK) {
+    } else {
         for (i = 0; i < NSTEPS; i++)
             p->bass[part - NKIT].step[i].flags = G_REST;
-    } else {
-        p->brk.steps = 0;
-        for (i = 0; i < 16; i++)
-            p->brk.slice[i] = 0;
     }
 }
 
@@ -1221,12 +1168,15 @@ static void undo_name(uint32_t lo, uint32_t hi, char *t)
     } else if (a >= p0 && b < a0 && (a - p0) / sizeof(pattern_t) == (b - p0) / sizeof(pattern_t)) {
         uint32_t pi = (a - p0) / sizeof(pattern_t), x = (a - p0) % sizeof(pattern_t), y = (b - p0) % sizeof(pattern_t);
         int pa = (int)(x < __builtin_offsetof(pattern_t, bass) ? x / sizeof(dpart_t)
-                       : x < __builtin_offsetof(pattern_t, brk) ? NKIT + (x - __builtin_offsetof(pattern_t, bass)) / sizeof(bpart_t)
-                       : PART_BRK);
+                       : NKIT + (x - __builtin_offsetof(pattern_t, bass)) / sizeof(bpart_t));
         int pb = (int)(y < __builtin_offsetof(pattern_t, bass) ? y / sizeof(dpart_t)
-                       : y < __builtin_offsetof(pattern_t, brk) ? NKIT + (y - __builtin_offsetof(pattern_t, bass)) / sizeof(bpart_t)
-                       : PART_BRK);
-        char *q = put_s(t, pa == pb ? PART_N[pa] : "PATTERN");
+                       : NKIT + (y - __builtin_offsetof(pattern_t, bass)) / sizeof(bpart_t));
+        char *q;
+        if (pa >= NPARTS)
+            pa = NPARTS - 1;                          /* the reserved bytes after the 303s: no part */
+        if (pb >= NPARTS)
+            pb = NPARTS - 1;
+        q = put_s(t, pa == pb ? PART_N[pa] : "PATTERN");
         put_i(put_s(q, " P"), (int)pi + 1);
     } else if (a >= p0 && b < a0) {
         put_s(t, "PATTERNS");
@@ -1251,8 +1201,6 @@ static void do_undo(int redo)
     }
     if (undo_lanes)
         engine_motion_reset();
-    engine_brk_loops();
-    ui.outline_ok = 0;
     if (ui.song_sel > song()->len)
         ui.song_sel = song()->len;
     build_pages();
@@ -1283,7 +1231,7 @@ static void save_project(void)
 /* PERF: what the FM-1 measures of itself, a window a second: the clock (the core's cycle counter
  * against the 24 MHz timer), the audio load and its peak, dropouts, stall cycles (when switched on),
  * and each stage's share of the CPU (the engine times them: engine.h ENG_PROF_N). PERF TEST plays
- * three patterns of its own (the factory loop, all five parts, a dense worst case) on the factory
+ * three patterns of its own (the factory loop, all four parts, a dense worst case) on the factory
  * sound, 1 s to settle and 3 s measured each, and keeps the table; then it puts back the project's
  * patterns, sound, tempo, mutes, chain and song mode. The project itself is never written. */
 static const char *const PT_N[3] = {"FACTORY LOOP", "ALL FIVE", "WORST CASE"};
@@ -1328,7 +1276,7 @@ static void perf_window(int force)
     perf.have = 1;
 }
 
-/* the test's patterns: 0 the factory loop (909 kick, clap, open hats; 303 A; the break), 1 all five,
+/* the test's patterns: 0 the factory loop (909 kick, clap, open hats; 303 A), 1 all four,
  * 2 everything dense */
 static void perf_build(void)
 {
@@ -1343,7 +1291,6 @@ static void perf_build(void)
         tb3po_generate(&p->bass[0]);
         if (i)
             tb3po_generate(&p->bass[1]);
-        p->brk.steps = 0xFFFFu;
         a->hit[DR_BD][0] = 0x1111u;
         a->hit[DR_CP][0] = 0x1010u;
         a->hit[DR_OH][0] = 0x4444u;
@@ -1385,7 +1332,6 @@ static void perf_restore(void)
     engine_apply_sound(&proj.sound);
     engine_motion_enable(1);
     engine_guard_enable(1);
-    engine_brk_loops();
 }
 
 static void perf_test_start(void)
@@ -1442,7 +1388,6 @@ static void perf_test_tick(void)
         engine_apply_sound(&perf_snd);
         engine_motion_enable(0);
         engine_guard_enable(0);
-        engine_brk_loops();
         seq_start(&seq);
         perf.phase = 1;
         perf.test_t0 = now;
@@ -1520,7 +1465,7 @@ static void run_action(int act, int arg)
         say("PATTERN CLEARED", 0);
         break;
     }
-    case ACT_COPY: {                                  /* arg: the pattern to paste onto (all five parts, */
+    case ACT_COPY: {                                  /* arg: the pattern to paste onto (all four parts, */
         int dst = arg & 0xFF, i, rc = 0;              /* each as it plays now) */
         for (i = 0; i < NPARTS; i++)
             if (seq.ppat[i] != dst)
@@ -1559,10 +1504,8 @@ static void run_action(int act, int arg)
     case ACT_RESET:
         project_defaults();
         engine_apply_sound(&proj.sound);
-        engine_brk_loops();
         palette_set(proj.set.palette);
         mark_dirty();
-        ui.outline_ok = 0;
         say("FACTORY SOUND + PATTERNS", 0);
         break;
     case ACT_PERF:
@@ -1613,7 +1556,6 @@ static void set_view(int v)
         ui.prev_view = ui.view;
     ui.view = (uint8_t)v;
     ui.held_step = -1;
-    ui.brk_held = -1;
     ui.hold_step = -1;
     ui.overlay = O_NONE;
     build_pages();
@@ -1682,7 +1624,7 @@ static int lock_step(void)
         return -1;
     if (is_303())
         return ui.rec ? -1 : ui.held_step;
-    return is_drum() ? ui.hold_step : ui.brk_held;
+    return ui.hold_step;
 }
 static int lockable(pref_t r) { return r.kind == R_ENG && engine_motion_part(r.a, r.b) == ui.part; }
 static int lock_of(pref_t r, int s)                  /* step s's own value of r, -1 none */
@@ -1754,14 +1696,14 @@ static void lock_release(void)                        /* the held step let go: s
     }
 }
 /* probability: SEQ or EDIT, a step held, SELECT sets its chance (5..100 %, a T_PROB lane: motion.h's
- * MOT_NONE = always). Drums: the selected track's step; the 303s and the break: the step */
+ * MOT_NONE = always). Drums: the selected track's step; the 303s: the step */
 static int held_any_step(void)
 {
     if (!steps_view() || ui.overlay != O_NONE)
         return -1;
     if (is_303())
         return ui.rec ? -1 : ui.held_step;
-    return is_drum() ? ui.hold_step : ui.brk_held;
+    return ui.hold_step;
 }
 static void prob_turn(int e)
 {
@@ -1986,7 +1928,7 @@ static int all_on(int w)                               /* every part plays patte
 }
 
 static const uint32_t MUTE_MASK[NPARTS] = {(1u << NDRUM) - 1u, ((1u << NDRUM) - 1u) << NDRUM, 1u << MUTE_BASS0,
-                                           1u << (MUTE_BASS0 + 1), 1u << MUTE_BRK};
+                                           1u << (MUTE_BASS0 + 1)};
 static int part_muted(int p) { return (seq.mute & MUTE_MASK[p]) == MUTE_MASK[p]; }
 
 static int perf_testing(void) { return perf.test >= 0 && perf.phase != 4; }
@@ -2111,7 +2053,7 @@ static void key_event(int k, int down)
         return;
     }
     if (ui.view == V_MIX || ui.view == V_FX)          /* MASTER, FX: the keys choose nothing (they used to */
-        return;                                       /* play the part's steps or the break's slices) */
+        return;                                       /* play the part's steps) */
     if (is_drum() && bl >= 0 && (ui.btn & (1u << B_HOME))) {   /* HOME + black key: mute that track */
         ui.btn_used |= 1u << B_HOME;
         if (down)
@@ -2123,48 +2065,11 @@ static void key_event(int k, int down)
             drum_key(bl, down);
         else if (w >= 0)
             drum_step(w, down);
-    } else if (is_303()) {
+    } else {                                           /* the 303s */
         if (ui.rec)                                    /* REC: the keys play and write notes */
             bass_kbd(k, down);
         else if (w >= 0)
             bass_step_key(w, down);
-    } else {
-        brkpart_t *bp = &cur_pat()->brk;
-        if (bl >= 0 && bl < 8 && down && ui.brk_held >= 0) {     /* a step held + black 1-8: its own slice */
-            int st = ui.brk_held;
-            bp->slice[st] = (uint8_t)(bp->slice[st] == bl + 1 ? 0 : bl + 1);
-            bp->steps |= 1u << st;
-            ui.hold_used = 1;                          /* its release keeps the step */
-            ui.brk_pinkeys |= (uint16_t)(1u << bl);
-            mark_dirty();
-            if (bp->slice[st]) {
-                char t[24];
-                put_i(put_s(put_i(put_s(t, "STEP "), st + 1), ": SLICE "), bl + 1);
-                say(t, 0);
-            } else
-                say("STEP: THE GENERATOR'S SLICE", 0);
-        } else if (bl >= 0 && !down && (ui.brk_pinkeys & (1u << bl))) {
-            ui.brk_pinkeys &= (uint16_t)~(1u << bl);
-        } else if (bl >= 0)
-            engine_brk_live(bl, down);
-        else if (w >= 0 && down) {                     /* as the drums: empty on at once, a tap takes it off */
-            ui.brk_held = (int8_t)w;
-            ui.hold_used = 0;
-            ui.hold_t0 = plat_ms();
-            ui.hold_created = !((bp->steps >> w) & 1u);
-            if (ui.hold_created) {
-                bp->steps |= 1u << w;
-                mark_dirty();
-            }
-        } else if (w >= 0 && ui.brk_held == w) {
-            if (!ui.hold_created && !ui.hold_used && plat_ms() - ui.hold_t0 < STEP_TAP_MS) {
-                bp->steps &= ~(1u << w);
-                mark_dirty();
-            }
-            if (ui.hold_used)
-                lock_release();
-            ui.brk_held = -1;
-        }
     }
 }
 
@@ -2437,7 +2342,6 @@ static void input(void)
             ui.part = (uint8_t)(p < 0 ? 0 : p >= NPARTS ? NPARTS - 1 : p);
             if (ui.view == V_GEN && !is_303())         /* TB-3PO is a 303's */
                 set_view(V_PART);
-            ui.outline_ok = 0;
             build_pages();
             if (ui.view == V_MIX) {                   /* MIX follows: a drum machine's tracks, else that part on PARTS */
                 int k;
@@ -2449,7 +2353,7 @@ static void input(void)
             }
         }
     }
-    if ((e = enc(EN_PRESET)) != 0) {             /* PRESETS: a part's screen, that part; else all five */
+    if ((e = enc(EN_PRESET)) != 0) {             /* PRESETS: a part's screen, that part; else all four */
         int part = part_view() ? ui.part : PART_909, c = seq_cue_of(&seq, part);
         int p = (c >= 0 ? c : seq.ppat[part]) + (e > 0 ? 1 : -1);
         p = p < 0 ? 0 : p >= NPAT ? NPAT - 1 : p;
@@ -3065,64 +2969,6 @@ static void draw_303(int band, int gen)
     }
 }
 
-static void draw_break(int band)
-{
-    const brkpart_t *bp = &cur_pat()->brk;
-    int c, ph = seq.playing ? eng_step[TRK_BRK] : -1, slice, bank, div, running;
-    uint16_t col = part_col();
-    uint32_t lmarks = lock_marks(-1, -1, 0);           /* (the break: its 16 steps) */
-    engine_brk_state(&slice, &bank, &div, &running);
-    if (!ui.outline_ok || ui.outline_slot != bp->slot_a) {
-        ui.outline_ok = (uint8_t)engine_brk_outline(0, ui.outline, 232);
-        ui.outline_slot = bp->slot_a;
-    }
-    if (band == 0) {                                   /* loop A, its 8 slices, the one sounding */
-        int x;
-        for (c = 0; c < 8; c++) {
-            int x0 = 4 + c * 29;
-            char t[2] = {(char)('1' + c), 0};
-            if (running && c == slice && bank == 0)
-                box(x0, 1, 28, 56, dim(col, 5));
-            text_c(x0 + 14, 59, &FONT_XS, t, running && c == slice && bank == 0 ? C_WHITE : C_DIM);
-        }
-        for (x = 0; x < 232 && ui.outline_ok; x++) {
-            int h = ui.outline[x] * 26 / 255, sl = x / 29;
-            if (h)
-                cv_rect(4 + x, 29 - h, 1, 2 * h, running && sl == slice && bank == 0 ? C_WHITE : col);
-        }
-        for (c = 1; c < 8; c++)
-            cv_rect(4 + c * 29, 1, 1, 56, C_LINE);
-    } else {
-        const char *const *sn = engine_brk_slot_names();
-        int ns = engine_brk_nslots();
-        char t[40], *q = t;
-        for (c = 0; c < 16; c++) {
-            int x = col_x(c), on = (bp->steps >> c) & 1u;
-            box(x, 2, 12, 10, on ? (c == ph ? C_WHITE : col) : (c == ph ? C_DIM : C_LINE));
-            if (on && ((lmarks >> c) & 1u))            /* the step's own values (p-locks): a notch */
-                cv_rect(x + 8, 3, 3, 3, C_BLACK);
-            if (bp->slice[c]) {                        /* the step's own slice */
-                char d[2] = {(char)('0' + bp->slice[c]), 0};
-                text_c(x + 6, vc(&FONT_XS, 2, 10), &FONT_XS, d, on ? C_BLACK : C_GRAY);
-            }
-        }
-        cv_text(3, 1, &FONT_XS, "ON", C_GRAY);
-        {
-            char ta[16], tb[16];
-            put_s(put_s(ta, "A  "), sn[bp->slot_a % ns]);
-            put_s(put_s(tb, "B  "), sn[bp->slot_b % ns]);
-            segs(4, 18, &FONT_S, C_HI, 18, ta, tb, 0, 0);
-            (void)q;
-        }
-        if (running) {
-            q = put_s(t, bank ? "PLAYING B" : "PLAYING A");
-            if (div > 1)
-                put_i(put_s(q, "   RETRIG X"), div);
-            cv_text(4, 36, &FONT_S, t, bank ? C_AMB : C_GRAY);
-        }
-    }
-}
-
 /* a part's lane on HOME: the 16 steps of the page its playhead is on (bits: those 16, from base) */
 static void lane(int y, int p, uint32_t bits, int ph, int len, int base)
 {
@@ -3173,18 +3019,13 @@ static void draw_home(int band)
         }
     } else {
         for (p = 2; p < NPARTS; p++) {
+            const bpart_t *bp = &pat_of(p)->bass[p - NKIT];
             uint32_t bits = 0;
-            int s;
-            if (p < PART_BRK) {
-                const bpart_t *bp = &pat_of(p)->bass[p - NKIT];
-                int base = seq.playing ? (eng_step[TRK_BASS0 + p - NKIT] & ~15) : 0;
-                for (s = 0; s < 16; s++)
-                    if (bstep_gate(&bp->step[base + s]) != G_REST)
-                        bits |= 1u << s;
-                lane((p - 2) * 16 + 1, p, bits, eng_step[TRK_BASS0 + p - NKIT], bp->len, base);
-            } else {
-                lane((p - 2) * 16 + 1, p, pat_of(p)->brk.steps, eng_step[TRK_BRK], 16, 0);
-            }
+            int s, base = seq.playing ? (eng_step[TRK_BASS0 + p - NKIT] & ~15) : 0;
+            for (s = 0; s < 16; s++)
+                if (bstep_gate(&bp->step[base + s]) != G_REST)
+                    bits |= 1u << s;
+            lane((p - 2) * 16 + 1, p, bits, eng_step[TRK_BASS0 + p - NKIT], bp->len, base);
         }
     }
 }
@@ -3232,7 +3073,7 @@ static void draw_song(int band)
 static void draw_fx(int band)
 {
     int p;
-    if (band == 0) {                                   /* five parts x reverb / delay */
+    if (band == 0) {                                   /* four parts x reverb / delay */
         cv_text(52, 0, &FONT_XS, "REVERB", C_GRAY);
         cv_text(148, 0, &FONT_XS, "DELAY", C_GRAY);
         for (p = 0; p < NPARTS; p++) {
@@ -3358,7 +3199,7 @@ static char *put_pct10(char *q, int v)                /* 123 -> "12.3%" */
 }
 static void draw_perf(int band)
 {
-    static const char *const SN[ENG_PROF_N] = {"909", "808", "303A", "303B", "BREAK", "FX", "MASTER", "SEQ"};
+    static const char *const SN[ENG_PROF_N] = {"909", "808", "303A", "303B", "FX", "MASTER", "SEQ"};
     char t[40], *q;
     int k;
     if (band == 0) {
@@ -3692,9 +3533,6 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         *a = "PRESS: ON";
         *b = "TAP: OFF";
         *c = "HOLD + KNOBS: EDIT";
-    } else {
-        *a = "STEP + 1-8: PIN A SLICE";                /* (1-8 play the slices numbered above) */
-        *b = "9 REV 10 HALF 11 STUT";
     }
     return C_DIM;
 }
@@ -3732,10 +3570,8 @@ static void draw_main(void)
             draw_perf(band);
         else if (is_drum())
             draw_drum(band);
-        else if (is_303())
-            draw_303(band, ui.view == V_GEN);
         else
-            draw_break(band);
+            draw_303(band, ui.view == V_GEN);
         if (band == 1 && readout)
             draw_readout();
     }
@@ -4014,17 +3850,6 @@ static void leds(void)
             for (i = 0; i < NKEYS; i++)
                 if (i % 12u == 7u)                    /* F3 = 0: C4 = 7, C5 = 19 */
                     d |= 1u << i;
-        } else if (ui.part == PART_BRK) {
-            int ph = eng_step[TRK_BRK];
-            for (i = 0; i < 16; i++) {
-                int on = (cur_pat()->brk.steps >> i) & 1u;
-                if (seq.playing && (int)i == ph)
-                    on = !on;
-                if (on)
-                    k |= 1u << WHITE_KEY[i];
-            }
-            for (i = 0; i < 8; i++)                   /* the slice pads */
-                d |= 1u << BLACK_KEY[i];
         }
     }
     k |= ui.keys;
@@ -4049,12 +3874,10 @@ void ui_init(void)
     ui.prev_view = V_PART;
     ui.part = PART_909;
     ui.held_step = -1;
-    ui.brk_held = -1;
     ui.hold_step = -1;
     ui.chain_first = -1;
     ui.touched = -1;
     ui.overlay = O_NONE;
-    ui.outline_ok = 0;
     palette_set(proj.set.palette);
     for (i = 0; i < 4; i++)
         blit_hash[i] = 0;

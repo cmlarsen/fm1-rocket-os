@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1]
-PART_COLOURS = {"909": "#e8860f", "808": "#e0483e", "303A": "#4fae3a", "303B": "#2e9bd6", "BREAK": "#a066e0"}
+PART_COLOURS = {"909": "#e8860f", "808": "#e0483e", "303A": "#4fae3a", "303B": "#2e9bd6"}
 
 CSS = """
 :root {

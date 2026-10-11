@@ -50,11 +50,8 @@ connections when many containers start at once.
 Build option: `X0X_CDC=1` adds Felucca's USB serial function (off by default: one plain
 MIDI interface).
 
-The build also generates `build/gen/`: the font, the 909's samples and tables
-(`tools/gen_drum_samples.py`), and the built-in break loops, rendered by the 909 port on the
-host (`tools/gen_builtin_break.sh`, needs a host `cc`). Opt-in, `X0X_BREAK_BANK=DIR` builds
-the break bank from one-bar WAVs instead (`tools/import_breaks.py` makes such a folder from
-BB Gen's samples, in `build/breaks/`); see README.md, Breaks. It fails if a soft-double routine is
+The build also generates `build/gen/`: the font and the 909's samples and tables
+(`tools/gen_drum_samples.py`). It fails if a soft-double routine is
 linked (a `double` crept in) and checks the image, RAM and pool sizes.
 
 ## Tests
@@ -65,7 +62,7 @@ tests/run_tests.sh
 
 Runs, on the build machine: the maths library against libm; the sequencer and TB-3PO
 (against schwung-tb3po, from `../schwung-tb3po` or `TB3PO_REF`); each engine against its
-original (9W9, 8W8, schwung-303, BB Gen — the scripts in `tests/host/` say where they look
+original (9W9, 8W8, schwung-303 — the scripts in `tests/host/` say where they look
 for those sources); flash storage; Felucca's update-path tests against `build/x0x.fwsc`
 (the loader test needs `AC79_SDK`); and the whole app in the simulator
 (`tests/scenarios/*.x0x`), with its screenshots and audio in `build/scenarios/`.

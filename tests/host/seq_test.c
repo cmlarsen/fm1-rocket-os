@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Sequencer and TB-3PO tests on the host: event times to the sample, 303 gate / slide /
  * tie semantics, swing, rates, polymeter, pattern cue + chain, external clock, MIDI clock
- * out, the break clock, and TB-3PO lines identical to schwung-tb3po's for the same seed. */
+ * out, and TB-3PO lines identical to schwung-tb3po's for the same seed. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +12,7 @@ static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("  FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
 /* ---- event log */
-enum { E_DRUM, E_ON, E_OFF, E_BRK, E_BRKSTOP, E_MIDI };
+enum { E_DRUM, E_ON, E_OFF, E_MIDI };
 typedef struct { uint32_t t; int kind, a, b, c, d; } ev_t;
 static ev_t evs[100000];
 static int nev;
@@ -25,10 +25,8 @@ static void log_ev(int k, int a, int b, int c, int d)
 static int s_drum(void *x, int k, int v, float vel) { (void)x; log_ev(E_DRUM, k * 100 + v, (int)(vel * 127.0f + 0.5f), 0, 0); return 1; }
 static void s_on(void *x, int p, int n, int acc, int sl) { (void)x; log_ev(E_ON, p, n, acc, sl); }
 static void s_off(void *x, int p) { (void)x; log_ev(E_OFF, p, 0, 0, 0); }
-static void s_brk(void *x, int s16, int bar, float spb, int en) { (void)x; log_ev(E_BRK, s16, bar, (int)spb, en); }
-static void s_brkstop(void *x) { (void)x; log_ev(E_BRKSTOP, 0, 0, 0, 0); }
 static void s_midi(void *x, uint8_t st, uint8_t d1, uint8_t d2) { (void)x; log_ev(E_MIDI, st, d1, d2, 0); }
-static const seq_sink_t SINK = {s_drum, s_on, s_off, s_brk, s_brkstop, s_midi, 0, 0};
+static const seq_sink_t SINK = {s_drum, s_on, s_off, s_midi, 0, 0};
 
 static seq_t S;
 static pattern_t P[NPAT];
@@ -181,7 +179,7 @@ static void test_polymeter_cue_chain(void)
     run((uint32_t)(step * 17));                               /* to the bar line and one more */
     i = find(E_DRUM, 1, 0);
     CHECK(i >= 0 && abs((int)evs[i].t - (int)(16 * step + 0.5)) <= 1, "cued pattern starts on the bar (%u)", i >= 0 ? evs[i].t : 0);
-    CHECK(S.ppat[0] == 1 && S.ppat[4] == 1, "now playing pattern 2");
+    CHECK(S.ppat[0] == 1, "now playing pattern 2");
     i = find(E_ON, 0, 0);
     /* pattern 2's 303 A line is empty: no notes after the switch */
     for (n = 0; (i = find(E_ON, 0, i < 0 ? 0 : i)) >= 0; i++)
@@ -250,14 +248,13 @@ static void test_song(void)
         sg.bar[1].pat[i] = 1;
         sg.bar[2].pat[i] = 2;
     }
-    sg.bar[1].pat[TRK_BRK] = 7;
     sg.bar[0].mute = sg.bar[1].mute = 0;
     sg.bar[2].mute = 1u << 1;                                   /* the 808 out in bar 3 */
     S.song_on = 1;
     S.song_start = 1;
     seq_start(&S);
     run(1);
-    CHECK(S.ppat[0] == 1 && S.ppat[TRK_BRK] == 7 && S.song_pos == 1, "starts at the start bar");
+    CHECK(S.ppat[0] == 1 && S.song_pos == 1, "starts at the start bar");
     run((uint32_t)bar);
     CHECK(S.ppat[0] == 2 && S.song_pos == 2 && seq_part_muted(&S, 1) && !seq_part_muted(&S, 0), "bar 3, 808 muted");
     run((uint32_t)bar);
@@ -276,9 +273,9 @@ static void test_song(void)
     run(1);
     CHECK(sg.len == 1 && sg.bar[0].pat[0] == 0, "record: bar 1 written at the start");
     seq_cue_part(&S, TRK_BASS0, 5);
-    S.mute |= seq_part_mask(TRK_BRK);
+    S.mute |= seq_part_mask(TRK_BASS0);
     run((uint32_t)bar);
-    CHECK(sg.len == 2 && sg.bar[1].pat[TRK_BASS0] == 5 && sg.bar[1].pat[0] == 0 && sg.bar[1].mute == 1u << TRK_BRK,
+    CHECK(sg.len == 2 && sg.bar[1].pat[TRK_BASS0] == 5 && sg.bar[1].pat[0] == 0 && sg.bar[1].mute == 1u << TRK_BASS0,
           "record: bar 2 has the cue and the mute (len %d, pat %d, mute %d)", sg.len, sg.bar[1].pat[TRK_BASS0], sg.bar[1].mute);
     run((uint32_t)bar * 2);
     CHECK(sg.len == 4 && sg.bar[3].pat[TRK_BASS0] == 5, "record: the song grows while it runs (%d)", sg.len);
@@ -336,28 +333,6 @@ static void test_ext_clock_and_midi_out(void)
     run(256);
     CHECK(find(E_MIDI, 0xFC, 0) > 0, "Stop sent");
     printf("  external clock follow + tempo, MIDI clock out: checked\n");
-}
-
-static void test_break_clock(void)
-{
-    int i, k;
-    reset();
-    S.bpm = 170.0f;
-    P[0].drum[0].rate = RATE_16T;                                /* the break stays on 16ths regardless */
-    P[0].drum[0].len = 12;
-    P[0].brk.steps = 0x00FFu;                                 /* first half of the bar */
-    seq_start(&S);
-    run(44100 * 3);
-    for (i = 0, k = 0; (i = find(E_BRK, -1, i)) >= 0; i++, k++) {
-        CHECK(evs[i].a == k % 16, "break step %d is %d", k, evs[i].a);
-        CHECK(evs[i].b == k / 16, "break bar %d", evs[i].b);
-        CHECK(evs[i].d == (k % 16 < 8), "break step %d enabled=%d", k, evs[i].d);
-    }
-    CHECK(k > 16 * 2, "break clocked %d times", k);
-    seq_stop(&S);
-    run(256);
-    CHECK(find(E_BRKSTOP, -1, 0) >= 0, "break told to stop");
-    printf("  break clock: %d 16ths, bars counted, step mask honoured\n", k);
 }
 
 /* ---- TB-3PO against schwung-tb3po: include its plugin source and call its generator */
@@ -421,7 +396,6 @@ int main(void)
     test_part_cue();
     test_song();
     test_ext_clock_and_midi_out();
-    test_break_clock();
 #ifdef REF_TB3PO
     test_tb3po_matches_reference();
 #endif

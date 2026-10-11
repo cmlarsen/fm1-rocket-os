@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * User sample slots: adapted from Felucca's eng_sample.c, Copyright (C) 2026 Leo Kuroshita
  * (@kurogedelic), Hugelton Instruments. */
-/* User sample slots (break loops), uploaded over USB with tools/fm1_sample_upload.py
+/* User sample slots, uploaded over USB with tools/fm1_sample_upload.py
  * (or the web editor's sample page): 3 slots of 80 KiB at flash 0xA0000.., read in place
  * through the XIP window. Slot = header (magic, count, name, data length, CRC32) + up to
- * 16 zones + IMA ADPCM data at +512. X0X plays zone 0 of a slot as a loop. */
+ * 16 zones + IMA ADPCM data at +512. Nothing in this fork plays them yet: the part that
+ * looped a slot's zone was removed in T1. */
 typedef struct {
     uint32_t off, n, ls, le;     /* byte offset (from the slot data), samples, loop start / end */
     uint32_t rate;               /* source rate / 44100, Q16 */

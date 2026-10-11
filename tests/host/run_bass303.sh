@@ -16,7 +16,7 @@ OUT=build/bass303_host
 mkdir -p "$OUT/ref"
 CC="${CC:-cc}"
 CXX="${CXX:-c++}"
-CFLAGS="-std=c99 -O2 -ffp-contract=off -Wall -Wextra -Wdouble-promotion"
+CFLAGS="-std=c99 -D_GNU_SOURCE -O2 -ffp-contract=off -Wall -Wextra -Wdouble-promotion"
 
 # --- the reference: Open303 driven the way plugin.cpp drives it, pots mapped as plugin.cpp maps
 # them (n = pot / 127). Where the port's panel differs from plugin.cpp (Tune is centred on 440,

@@ -26,7 +26,7 @@ BODY, TRAY, KEY_W, KEY_B, KNOB, BTN, LABEL = "#3a3d42", "#26282c", "#d9dadc", "#
 WHITE_N = 16
 BLACK_AFTER = [0, 1, 2, 4, 5, 7, 8, 9, 11, 12, 14]          # black key k sits after white key BLACK_AFTER[k]
 SHOTS = {"t01_909.png": "screen-909.png", "t04_303a.png": "screen-303.png", "t10_home.png": "screen-home.png",
-         "t08_break.png": "screen-break.png", "t14_mix_pump.png": "screen-mix.png", "t15_list.png": "screen-list.png",
+         "t14_mix_pump.png": "screen-mix.png", "t15_list.png": "screen-list.png",
          "t19_ask.png": "screen-ask.png", "t02_909_readout.png": "screen-readout.png", "t06_tb3po.png": "screen-tb3po.png",
          "t12_fx.png": "screen-fx.png", "t17_global.png": "screen-global.png"}
 SONG_SHOTS = {"s04_song_playing.png": "screen-song.png", "s05_motion.png": "screen-motion.png"}   # build/scenarios/song
@@ -126,7 +126,7 @@ def panel(screen_png):
         if bot[i][1]:
             s.append(what(x + 27, 330, bot[i][1]))
     s.append(keybed(36, 400, W - 72, h=270))
-    s.append(what(W / 2, 696, "Black keys: drum tracks, break slices, part mutes, mixer channels   ·   "
+    s.append(what(W / 2, 696, "Black keys: drum tracks, part mutes, mixer channels   ·   "
                               "White keys: steps (on HOME, patterns)"))
     s.append("</svg>")
     return "".join(s)
@@ -136,11 +136,11 @@ def keymap():
     W, H = 1000, 330
     names909 = ["BD", "SD", "LT", "MT", "HT", "RS", "CP", "CH", "OH", "CR", "RD"]
     s = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" '
-         f'aria-label="The keys in X0X: black keys 1 to 11 are drum tracks or break slices, white keys 1 to 16 are steps">',
+         f'aria-label="The keys in X0X: black keys 1 to 11 are drum tracks, white keys 1 to 16 are steps">',
          STYLE, f'<rect x="0" y="0" width="{W}" height="{H}" rx="28" fill="{BODY}"/>',
          keybed(20, 20, W - 40, white_label=lambda i: str(i + 1), black_label=lambda k: str(k + 1),
                 black_sub=lambda k: names909[k], white_sub=lambda i: "step", h=250),
-         f'<text x="40" y="306" class="cap">BLACK KEYS: 909 TRACKS (808, BREAK SLICES, HOME MUTES)   ·   WHITE KEYS: STEPS (HOME: PATTERNS)</text>',
+         f'<text x="40" y="306" class="cap">BLACK KEYS: 909 TRACKS (808, HOME MUTES)   ·   WHITE KEYS: STEPS (HOME: PATTERNS)</text>',
          "</svg>"]
     return "".join(s)
 

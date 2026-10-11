@@ -1,12 +1,11 @@
 # GLO > KEY SOUND: by default a black drum key selects silently while the pattern plays; stopped,
 # or with REC on, it plays. ALWAYS plays it every time.
 wait 300
-# only the (empty) 909 heard: mute 303A, 303B and the break on HOME
+# only the (empty) 909 heard: mute 303A and 303B on HOME
 tap HOME
 tapkey b2
 tapkey b3
-tapkey b4
-expect mute 29360128
+expect mute 12582912
 tap EDIT
 expect part 0
 # stopped: the key plays its drum

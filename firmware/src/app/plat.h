@@ -47,9 +47,9 @@ enum { OBJ_SET, OBJ_SOUND, OBJ_PAT0, OBJ_PAT1, OBJ_PANEL, OBJ_SONG, OBJ_MOTION, 
 /* flash: OBJ_SET 0xFC000; SOUND / PAT0 / PAT1 / SONG 0x97000.. (2 sectors each); OBJ_PANEL 0xDC000,
  * OBJ_MOTION 0xDE000 (all inside Felucca's data area, 0x97000..0xDFFFF) */
 
-/* user sample slots (break loops), read in place; 0 = empty slot */
+/* user sample slots, read in place; 0 = empty slot */
 #define PLAT_NSLOTS 3
-/* every zone of a slot is one loop (tools/upload_breaks.py packs several bars per slot) */
+/* every zone of a slot is one loop (tools/fm1_sample_upload.py packs several bars per slot) */
 #define PLAT_SLOT_ZONES 16
 int plat_slot_zones(int k);            /* loops in slot k, 0 = empty */
 /* slot k, zone z: IMA ADPCM from predictor 0 / index 0, *nsamples, *rate in Hz; name = the slot's */

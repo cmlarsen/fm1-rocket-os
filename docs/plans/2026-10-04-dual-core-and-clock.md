@@ -2,8 +2,8 @@
 
 ## Done (2026-10-09): what it took on the device
 
-The split below is in (hal/fm1_cpu1.{h,S}, engine.c render_sub): core 1 renders the 909 and the
-808 into the mix while core 0 renders the 303s and the break; the output is bit for bit one core's.
+The split below is in (hal/fm1_cpu1.{h,S}, engine.c render_sub): core 1 renders the
+808 into the mix while core 0 renders the 909 and the 303s; the output is bit for bit one core's.
 What the device needed, beyond the SDK sequence (several from Melodee's dual-core audio,
 github.com/keremimo/melodee, GPL-3.0):
 
@@ -24,10 +24,10 @@ worst case 115 -> 81 % (peak 100 %). Core 1's stack: 828 of 2816 bytes at the de
 
 The worst block, taken apart (X0X_DEBUG's x0x_worst, read over USB): 11 639 us of an 11 609 us
 half, of which core 0 waited 5 086 us for core 1; 84 blocks over 90 %, one dropout. Core 1 was the
-critical path. Rebalanced: **core 1 = 808 + break; core 0 = 909 (rendered into the mix in place,
+critical path. Rebalanced: **core 1 = 808; core 0 = 909 (rendered into the mix in place,
 scaled by its glides: 0 + x * c is x * c, so still bit for bit) + both 303s**. Then: 39 / 54 / 68 %,
 peak 84 %, the worst block 9 806 us with 2 us of waiting, no block over 90 %, no dropout. The factory
-loop (909 + 303 A + break, no 808) costs more than with the drums together (32 -> 39 %): core 1
+loop (909 + 303 A, no 808) costs more than with the drums together (32 -> 39 %): core 1
 has little to do there. A split chosen per block by what sounds would recover it.
 
 Research for using the AC79's second core, from JieLi's AC79 SDK
@@ -84,14 +84,14 @@ Today the sequencer and the engines interleave inside the block (`render_sub` ru
 For two cores, a block becomes:
 
 1. core 0: drain the command queue, motion, then run the sequencer over the whole block into a list
-   of timestamped events (drum hits, 303 notes, break steps);
+   of timestamped events (drum hits, 303 notes);
 2. core 1: render the 909 and the 808 through the block, applying the drum events at their samples;
-   core 0, at the same time: the two 303s and the break;
+   core 0, at the same time: the 909 and the two 303s;
 3. core 0: wait for core 1, then the sends, the master and the output.
 
 Parameters for the drum engines are applied by core 0 before step 2 only, so the engines are never
 written while core 1 renders them. With the worst case measured in the simulator (909 54 + 808 171
-against 303s 145 + break 12 ns/sample, FX + master 60), a block costs about the larger half plus the
+against 909 + 303s 145 ns/sample, FX + master 60), a block costs about the larger half plus the
 tail: ~285 instead of ~440 ns, **about -35 %**. The split can also be chosen per block by load.
 
 Risks: both cores missing the I-cache at once contend for the flash; the I-cache is shared, so two
