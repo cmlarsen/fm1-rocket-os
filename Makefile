@@ -201,4 +201,14 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-engines unit-store unit-take
+unit-core: unit-clip unit-engines unit-store unit-take unit-midi
+.PHONY: unit-midi
+unit-midi:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/midi_in_test \
+	    tests/host/midi_in_test.c core/midi/midi_in.c
+	build/host/midi_in_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/midi_in_test_san \
+	    tests/host/midi_in_test.c core/midi/midi_in.c
+	build/host/midi_in_test_san
+
