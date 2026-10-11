@@ -23,6 +23,8 @@ seq_t seq;
 void engine_drum(int kit, int v, float vel) { (void)kit; (void)v; (void)vel; }
 void engine_bass_on(int p, int n, int a, int s) { (void)p; (void)n; (void)a; (void)s; }
 void engine_bass_off(int p) { (void)p; }
+void engine_note_on(int part, int note, int vel) { (void)part; (void)note; (void)vel; }
+void engine_note_off(int part, int note) { (void)part; (void)note; }
 void engine_set(int t, int v, int i, int val) { (void)t; (void)v; (void)i; (void)val; }
 void engine_all_off(void) {}
 
@@ -135,9 +137,30 @@ int main(void)
     CHECK(count_used(12, ROLE_CLIPS_LEAD) == 1);
     CHECK(sg.clip[12].used && sg.clip[12].d.notes[0].note == 48);
 
-    /* CHORDS and FX stay empty */
-    CHECK(count_used(19, ROLE_CLIPS_CHORDS) == 0);
-    CHECK(count_used(24, ROLE_CLIPS_FX) == 0);
+    /* T5i: the CHORDS clips are derived from the BASS clips (each note a chord at root+12/+19/+24,
+     * vel 90, the same step and length), and the three FX clips are generated */
+    CHECK(count_used(19, ROLE_CLIPS_CHORDS) == 2);
+    CHECK(sg.clip[19].used && sg.clip[20].used && !sg.clip[21].used);
+    CHECK(sg.clip[19].nnotes == 6);
+    CHECK(sg.clip[19].d.notes[0].step == 0 && sg.clip[19].d.notes[0].note == 50 &&
+          sg.clip[19].d.notes[0].vel == 90 && sg.clip[19].d.notes[0].len == 2);
+    CHECK(sg.clip[19].d.notes[1].note == 57 && sg.clip[19].d.notes[2].note == 62);
+    CHECK(sg.clip[19].d.notes[3].step == 2 && sg.clip[19].d.notes[3].note == 52 &&
+          sg.clip[19].d.notes[3].len == 1);
+    CHECK(sg.clip[19].d.notes[4].note == 59 && sg.clip[19].d.notes[5].note == 64);
+    CHECK(sg.clip[20].nnotes == 3 && sg.clip[20].d.notes[0].note == 52 &&
+          sg.clip[20].d.notes[1].note == 59 && sg.clip[20].d.notes[2].note == 64);
+    CHECK(count_used(24, ROLE_CLIPS_FX) == 3);
+    CHECK(sg.clip[24].len == 16 && sg.clip[24].nnotes == 4 && sg.clip[24].d.notes[0].step == 2 &&
+          sg.clip[24].d.notes[0].note == 60 && sg.clip[24].d.notes[0].vel == 100 &&
+          sg.clip[24].d.notes[3].step == 14);
+    CHECK(sg.clip[25].len == 16 && sg.clip[25].nnotes == 16 && sg.clip[25].d.notes[0].vel == 20 &&
+          sg.clip[25].d.notes[0].step == 0 && sg.clip[25].d.notes[15].vel == 127 &&
+          sg.clip[25].d.notes[15].step == 15);
+    CHECK(sg.clip[26].len == 32 && sg.clip[26].nnotes == 3 && sg.clip[26].d.notes[0].step == 0 &&
+          sg.clip[26].d.notes[1].step == 11 && sg.clip[26].d.notes[2].step == 22 &&
+          sg.clip[26].d.notes[0].note == 48 && sg.clip[26].d.notes[0].vel == 80 &&
+          sg.clip[26].d.notes[0].len == 4);
 
     /* every clip's motion lanes are empty (marked MOTION_NONE, not zero) */
     CHECK(sg.clip[0].motion[0].param == PARAM_NONE && sg.clip[0].motion[1].param == PARAM_NONE);

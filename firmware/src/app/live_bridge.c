@@ -91,6 +91,78 @@ static void map_line(const bpart_t *bp, clip_t *c)
         c->used = 0;
 }
 
+#define CHORDS_FIRST (ROLE_CLIPS_DRUMS + ROLE_CLIPS_BASS + ROLE_CLIPS_LEAD)
+#define FX_FIRST (CHORDS_FIRST + ROLE_CLIPS_CHORDS)
+
+/* T5i interim content (until T6i/T8's starter songs): the CHORDS clips are derived from the BASS
+ * clips, each bass note a chord a fifth and two octaves up at vel 90, and the three FX clips are a
+ * generated NOISE pattern: off-beat eighths, a 1-bar riser and a sparse 2-bar texture. */
+static void map_chords_fx(live_song_t *sg)
+{
+    static const int COFF[3] = {12, 19, 24};
+    int i, j, k, nn;
+    for (i = 0; i < (int)ROLE_CLIPS_CHORDS; i++) {
+        const clip_t *b = &sg->clip[ROLE_CLIPS_DRUMS + i];   /* the BASS clips */
+        clip_t *c = &sg->clip[CHORDS_FIRST + i];
+        if (!b->used)
+            continue;
+        c->used = 1;
+        c->len = b->len;
+        c->mode = b->mode;
+        c->quant = b->quant;
+        nn = 0;
+        for (j = 0; j < (int)b->nnotes && nn + 3 <= (int)CLIP_MAX_NOTES; j++)
+            for (k = 0; k < 3; k++) {                  /* root + 12, +19, +24 */
+                int n = (int)b->d.notes[j].note + COFF[k];
+                note_t *nt = &c->d.notes[nn++];
+                nt->step = b->d.notes[j].step;
+                nt->note = (uint8_t)(n < 0 ? 0 : n > 127 ? 127 : n);
+                nt->vel = 90;
+                nt->len = b->d.notes[j].len;
+            }
+        c->nnotes = (uint8_t)nn;
+        if (!nn)
+            c->used = 0;
+    }
+    for (i = 0; i < (int)ROLE_CLIPS_FX; i++) {
+        clip_t *c = &sg->clip[FX_FIRST + i];
+        c->used = 1;
+        c->mode = CLIP_LOOP;
+        c->quant = Q_BAR;
+        nn = 0;
+        if (i == 0) {                                  /* off-beat eighths, 1 bar */
+            c->len = 16;
+            for (j = 2; j < 16; j += 4) {
+                note_t *nt = &c->d.notes[nn++];
+                nt->step = (uint8_t)j;
+                nt->note = 60;
+                nt->vel = 100;
+                nt->len = 1;
+            }
+        } else if (i == 1) {                           /* a 1-bar riser: 16 steps, vel 20 -> 127 */
+            c->len = 16;
+            for (j = 0; j < 16; j++) {
+                note_t *nt = &c->d.notes[nn++];
+                nt->step = (uint8_t)j;
+                nt->note = 60;
+                nt->vel = (uint8_t)(20 + 107 * j / 15);
+                nt->len = 1;
+            }
+        } else {                                       /* a sparse 2-bar texture */
+            static const uint8_t SP[3] = {0, 11, 22};
+            c->len = 32;
+            for (j = 0; j < 3; j++) {
+                note_t *nt = &c->d.notes[nn++];
+                nt->step = SP[j];
+                nt->note = 48;
+                nt->vel = 80;
+                nt->len = 4;
+            }
+        }
+        c->nnotes = (uint8_t)nn;
+    }
+}
+
 void live_bridge_map(const pattern_t *pats, void *songp)
 {
     live_song_t *sg = (live_song_t *)songp;
@@ -115,10 +187,12 @@ void live_bridge_map(const pattern_t *pats, void *songp)
     sg->role[ROLE_LEAD].volume = 100;
     sg->role[ROLE_LEAD].first_clip = ROLE_CLIPS_DRUMS + ROLE_CLIPS_BASS;
     sg->role[ROLE_LEAD].nclips = ROLE_CLIPS_LEAD;
-    sg->role[ROLE_CHORDS].engine = ENG_FM6;           /* empty until T5i; CHORDS and FX are silent */
+    sg->role[ROLE_CHORDS].engine = ENG_FM6;           /* T5i: FM6 chords derived from the BASS clips */
+    sg->role[ROLE_CHORDS].volume = 100;
     sg->role[ROLE_CHORDS].first_clip = ROLE_CLIPS_DRUMS + ROLE_CLIPS_BASS + ROLE_CLIPS_LEAD;
     sg->role[ROLE_CHORDS].nclips = ROLE_CLIPS_CHORDS;
-    sg->role[ROLE_FX].engine = ENG_NOISE;
+    sg->role[ROLE_FX].engine = ENG_NOISE;             /* T5i: generated NOISE FX patterns */
+    sg->role[ROLE_FX].volume = 100;
     sg->role[ROLE_FX].first_clip = ROLE_CLIPS_DRUMS + ROLE_CLIPS_BASS + ROLE_CLIPS_LEAD + ROLE_CLIPS_CHORDS;
     sg->role[ROLE_FX].nclips = ROLE_CLIPS_FX;
 
@@ -158,6 +232,8 @@ void live_bridge_map(const pattern_t *pats, void *songp)
             nl++;
         }
     }
+
+    map_chords_fx(sg);
 
     /* T3 leaves every clip's motion lanes empty: a zeroed lane would look like a real parameter
      * (param 0) and fire on every step, so mark them MOTION_NONE. */
@@ -207,8 +283,9 @@ void live_bridge_exit(void)
     if (!g_active)
         return;
     clip_engine_transport_stop(&g_eng);
-    engine_bass_off(0);                                /* release any held 303 A/B note */
+    engine_bass_off(0);                                /* release any held 303 A/B note (and log it) */
     engine_bass_off(1);
+    engine_all_off();                                  /* T5i: release FM6/NOISE (and stop X0X) too */
     for (i = 0; i < NROLES; i++)
         g_stop_q[i] = 0;
     g_active = 0;
@@ -273,8 +350,19 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
             engine_bass_on(part, note, vel >= 100, 0);
         else
             engine_bass_off(part);
+        return;
     }
-    /* CHORDS / FX: silent until T5i */
+    if (role == ROLE_CHORDS) {                         /* T5i: FM6 */
+        if (down)
+            engine_note_on(PART_FM6, note, vel);
+        else
+            engine_note_off(PART_FM6, note);
+    } else if (role == ROLE_FX) {                      /* T5i: NOISE */
+        if (down)
+            engine_note_on(PART_NOISE, note, vel);
+        else
+            engine_note_off(PART_NOISE, note);
+    }
 }
 
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
