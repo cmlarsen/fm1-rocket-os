@@ -148,7 +148,7 @@ Owner decisions for unattended work:
 ## Lanes (v3, 2026-10-11)
 Overnight the owner asked for more parallelism. Each task with a self-contained core is split into a **core** part (new files and unit tests, nothing shared) and an **integration** part (the wiring into `ui.c` and the sequencer).
 - **Core lanes run in parallel:** clip engine (T4c), FM6 + NOISE (T5c), storage + undo (T6c), take recorder/player (T9c), punch FX DSP (T10c), MIDI-in parser (T11c), name entry port (T8c).
-- **The integration lane runs serially:** T2 → T3 → T4i → T5i → T6i → T7 → T8 → T9i → T10i → T11i. Each step wires cores that are already tested.
+- **The integration lane runs serially:** T2 → T3 (LIVE on the clip engine; absorbs T4i) → T5i → T6i → T7 → T8 → T9i → T10i → T11i. Each step wires cores that are already tested.
 - **The unlock** is `core/model/model.h` (Song, Role, Clip, Take types and limits), written and frozen by the coordinator right after T1. Changing it later needs the coordinator.
 - **At most 4 workers run at once:** the integration lane plus 3 core lanes. Core lanes go in critical-path order: T4c, T5c, T6c, then T9c, T10c, T11c, T8c.
 - **Worker fallback on usage limits (owner, 2026-10-11).** 1) DeepSeek 4.1 Flash via opencode. 2) If DeepSeek hits a limit: Codex Sol (`--agent codex`, its default `gpt-6.1-sol`). 3) If Codex also runs out: check DeepSeek first, then Codex; only if both are still limited, use a Claude worker. Before every later Claude worker, check DeepSeek and Codex again, and go back to them as soon as either works. A limit shows up as the worker stalling or reporting a quota/429 error; probe with a one-line `opencode run` / `codex exec` before relaunching. Retry the same Task with `--retry-of`.
