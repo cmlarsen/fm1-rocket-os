@@ -1,0 +1,35 @@
+# TLSET: stage lock blocks the launch-mode clear while playing, and only then.
+wait 300
+tap SEQ
+tap HOME
+tap SEL
+expect liveque0 0
+press PLAY
+wait 700
+release PLAY
+wait 100
+tap EDIT
+turn SELECT 2 80
+turn ALGO 1 80
+expect stagelock 1
+tap EDIT
+press PLAY
+wait 700
+release PLAY
+wait 100
+tap PLAY
+wait-bar 1
+press HOME
+key w0 down
+wait 1700
+key w0 up
+release HOME
+expect clipused0 1
+tap PLAY
+wait 300
+press HOME
+key w0 down
+wait 1700
+key w0 up
+release HOME
+expect clipused0 0

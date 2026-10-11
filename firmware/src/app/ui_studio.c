@@ -150,10 +150,18 @@ static void st_finish_clear(void)
     st.clear_clip = 0xFF;
 }
 
+static int st_clear_locked(void)
+{
+    if (!song_io_setup_get(SONG_SETUP_LOCK) || !live_bridge_transport_playing())
+        return 0;
+    st_toast("LOCKED", "stage lock");
+    return 1;
+}
+
 /* Start a clear on a clip if it holds one (HOME + a pad, or SEL on the cursor). */
 static void st_clear_start(int clip, int sel, int key)
 {
-    if (clip < 0 || !live_bridge_clip_used(clip))
+    if (clip < 0 || !live_bridge_clip_used(clip) || st_clear_locked())
         return;
     st.clear_clip = (uint8_t)clip;
     st.clear_sel = (uint8_t)sel;
@@ -169,7 +177,7 @@ void studio_tick(void)
     if ((ui.view == V_STUDIO) && (ui.btn & (1u << B_SEL)) && !(ui.btn & (1u << B_HOME)) &&
         st.clear_clip == 0xFF && (now - ui.down_t[B_SEL]) >= 250u) {
         int c = st_cursor_clip();
-        if (c >= 0 && live_bridge_clip_used(c)) {
+        if (c >= 0 && live_bridge_clip_used(c) && !st_clear_locked()) {
             st.clear_clip = (uint8_t)c;
             st.clear_sel = 1;
             st.clear_key = 0xFF;
