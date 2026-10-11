@@ -155,6 +155,15 @@ Overnight the owner asked for more parallelism. Each task with a self-contained 
 - **Worker fallback on usage limits (owner, 2026-10-11).** 1) DeepSeek 4.1 Flash via opencode. 2) If DeepSeek hits a limit: Codex Sol (`--agent codex`, its default `gpt-6.1-sol`). 3) If Codex also runs out: check DeepSeek first, then Codex; only if both are still limited, use a Claude worker. Before every later Claude worker, check DeepSeek and Codex again, and go back to them as soon as either works. A limit shows up as the worker stalling or reporting a quota/429 error; probe with a one-line `opencode run` / `codex exec` before relaunching. Retry the same Task with `--retry-of`.
 - **Reviews scale with risk.** Sequencer, storage and loader changes get a full Opus review. Deletions, docs and standalone modules get a quick pass.
 
+## Follow-ups found in review (not yet scheduled)
+- **LIVE (from T3):**
+  - A slide gets a note-off just before its note-on, so the 303 glide isn't legato (`engine.c` `live_apply`).
+  - `s_bon` applies X0X's old probability lanes, so a LIVE bass note can be skipped by chance. LIVE should ignore probability.
+  - `all_off_now` sends no MIDI note-offs or clock stop to external gear.
+  - K1–K4 changes made in LIVE are saved into the project.
+  - The screen tour (`screens_tour.x0x`) doesn't visit LIVE yet, so `screens-lint` doesn't cover it.
+- **Device install log:** the T3 build (`build/rc/rocket-t3-*.fwsc`) was installed unattended on 2026-10-11, and the FM-1 stayed up for 30 s, answering `FM-1_900 [running]`.
+
 ## Riskiest tasks
 | Task | Risk | When we'll know |
 |---|---|---|
