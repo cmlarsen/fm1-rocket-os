@@ -46,9 +46,12 @@ static uint8_t   g_nheld;
 static void ml_note_on(void *x, uint8_t note, uint8_t vel)
 {
     int role = live_focus();
+    uint8_t prev = mh[note];
     (void)x;
     if (role < 0)
         role = 0;
+    if (prev && prev != (uint8_t)(role + 1))
+        live_bridge_play_key((uint8_t)(prev - 1u), note, 0, 0);   /* the focus moved: free the old role */
     if (!mh[note] && g_nheld < 255u)
         g_nheld++;
     mh[note] = (uint8_t)(role + 1);                 /* the release finds its role even if focus moved */

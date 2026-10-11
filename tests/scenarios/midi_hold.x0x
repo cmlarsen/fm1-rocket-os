@@ -1,26 +1,44 @@
-# T11i: a MIDI note held across a view change is released, and a note-off after it still lands;
-# then a deterministic MIDI fuzz: no note is left held and no T5i voice sounds.
+# T11i: MIDI notes held across a focus and a view change are released, and a note retriggered
+# after the focus moved frees the old role's voice; then a deterministic MIDI fuzz.
 wait 300
-# focus CHORDS (FM6), so the voice counters are meaningful: enter LIVE, ALGO +2, leave
+# focus CHORDS (FM6), so the voice counters are meaningful: enter LIVE, ALGO +2
 press PLAY
 wait 700
 release PLAY
 wait 20
 turn ALGO 2 80
 expect focus 3
+# the same note retriggered after the focus moved (CHORDS -> FX): the old role's note is freed
+midi 90 3C 64
+wait 50
+expect fm6held 1
+turn ALGO 1 80
+expect focus 4
+midi 90 3C 64
+wait 50
+expect fm6held 0
+expect nzvoices 1
+midi 80 3C 00
+wait 2000
+expect nzvoices 0
+expect fm6voices 0
+# back to CHORDS and out of LIVE
+turn ALGO -1 80
+expect focus 3
 press PLAY
 wait 700
 release PLAY
 wait 50
 expect mode 0
-midi 90 3C 64
+# a MIDI note held across a view change is released; the late note-off is harmless
+midi 90 3E 64
 wait 50
 expect fm6held 1
-tap GLO                                         # a view change releases what MIDI held
+tap GLO
 wait 200
 expect fm6held 0
 expect midiheld 0
-midi 80 3C 00                                   # the late note-off is harmless
+midi 80 3E 00
 wait 2000
 expect fm6voices 0
 # the fuzz: random notes / PC / CC across the 16 channels, then the panic on every channel
