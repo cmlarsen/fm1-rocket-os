@@ -1,0 +1,30 @@
+# case restart_after_edit
+# script:
+clip 12 melodic 8
+note 12 0 60 100 1
+play
+launch 12 0
+run 12000
+stop
+run 4000
+note 12 4 67 100 1
+restart
+runto 80000
+
+# events:
+0 clip_queued lead 0 0 12
+0 playing bass 0 0 0
+0 clip_started lead 0 0 12
+0 note_on lead 60 100 12
+6000 note_off lead 60 0 0
+12000 stopped drums 0 0 0
+12000 playing bass 0 0 0
+12000 clip_started lead 0 0 12
+12000 note_on lead 60 100 12
+18000 note_off lead 60 0 0
+36000 note_on lead 67 100 12
+42000 note_off lead 67 0 0
+60000 note_on lead 60 100 12
+66000 note_off lead 60 0 0
+
+# events=14

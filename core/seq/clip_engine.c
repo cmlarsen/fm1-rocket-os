@@ -325,7 +325,10 @@ static void relaunch_stage(clip_engine_t *e)
     if (!e->song)
         return;
     for (r = 0; r < NROLES; r++) {
-        uint8_t clip = e->cur[r] != CLIP_NONE ? e->cur[r] : e->s_cur[r];
+        uint8_t clip;
+        if (e->que_set[r])
+            continue;                 /* a launch is already staged for this role: it wins */
+        clip = e->cur[r] != CLIP_NONE ? e->cur[r] : e->s_cur[r];
         if (clip != CLIP_NONE && clip < NCLIPS) {
             e->next[r] = e->song->clip[clip];
             e->next_clip[r] = clip;

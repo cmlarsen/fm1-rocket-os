@@ -138,16 +138,12 @@ static void clip_motion_set(int idx, int lane, int param)
 
 static void render_n(uint32_t n)
 {
-    if (eng.playing && !hplay) {               /* transport just started: time restarts at 0 */
-        hbase = 0;
-        hplay = 1;
-    }
-    win_base = hbase;
+    win_base = hbase;                          /* an absolute timeline: a mid-case start does not
+                                                * reset it (the engine's elapsed does) */
     clip_engine_render(&eng, n, &SINK);
     if (eng.playing)
         hbase += n;
-    else
-        hplay = 0;
+    hplay = eng.playing;
 }
 
 /* render exactly to absolute sample `target` (in transport time) */
@@ -542,6 +538,18 @@ int main(void)
         "bpm 900\n"                     /* a song loads with its own 90 bpm */
         "run 2000\n"
         "bpmof\n");
+
+    run_case("restart_after_edit",
+        "clip 12 melodic 8\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 12000\n"
+        "stop\n"
+        "run 4000\n"
+        "note 12 4 67 100 1\n"          /* edit the song's clip while the transport is stopped */
+        "restart\n"                     /* T11i: MIDI Start relaunches the fresh copy, not play[] */
+        "runto 80000\n");
 
     run_case("mute_midnote",
         "clip 12 melodic 4\n"
