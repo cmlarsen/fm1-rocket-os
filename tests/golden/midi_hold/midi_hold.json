@@ -7,7 +7,7 @@
     {"part": 3, "ppat": 0, "pcue": -1, "mute": 0}
   ],
   "view": 5,
-  "studio": {"role": 0, "col": 0, "clip": 0, "classic": 0},
+  "studio": {"role": 0, "col": 0, "clip": 0},
   "songs": {"up": 0, "used": 0, "current": -1, "free": 0, "canundo": 0, "rows": [
     {"slot": 0, "used": 0, "take": 0, "current": 0, "name": ""},
     {"slot": 1, "used": 0, "take": 0, "current": 0, "name": ""},

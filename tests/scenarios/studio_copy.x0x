@@ -1,6 +1,7 @@
 # T7a STUDIO 14: hold a loaded pad; the empty keys blink slowly as targets; tap one to copy the
 # source clip there (same role only), with an undo entry.
 wait 300
+newsong 0
 tap SEQ
 tap HOME
 wait 1400

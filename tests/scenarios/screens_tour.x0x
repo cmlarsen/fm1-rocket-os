@@ -1,10 +1,12 @@
-# T2b screen tour: visit every X0X view and overlay and take a shot of each.
+# T2b screen tour: visit every surviving view and overlay and take a shot of each.
 # `make screens-lint` runs this with a host build that records every text draw (-DX0X_LINT)
 # and checks the shots for clipped or overlapping text. `make screens` shows them at 1:1.
+# TCLS: the X0X pattern pages (HOME/PART-step/GEN/SEQ/SONG) are gone; the tour covers the
+# surviving sound/FX/MIX/GLOBAL pages, STUDIO and LIVE.
 wait 300
 # T11h: the two help systems, so screens-lint sees them too (the same STUDIO shots as
 # tests/scenarios/help_cards.x0x). SYSTEM 1 is the HOME-hold cheat sheet; SYSTEM 2 is GLO + a
-# button. (LIVE's two overlays are covered by help_cards.x0x; the tour stays in STUDIO/Classic.)
+# button.
 press HOME
 wait 450
 shot z00_sheet_studio.png
@@ -60,7 +62,7 @@ wait 700
 shot s00g_studio_clear.png
 key w0 up
 release HOME
-# T7a: the sound cards outside Classic (EDIT from the song home)
+# T7a: the sound cards (EDIT from the song home)
 cursor 3 0
 tap EDIT
 wait 300
@@ -71,35 +73,9 @@ tap EDIT
 wait 300
 shot s00i_sound_303.png
 tap HOME
-# T7a: into the classic X0X pages (GLOBAL -> Classic patterns)
-tap GLO
-tap SEL
-wait 150
 # a little content, so the screens are not empty
-tapkey b0
-tapkey w0
-tapkey w4
-tapkey w8
-tapkey w12
-press ENV
-tapkey w0
-release ENV
 tap PLAY
 wait 400
-# HOME (X0X boots into PART)
-tap HOME
-wait 150
-shot s01_home.png
-# PART (the part's sound; EDIT)
-tap EDIT
-wait 150
-shot s02_part.png
-# a 303 part for the generator
-turn ALGO 2
-# GEN (TB-3PO; ARP)
-tap ARP
-wait 150
-shot s03_gen.png
 # FX
 tap FX
 wait 150
@@ -108,28 +84,16 @@ shot s04_fx.png
 tap LFO
 wait 150
 shot s05_mix.png
-# SEQ (the part's steps)
-tap SEQ
-wait 150
-shot s06_seq.png
-# SONG (HOME toggles HOME <-> SONG)
-tap HOME
-wait 150
-tap HOME
-wait 150
-shot s07_song.png
 # GLOBAL (GLO opens its list)
 tap GLO
 wait 150
 shot s08_global.png
-# O_ASK: the list's RESET asks first
-turn SELECT 14
+# O_ASK: the list's FACTORY RESET asks first (TCLS: row 13)
+turn SELECT 13
 wait 80
 tap SEL
 wait 150
 shot s09_ask.png
-tap HOME
-wait 300
 tap HOME
 wait 300
 # O_LIST: SELECT opens the page list
@@ -138,19 +102,31 @@ wait 150
 shot s10_list.png
 tap HOME
 wait 300
-# PERF (GLOBAL > PERFORMANCE)
+# PERF (GLOBAL > PERFORMANCE; TCLS: row 14)
 tap GLO
 wait 150
-turn SELECT 15
+turn SELECT 14
 wait 80
 tap SEL
 wait 300
 shot s11_perf.png
 tap HOME
 wait 300
-# the help card: hold a button (~600 ms)
-press SAVE
+# LIVE: PADS, PLAY and the punch FX layer
+press PLAY
 wait 700
-shot s12_help.png
-release SAVE
+release PLAY
+wait 100
+shot s13_live_pads.png
+tap SEL
+wait 150
+shot s14_live_play.png
+press FX
+wait 100
+shot s15_live_fx.png
+release FX
+wait 100
+press PLAY
+wait 700
+release PLAY
 wait 150

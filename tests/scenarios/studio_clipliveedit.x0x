@@ -3,6 +3,7 @@
 # DRUMS clip plays while a hit is added on the grid; the clip keeps looping and the edited hit
 # plays back, and the event stream stays sane.
 wait 300
+newsong 0
 cursor 0 0
 tap SEQ
 tapkey b0

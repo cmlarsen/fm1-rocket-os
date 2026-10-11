@@ -1,0 +1,9 @@
+# TCLS r1: SAVE must not stick on "SAVES WHEN STOPPED". The OTA path used to call seq_stop, which
+# set seq.req_stop and was cleared only by engine_all_off; a later SAVE then waited forever. The
+# host's `stop` command sets the same seq.req_stop (it deliberately does not all-off), so it stands
+# in for the OTA-cancel path: after it, SAVE must save.
+wait 300
+stop
+tap SAVE
+wait 300
+expect store_writes >0

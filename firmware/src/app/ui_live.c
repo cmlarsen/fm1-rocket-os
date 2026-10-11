@@ -20,7 +20,6 @@ typedef struct {
     uint8_t holding, to_live;             /* the ring is filling; 1 = entering LIVE */
     uint8_t long_done;                    /* the 600 ms point was reached */
     uint8_t back;                         /* the view to come back to */
-    uint8_t back_classic;                 /* T7a: LIVE was entered from the classic pages */
     uint32_t t0;
     int8_t octv;                          /* the PLAY layer's octave */
 } live_ui_t;
@@ -66,7 +65,6 @@ static void live_fx_reset_ui(void)
 static void live_enter(void)
 {
     live.back = ui.view;
-    live.back_classic = ui.classic;       /* T7a: remember whether we came from the classic pages */
     live.layer = LIVE_PADS;               /* the PADS layer is the default on entry */
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
@@ -74,10 +72,8 @@ static void live_enter(void)
     live_fx_reset_ui();                   /* T10i: a fresh LIVE starts with no FX layer open */
     engine_perform_reset();               /* T10i: and no effect left from a previous visit */
     live_bridge_mute_all(0);              /* T10i: and no mute */
-    ui.classic = 0;                       /* LIVE is the clip engine, wherever it was entered from */
-    live_bridge_enter(&proj.pat[0], 0);   /* T7a: make the clip engine the source; it does not
-                                           * rebuild and does not reset the transport, so clips keep
-                                           * playing across the mode change */
+    live_bridge_enter();                  /* the clip engine is already the source; it does not
+                                           * reset the transport, so clips keep playing */
     set_view(V_LIVE);
     say("LIVE", 0);
 }
@@ -88,18 +84,11 @@ static void live_leave(void)
     live_fx_reset_ui();                   /* T10i: the FX layer closes */
     engine_perform_reset();               /* T10i: leaving LIVE releases every effect */
     live_bridge_mute_all(0);              /* T10i: and clears every mute */
-    if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
-        ui.classic = 1;
-        live_bridge_exit();
-        engine_all_off();
-        set_view(live.back == V_LIVE ? V_HOME : live.back);
-    } else {                              /* back to the song: the clips keep playing (T7a dec. 7) */
-        if (!live_bridge_transport_playing())
-            engine_all_off();             /* safety: release any other held voice when stopped */
-        set_view(live.back == V_LIVE ? V_STUDIO : live.back);
-        if (ui.view == V_STUDIO)
-            studio_enter();
-    }
+    if (!live_bridge_transport_playing())
+        engine_all_off();                 /* safety: release any other held voice when stopped */
+    set_view(live.back == V_LIVE ? V_STUDIO : live.back);
+    if (ui.view == V_STUDIO)
+        studio_enter();
     say("STUDIO", 0);
 }
 
@@ -225,6 +214,7 @@ static int live_handle_button(int b)
     case B_PLAY:
         if (live_bridge_transport_playing()) {
             live_bridge_transport_stop();
+            engine_all_off();                      /* TCLS: STOP releases every voice, as X0X's did */
             say("STOP", 0);
         } else {
             live_bridge_transport_start();
@@ -400,20 +390,21 @@ static void live_draw_header(void)
 
 static uint16_t live_footer(const char **a, const char **b, const char **c)
 {
+    /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
     *a = *b = *c = 0;
     if (fx_layer_active()) {
-        *a = "tap latch hold moment";
-        *b = "HOME+FX reset";
+        *a = "TAP LATCH";
+        *b = "HOME+FX RESET";
     } else if (live.layer == LIVE_PLAY) {
         static char t[24];
         char *q;
-        q = put_s(t, "keys play ");
+        q = put_s(t, "KEYS PLAY ");
         put_s(q, LV_ROLE_L[live.focus]);
         *a = t;
-        *b = "SCL pads";
+        *b = "SCL PADS";
     } else {
-        *a = "SCL play";
-        *b = "hold PLAY exit";
+        *a = "SCL PLAY";
+        *b = "HOLD PLAY EXIT";
     }
     return C_DIM;
 }

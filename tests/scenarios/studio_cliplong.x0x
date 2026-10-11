@@ -1,6 +1,7 @@
 # T7b: a long clip paged with OCT. A DRUMS clip is set to two bars in SETTINGS; on the drum grid
 # OCT+ and OCT- page the visible 16 steps, so the same white key toggles different steps.
 wait 300
+newsong 0
 cursor 0 0
 tap SEQ
 tap SEQ

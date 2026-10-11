@@ -179,7 +179,8 @@ int main(void)
 
     /* the bridge's event stream: launch a drum clip and a 303 clip "now" and render; the sink
      * (not a stub) sees the DRUM with its lane and the NOTE_ON/NOTE_OFF of the bass. */
-    live_bridge_enter(pats, 1200u);
+    live_bridge_rebuild(pats);                        /* TCLS: enter no longer seeds from patterns */
+    live_bridge_enter();
     live_bridge_transport_start();
     live_bridge_launch_now(0);                        /* drum clip A: a kick on step 0 */
     live_bridge_launch_now(7);                        /* bass clip A: a note on step 0 */

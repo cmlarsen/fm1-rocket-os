@@ -18,13 +18,13 @@ tap SAVE
 wait 6000
 expect songfailed 1
 expect songsaves 1
-expect songwrites 8
+expect songwrites 9
 # a new edit re-enables saving; it succeeds on another extent
 assignkey 0 11
 expect songfailed 0
 tap SAVE
 expect songsaves 2
 expect songdirty 0
-expect songwrites 14
+expect songwrites 16
 reboot
 expect keyclip0 11

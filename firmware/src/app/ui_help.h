@@ -9,8 +9,8 @@
  * context: what tap, hold and combos do (design/project/Sys-Help.dc.html). Releasing closes
  * it. Every card's text lives in the table in ui_help.c, so docs and check_help.py can read it.
  *
- * Outside Classic the inherited X0X "hold a button 1 s" help is off (ui.c's help_tick keeps
- * its old behaviour only inside Classic, so a hold there still shows X0X's own card).
+ * TCLS: the inherited X0X "hold a button 1 s" help (the Classic help) is gone; ui.c's help_tick
+ * no longer sets it. These two systems are the only help.
  *
  * ui_help.c is included by ui.c after the drawing helpers, like ui_live.c, so it draws with the
  * same code and reaches ui/proj. These declarations are what ui.c needs earlier in the file. */
@@ -23,7 +23,7 @@
 /* the contexts a card and a cheat sheet are written for */
 enum { HELP_CTX_STUDIO, HELP_CTX_LIVE, HELP_CTX_SONGS, HELP_NCTX };
 
-/* the current context, or -1 when there is none (Classic keeps X0X's own help) */
+/* the current context, or -1 when there is none (a question or the perf test) */
 int  help_ctx(void);
 
 /* SYSTEM 1 */

@@ -28,9 +28,9 @@ static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND,
        V_CLIPEDIT, V_CLIPMOTION, V_SONGS, NVIEWS };
 static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND", "EDIT", "MOTION", "SONGS"};
-/* T7a: the classic X0X pages (the pattern editors) are not on the normal button paths any more;
- * they are reached from the GLOBAL list's "Classic patterns" row. `classic` is that mode: X0X's
- * sequencer is the audio source and its views behave exactly as before. */
+/* TCLS: the classic X0X pattern pages are gone (ADR-0004). The surviving inherited pages
+ * (part sound, FX, MIX, GLOBAL) are sound/FX/setup pages; the clip engine is the only audio
+ * source and the X0X pattern editor code below is unreachable. */
 static const uint16_t PART_COL[NPARTS] = {TOK_DRUM, TOK_FX, TOK_BASS, TOK_LEAD};   /* T2b: the design's role colours */
 static const char *const PART_N[NPARTS] = {"909", "808", "303A", "303B"};
 static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4 chars: lane labels */
@@ -38,7 +38,7 @@ static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4
 /* overlays drawn over the main area */
 enum { O_NONE, O_LIST, O_ASK };
 enum { ACT_NONE, ACT_SAVE, ACT_CLEAR_PART, ACT_CLEAR_PAT, ACT_COPY, ACT_RESET, ACT_ABOUT, ACT_SONG_INS,
-       ACT_SONG_DEL, ACT_SONG_CLR, ACT_PERF, ACT_PERF_TEST, ACT_CLASSIC };
+       ACT_SONG_DEL, ACT_SONG_CLR, ACT_PERF };
 
 typedef struct {
     uint8_t view, part, prev_view;
@@ -60,7 +60,6 @@ typedef struct {
     uint32_t hold_t0;                  /* when it went down (a tap takes an old step off) */
     uint8_t gen_stale[NBASS];          /* TB-3PO's knobs changed since the line was written */
     uint32_t btn, keys, btn_used;
-    int8_t chain_first;
     uint32_t enc_t[NE];
     uint8_t enc_run[NE];               /* quick detents in a row (acceleration waits for a spin) */
     char msg[28];
@@ -81,7 +80,6 @@ typedef struct {
     uint32_t down_t[NB];               /* when each button went down */
     uint32_t turn_t;                   /* the last encoder turn */
     uint8_t song_sel;                  /* the SONG screen's bar */
-    uint8_t classic;                   /* T7a: the classic X0X pages own the audio (X0X's sequencer) */
     uint8_t sound_role;                /* T7a: the role whose FM6/NOISE sound card V_SOUND shows (3/4) */
 } ui_t;
 static ui_t ui;
@@ -131,14 +129,12 @@ int  studio_cursor_clip(void);                /* the clip under the cursor, -1 n
 int  studio_cursor_role(void);
 void studio_set_cursor(int role, int col);    /* the runner's test setup */
 static int  studio_holding(void);             /* a clear/copy hold is in progress */
-static int  studio_classic(void);             /* whether the classic pages own the audio */
 void studio_tick(void);                        /* the clear / copy hold timers */
-void studio_set_classic(int on);
 int  studio_cursor(void);                      /* packed role<<8 | clip, for the runner */
 static void studio_sound_key(int k, int down); /* the sound page's keys audition the role */
 static void studio_undo(void);
 static void studio_redo(void);
-static void studio_draw_part(int band);        /* V_PART outside Classic: a sound card, no step grid */
+static void studio_draw_part(int band);        /* V_PART: a sound card, no step grid */
 static void studio_draw_sound(int band);       /* V_SOUND: the FM6/NOISE sound card */
 static uint16_t studio_footer_sound(const char **a, const char **b, const char **c);
 /* the clip-setting knob refs (R_CLIP_*), used by build_pages / pref_* in ui.c */
@@ -169,14 +165,14 @@ int  ui_songs_up(void);                         /* the runner: 1 while the songs
 /* One table for every "a key plays a note" path (LIVE's PLAY layer, the sound pages, and any
  * future one). A key maps to what it started — the role and note — so a release always releases
  * what that key began, whatever view, layer or mode is showing. Home/SEQ handoffs, set_view and
- * the STUDIO/LIVE/Classic switches release everything still held. */
+ * the STUDIO/LIVE switches release everything still held. */
 static uint8_t hn_on[NKEYS], hn_role[NKEYS], hn_note[NKEYS];
 /* T2c: the view / mode the note started in. The fuzzer's held-across-transition check compares it
  * with the current one: a note that is still in the table after a view/mode change is a bug. */
 static uint8_t hn_mode[NKEYS];
 static uint8_t hn_mode_now(void)
 {
-    return (uint8_t)(ui.view | (ui.classic ? 0x40u : 0u) | (live_bridge_active() ? 0x80u : 0u));
+    return (uint8_t)(ui.view | (live_bridge_active() ? 0x80u : 0u));
 }
 /* T2c r2: the 303 A/B parts are monophonic. Releasing one key must not cut the note while another
  * key on the same part is still held; the note-off goes out only on the last release, whichever
@@ -244,8 +240,7 @@ static int32_t enc(int role)
     return v;
 }
 
-/* PERF (the performance screen and its test; see "performance" below) */
-enum { PT_IDLE = -1, PT_DONE = 3 };
+/* PERF (the performance screen; see "performance" below) */
 static struct {
     uint32_t t_ms, ticks, cyc, frames, prof[ENG_PROF_N], st[3];
     uint16_t mhz10;                    /* the CPU clock x 10; 0 = not known (no cycle counter) */
@@ -253,18 +248,9 @@ static struct {
     uint16_t stage[ENG_PROF_N];        /* each stage's share of the CPU, x 10 (%) */
     uint16_t cps;                      /* the render's cycles per sample (cycle counter only) */
     uint8_t stall[3];                  /* fetch / read / write stall cycles, % */
-    int8_t test, phase;                /* test: PT_IDLE, a scenario 0..2, PT_DONE (when phase is 4);
-                                        * phase: 0 stop, 1 settle, 2 measure, 3 put back, 4 done */
-    uint32_t test_t0;
-    uint16_t res_load[3], res_cps[3];  /* per scenario: the render's share x 10, cycles per sample */
-    uint8_t res_peak[3];
-    pattern_t *pat;                    /* what the test changes, to put back */
-    uint8_t ppat[NPARTS], song_on, ca, cb;
-    uint32_t mute;
-    float bpm;
-} perf = {.test = PT_IDLE};
+} perf;
 
-static pattern_t *pat_of(int part) { return &proj.pat[seq.ppat[part]]; }
+static pattern_t *pat_of(int part) { return project_pat(seq.ppat[part]); }
 static pattern_t *cur_pat(void) { return pat_of(ui.part); }    /* the pattern the part on screen plays */
 static int part_view(void) { return ui.view == V_PART || ui.view == V_SEQ || ui.view == V_GEN; }
 static int steps_view(void) { return ui.view == V_PART || ui.view == V_SEQ; }   /* the keys are the part's steps */
@@ -371,8 +357,7 @@ static const x0x_param_t SEQ_P[NSQ] = {
 static const x0x_param_t ACT_P[] = {
     {"", 0, 0, 0}, {"SAVE PROJECT", 0, 0, 0}, {"CLEAR THIS PART", 0, 0, 0}, {"CLEAR PATTERN", 0, 0, 0},
     {"COPY PATTERN", 0, 0, 0}, {"FACTORY RESET", 0, 0, 0}, {"ABOUT X0X", 0, 0, 0}, {"INSERT BAR", 0, 0, 0},
-    {"DELETE BAR", 0, 0, 0}, {"CLEAR SONG", 0, 0, 0}, {"PERFORMANCE", 0, 0, 0}, {"RUN PERF TEST", 0, 0, 0},
-    {"CLASSIC PATTERNS", 0, 0, 0},
+    {"DELETE BAR", 0, 0, 0}, {"CLEAR SONG", 0, 0, 0}, {"PERFORMANCE", 0, 0, 0},
 };
 static const x0x_param_t STALLS_P = {"STALLS", 1, 0, ONOFF_N};
 static const x0x_param_t MIDICH_P[NPARTS] = {   /* 0 = OFF (no notes in or out), 1-16 */
@@ -488,9 +473,7 @@ static int pref_get(pref_t r)
         }
     }
     case R_TEMPO:
-        if (ui.classic)
-            return (int)(seq.bpm + 0.5f) - 20;
-        return (int)(live_bridge_bpm_x10() / 10u) - 20;
+        return (int)(live_bridge_bpm_x10() / 10u) - 20;   /* TCLS: the song's tempo, everywhere */
 
     case R_ACCENT: return seq.accent_q7;
     case R_CLKOUT: return seq.send_clock;
@@ -577,14 +560,10 @@ static void pref_set(pref_t r, int v)
             ui.gen_stale[r.a] = 1;
         break;
     }
-    case R_TEMPO:
-        if (ui.classic)
-            seq.bpm = (float)(v + 20);
-        else {                                         /* T7a: the song's tempo, everywhere */
-            song_io_set_bpm((v + 20) * 10);
-            live_bridge_set_bpm((uint16_t)((v + 20) * 10));
-            live_bridge_sync_tempo();
-        }
+    case R_TEMPO:                                      /* T7a/TCLS: the song's tempo, everywhere */
+        song_io_set_bpm((v + 20) * 10);
+        live_bridge_set_bpm((uint16_t)((v + 20) * 10));
+        live_bridge_sync_tempo();
         break;
     case R_ACCENT: seq.accent_q7 = (uint8_t)v; break;
     case R_CLKOUT: seq.send_clock = (uint8_t)v; break;
@@ -699,8 +678,6 @@ static const char *pref_name(pref_t r)
     if (r.kind == R_CLIP_LEN || r.kind == R_CLIP_MODE || r.kind == R_CLIP_QUANT || r.kind == R_CLIP_SWING ||
         r.kind == R_ED_STEP || r.kind == R_ED_NOTE || r.kind == R_ED_VEL || r.kind == R_ED_LEN || r.kind == R_ED_LANE)
         return d->name;
-    if (r.kind == R_ACT && r.a == ACT_CLASSIC)       /* T7a: enter Classic, or back to the song home */
-        return ui.classic ? "BACK TO SONG" : "CLASSIC PATTERNS";
     if ((ui.view == V_LIVE || ui.view == V_CLIPMOTION) && r.kind == R_ENG) {   /* T3/T7b: design labels */
         if (r.a == T_MST && r.c == MST_DJF)
             return "FILTER";
@@ -984,10 +961,11 @@ static void build_pages(void)
         add_page("PERFORM", PR(R_ENG, T_MST, 0, MST_DJF), PR(R_ENG, T_FX, 0, FX_RV_LEVEL),
                  PR(R_ENG, T_FX, 0, FX_DL_LEVEL), PR(R_ENG, T_FX, 0, FX_DRIVE));
         break;
-    case V_HOME:                                       /* the pattern: how the parts run through it */
+    case V_HOME:                                       /* (TCLS: unreachable — the X0X pattern home) */
     case V_GLO:
-        add_page("PERFORM", PR(R_TEMPO, 0, 0, 0), PR(R_SWING, 0, 0, 0), PR(R_ENG, T_MST, 0, MST_DJF),
-                 PR(R_ENG, T_MST, 0, MST_PUMP));
+        /* TCLS: the X0X pattern SWING knob is gone; the song's swing is the clip SWING (STUDIO 5). */
+        add_page("PERFORM", PR(R_TEMPO, 0, 0, 0), PR(R_ENG, T_MST, 0, MST_DJF),
+                 PR(R_ENG, T_MST, 0, MST_PUMP), NONE);
         break;
     case V_SEQ:                                        /* the part's steps: how its pattern runs */
         pg_grp = GR_PAT;
@@ -1165,8 +1143,8 @@ static void open_list_of_pages(void)
         list_rows[ui.list_n++] = PR(R_HDR, GR_MORE, 0, 0);
     for (k = 0; k < pg.nmore; k++)
         list_add(pg.more[k]);
-    if (ui.view == V_PERF)
-        list_add(PR(R_ACT, ACT_PERF_TEST, 0, 0));
+    /* TCLS: the PERF TEST played X0X's own patterns through its sequencer, which is gone; the PERF
+     * screen keeps its live CPU/stats readout. */
     if (ui.view == V_SONG) {
         list_add(PR(R_SMODE, 0, 0, 0));
         list_add(PR(R_SLEN, 0, 0, 0));
@@ -1187,8 +1165,8 @@ static void open_list_of_pages(void)
 static void open_global(void)
 {
     ui.list_n = 0;
-    if (!ui.classic)                               /* T7a: the way into the classic pages, first */
-        list_add(PR(R_ACT, ACT_CLASSIC, 0, 0));
+    /* TCLS: no CLASSIC PATTERNS, BACK TO SONG, SONG mode, CLEAR/COPY PATTERN, CLEAR SONG or bar
+     * insert/delete rows — the X0X pattern and song objects are gone. */
     list_add(PR(R_CLKOUT, 0, 0, 0));
     list_add(PR(R_CLKIN, 0, 0, 0));                /* T11i: the MIDI-in clock source next to CLOCK OUT */
     list_add(PR(R_NOTEOUT, 0, 0, 0));
@@ -1198,16 +1176,12 @@ static void open_global(void)
     list_add(PR(R_KEYLED, 0, 0, 0));
     list_add(PR(R_KEYSOUND, 0, 0, 0));
     list_add(PR(R_PALETTE, 0, 0, 0));
-    list_add(PR(R_SMODE, 0, 0, 0));
     list_add(PR(R_ACT, ACT_SAVE, 0, 0));
     list_add(PR(R_AUTOSAVE, 0, 0, 0));
-    list_add(PR(R_ACT, ACT_CLEAR_PAT, 0, 0));
     list_add(PR(R_ACT, ACT_RESET, 0, 0));
     list_add(PR(R_ACT, ACT_PERF, 0, 0));
     list_add(PR(R_ACT, ACT_ABOUT, 0, 0));
     list_add(PR(R_BATT, 0, 0, 0));
-    if (ui.classic)                                /* T7a: the way back, last (keeps the rows above) */
-        list_add(PR(R_ACT, ACT_CLASSIC, 0, 0));
     put_s(list_title, "GLOBAL");
     ui.list_sel = ui.list_top = 0;
     ui.overlay = O_LIST;
@@ -1266,8 +1240,8 @@ static void clear_lanes(int pat, int part)
 /* part `part` of pattern src onto pattern dst, its lanes too; 0 = done, -1 = lanes did not fit */
 static int copy_part(int dst, int src, int part)
 {
-    pattern_t *d = &proj.pat[dst];
-    const pattern_t *a = &proj.pat[src];
+    pattern_t *d = project_pat(dst);
+    const pattern_t *a = project_pat(src);
     int k, rc = 0;
     if (part < NKIT) {
         d->drum[part] = a->drum[part];
@@ -1308,76 +1282,10 @@ static void clear_part(pattern_t *p, int part)
 }
 
 /* ============================================================ help cards === */
-/* T11h: this is X0X's own "hold one button ~1 s" help, and it stays only inside Classic. Outside
- * Classic the help is SYSTEM 2 (GLO + a button) in ui_help.c, and a hold never shows X0X help. */
-#define HELP_HOLD 900u
-#define HELP_HOLD_SAVE 400u                    /* SAVE is held to copy: its card says what will be copied */
-static int perf_testing(void);
-#define HELP_LINES 6
+/* TCLS: X0X's own "hold one button ~1 s" help (the Classic help) is gone; the reachable help is
+ * the GLO + button card and the HOME cheat sheet (ui_help.c). The labels below name those cards. */
 static const char *const BTN_LABEL[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                           "PLAY / STOP", "REC", "OCT-", "OCT+"};
-
-static int help_lines(int b, const char *l[HELP_LINES])
-{
-    int n = 0, gen = ui.view == V_GEN, kbd = is_303() && ui.rec;
-#define L(s) (l[n++] = (s))
-    switch (b) {
-    case B_FX: L("THE EFFECTS: REVERB, DELAY,"); L("TAPE AND KIT DRIVE"); L("AGAIN: THE NEXT PAGE"); break;
-    case B_SEL: L("THIS SCREEN AS A LIST"); L("IN A LIST: RUN THE ACTION"); L("IN A QUESTION: YES"); break;
-    case B_ENV:
-        if (is_303()) { L("HOLD + KEY: AN ACCENT"); if (kbd) L("WRITING: + OCT: A REST"); }
-        else if (is_drum()) { L("HOLD + WHITE KEY: ACCENT"); L("HOLD + BLACK KEY: LOUD HIT"); }
-        else L("HOLD + KEY: AN ACCENT");
-        break;
-    case B_LFO:
-        L("THE MIXER AND THE MASTER"); L("AGAIN: THE NEXT PAGE");
-        if (ui.view == V_MIX) L("HOME + BLACK KEY: MUTE");
-        if (is_303()) { L("HOLD + KEY: A SLIDE"); if (kbd) L("HOLD + OCT: A TIE"); }
-        break;
-    case B_EDIT: L("THE PART'S SOUND"); L("AGAIN: THE NEXT PAGE"); L("HOLD A STEP + KNOB: P-LOCK");
-        L("HOLD A STEP + SELECT: ITS CHANCE"); break;
-    case B_GLO: L("SETTINGS, SAVE, CLEAR,"); L("FACTORY RESET, PERFORMANCE"); L("AGAIN: CLOSE"); break;
-    case B_HOME:
-        L("THE PATTERN: ALL FIVE PARTS"); L("AGAIN: THE SONG   + SELECT: TEMPO"); L("+ WHITE KEY: PATTERN");
-        if (is_drum() && part_view()) L("+ BLACK KEY: MUTE THE TRACK");
-        L("+ REC: UNDO   + PLAY: REDO"); L("LIST: BACK   QUESTION: NO");
-        break;
-    case B_SAVE: {                                   /* the pattern a copy takes */
-        static char cp[40], cl[32];
-        put_s(put_i(put_s(cp, "+ WHITE KEY: PASTE P"), seq.ppat[PART_909] + 1), " THERE");
-        put_s(put_s(cl, "+ REC: CLEAR "), PART_N[ui.part]);
-        L("TAP: SAVE EVERYTHING"); L(cp); L(ui.pbank ? "    TO P17-32 (+ OCT-: P1-16)" : "    TO P1-16 (+ OCT+: P17-32)"); L(cl);
-        L("+ KNOB: FORGET ITS MOTION"); L(proj.set.autosave_off ? "AUTOSAVE IS OFF" : "STOPPED: SAVES BY ITSELF");
-        break;
-    }
-    case B_ARP:
-        L("TB-3PO: THE 303 LINE"); L("GENERATOR (303A, 303B)");
-        if (gen) { L("OCT+: A NEW LINE"); L("OCT-: MUTATE IT"); }
-        L("AGAIN: THE NEXT PAGE");
-        break;
-    case B_SEQ:
-        L("THE PART'S STEPS: LENGTH, RATE"); L("AGAIN: THE NEXT PAGE"); L("HOLD A STEP + SELECT: ITS CHANCE");
-        break;
-    case B_PLAY: L("START / STOP"); L("HOME + PLAY: REDO"); break;
-    case B_REC:
-        L("RECORD ON / OFF:"); L(is_303() ? "THE KEYS PLAY AND WRITE NOTES" : "BLACK KEYS, KNOB MOVES");
-        L("HOME + REC: UNDO"); L("SAVE + REC: CLEAR PART");
-        break;
-    case B_OCTDN:
-    case B_OCTUP:
-        if (gen) L(b == B_OCTUP ? "A NEW 303 LINE" : "MUTATE THE LINE");
-        else if (kbd) { L("THE KEYBOARD'S OCTAVE"); L("LFO + OCT: A TIE  ENV + OCT: A REST"); }
-        else if (ui.view == V_HOME || ui.view == V_SONG) L(b == B_OCTUP ? "PATTERNS 17-32" : "PATTERNS 1-16");
-        else {
-            L(b == B_OCTUP ? "THE NEXT 16 STEPS" : "THE 16 STEPS BEFORE"); L("PAGES: 1-16 17-32 33-48 49-64");
-            if (is_303()) L("HOLDING A STEP: ITS OCTAVE");
-        }
-        break;
-    default: break;
-    }
-#undef L
-    return n;
-}
 
 /* SAVE held on its own a moment: the pattern is on the clipboard ("P1 COPIED"); a white key pastes it */
 #define COPY_HOLD 250u
@@ -1398,32 +1306,19 @@ static void copy_tick(uint32_t btn, uint32_t keys)
     }
 }
 
+/* TCLS: X0X's "hold one button ~1 s" help was the Classic help; it is gone, so this is off.
+ * The reachable help is the GLO+button card and the HOME cheat sheet (ui_help.c). */
 static void help_tick(uint32_t btn, uint32_t keys)
 {
-    uint32_t now = plat_ms();
-    int i;
-    if (!ui.classic)
-        return;                                      /* T11h: outside Classic the 1 s help is off */
-    if (ui.help) {
-        uint32_t m = 1u << (ui.help - 1);
-        if (btn != m || keys || (int32_t)(ui.turn_t - ui.down_t[ui.help - 1]) > 0 || ui.overlay == O_ASK)
-            ui.help = 0;                                 /* used with something, or let go */
-        return;
-    }
-    if (!btn || (btn & (btn - 1u)) || keys || ui.overlay == O_ASK || perf_testing())
-        return;                                          /* exactly one button, nothing else */
-    for (i = 0; i < NB; i++)
-        if (btn == 1u << i && !(ui.btn_used & btn) && now - ui.down_t[i] >= (i == B_SAVE ? HELP_HOLD_SAVE : HELP_HOLD) &&
-            (int32_t)(ui.turn_t - ui.down_t[i]) <= 0) {
-            ui.help = (uint8_t)(i + 1);
-            ui.btn_used |= btn;                          /* its release now does nothing */
-        }
+    (void)btn;
+    (void)keys;
 }
 
 /* ================================================================ undo === */
-/* HOME + REC undoes, HOME + PLAY redoes (undo.c): everything after the settings is undoable, the
- * sound, the patterns, the song and the knob motion. A step is one gesture: what changed between
- * two quiet moments (UNDO_QUIET ms with nothing touched or held), or a whole recording pass. */
+/* The X0X project diff-undo (undo.c). TCLS: with the pattern pages gone the reachable undo is the
+ * clip undo (studio_undo/redo -> song_io); this inherited machinery still diffs the project after
+ * its settings (the sound and the inherited song/motion regions). A step is one gesture: what
+ * changed between two quiet moments (UNDO_QUIET ms with nothing touched or held). */
 #define UNDO_QUIET 400u
 #define UNDO_OFF __builtin_offsetof(project_t, sound)
 static undo_t undo X0X_POOL;
@@ -1434,7 +1329,7 @@ static void undo_start(void) { undo_init(&undo, (uint8_t *)&proj + UNDO_OFF, und
 
 static void undo_tick(void)
 {
-    if (perf_testing() || (ui.rec && seq.playing) || ui.btn || ui.keys || plat_ms() - ui.act_t < UNDO_QUIET ||
+    if ((ui.rec && seq.playing) || ui.btn || ui.keys || plat_ms() - ui.act_t < UNDO_QUIET ||
         (ui.frame & 3u))
         return;
     undo_commit(&undo);
@@ -1458,36 +1353,20 @@ static void undo_changed(uint32_t off, uint32_t len)
     }
 }
 
-/* what an undo step touched, in words: "909 P3", "SOUND", "SONG", "MOTION" */
+/* what an undo step touched, in words: "SOUND", "SONG", "MOTION" (TCLS: the pattern region is gone) */
 static void undo_name(uint32_t lo, uint32_t hi, char *t)
 {
-    const uint32_t p0 = __builtin_offsetof(project_t, pat), a0 = __builtin_offsetof(project_t, arr),
+    const uint32_t a0 = __builtin_offsetof(project_t, arr),
                    l0 = a0 + __builtin_offsetof(arrange_t, lane);
     uint32_t a = lo + UNDO_OFF, b = hi + UNDO_OFF;
-    if (b < p0) {
+    if (b < a0)
         put_s(t, "SOUND");
-    } else if (a >= p0 && b < a0 && (a - p0) / sizeof(pattern_t) == (b - p0) / sizeof(pattern_t)) {
-        uint32_t pi = (a - p0) / sizeof(pattern_t), x = (a - p0) % sizeof(pattern_t), y = (b - p0) % sizeof(pattern_t);
-        int pa = (int)(x < __builtin_offsetof(pattern_t, bass) ? x / sizeof(dpart_t)
-                       : NKIT + (x - __builtin_offsetof(pattern_t, bass)) / sizeof(bpart_t));
-        int pb = (int)(y < __builtin_offsetof(pattern_t, bass) ? y / sizeof(dpart_t)
-                       : NKIT + (y - __builtin_offsetof(pattern_t, bass)) / sizeof(bpart_t));
-        char *q;
-        if (pa >= NPARTS)
-            pa = NPARTS - 1;                          /* the reserved bytes after the 303s: no part */
-        if (pb >= NPARTS)
-            pb = NPARTS - 1;
-        q = put_s(t, pa == pb ? PART_N[pa] : "PATTERN");
-        put_i(put_s(q, " P"), (int)pi + 1);
-    } else if (a >= p0 && b < a0) {
-        put_s(t, "PATTERNS");
-    } else if (a >= a0 && b < l0) {
+    else if (a >= a0 && b < l0)
         put_s(t, "SONG");
-    } else if (a >= l0) {
+    else if (a >= l0)
         put_s(t, "MOTION");
-    } else {
+    else
         put_s(t, "CHANGES");
-    }
 }
 
 static void do_undo(int redo)
@@ -1516,7 +1395,9 @@ static uint8_t save_wait;
 static void save_project(void)
 {
     int rc;
-    if (seq.playing || seq.req_stop) {
+    /* TCLS: the clip engine owns the transport and the X0X sequencer never plays (seq.playing and
+     * seq.req_stop are always 0), so the save waits on the clip transport and the voices only. */
+    if (live_bridge_transport_playing() || engine_voices_active()) {
         save_wait = 1;
         say("SAVES WHEN STOPPED", 0);
         return;
@@ -1531,13 +1412,9 @@ static void save_project(void)
 /* ============================================================ performance === */
 /* PERF: what the FM-1 measures of itself, a window a second: the clock (the core's cycle counter
  * against the 24 MHz timer), the audio load and its peak, dropouts, stall cycles (when switched on),
- * and each stage's share of the CPU (the engine times them: engine.h ENG_PROF_N). PERF TEST plays
- * three patterns of its own (the factory loop, all four parts, a dense worst case) on the factory
- * sound, 1 s to settle and 3 s measured each, and keeps the table; then it puts back the project's
- * patterns, sound, tempo, mutes, chain and song mode. The project itself is never written. */
-static const char *const PT_N[3] = {"FACTORY LOOP", "ALL FIVE", "WORST CASE"};
-static pattern_t perf_bench[3];
-static sound_t perf_snd;
+ * and each stage's share of the CPU (the engine times them: engine.h ENG_PROF_N). TCLS: the PERF
+ * TEST played X0X's own patterns through its sequencer, which is gone; the screen keeps the live
+ * readout. */
 
 static void perf_window(int force)
 {
@@ -1575,172 +1452,6 @@ static void perf_window(int force)
         for (k = 0; k < 3; k++)
             perf.st[k] = st[k];
     perf.have = 1;
-}
-
-/* the test's patterns: 0 the factory loop (909 kick, clap, open hats; 303 A), 1 all four,
- * 2 everything dense */
-static void perf_build(void)
-{
-    /* the tracks in key order (pattern.h): 909 BD SD LT MT HT RS CP CH OH CR RD, 808 ... CB CY OH CH */
-    enum { DR_BD, DR_SD, DR_LT, DR_MT, DR_HT, DR_RS, DR_CP, DR_CH, DR_OH, DR_CR, DR_RD };
-    enum { D8_BD, D8_SD, D8_LT, D8_MT, D8_HT, D8_RS, D8_CP, D8_CB, D8_CY, D8_OH, D8_CH };
-    int i;
-    for (i = 0; i < 3; i++) {
-        pattern_t *p = &perf_bench[i];
-        dpart_t *a = &p->drum[0], *b = &p->drum[1];
-        pattern_init(p, 0x3B0u + 977u * (uint32_t)i, 0x5A1u + 613u * (uint32_t)i);
-        tb3po_generate(&p->bass[0]);
-        if (i)
-            tb3po_generate(&p->bass[1]);
-        a->hit[DR_BD][0] = 0x1111u;
-        a->hit[DR_CP][0] = 0x1010u;
-        a->hit[DR_OH][0] = 0x4444u;
-        a->accent[0] = 0x0101u;
-        if (i >= 1) {
-            b->hit[D8_BD][0] = 0x1111u;
-            b->hit[D8_CP][0] = 0x1010u;
-            b->hit[D8_CH][0] = 0x1111u;
-            b->hit[D8_OH][0] = 0x4444u;
-            b->hit[D8_CB][0] = 0x0808u;
-        }
-        if (i == 2) {
-            a->hit[DR_SD][0] = 0x1010u;
-            a->hit[DR_CH][0] = 0xFFFFu;
-            a->hit[DR_CR][0] = 0x0001u;
-            a->hit[DR_RD][0] = 0x1111u;
-            a->hit[DR_LT][0] = 0x4000u;
-            a->accent[0] = 0x1111u;
-            b->hit[D8_SD][0] = 0x1010u;
-            b->hit[D8_CH][0] = 0xFFFFu;
-            b->hit[D8_CY][0] = 0x0101u;
-            b->hit[D8_LT][0] = 0x8080u;
-        }
-    }
-}
-
-static void perf_restore(void)
-{
-    int p;
-    seq.pat = perf.pat;
-    for (p = 0; p < NPARTS; p++) {
-        seq.ppat[p] = perf.ppat[p];
-        seq.pcue[p] = 0xFF;
-    }
-    seq.mute = perf.mute;
-    seq.song_on = perf.song_on;
-    seq_chain(&seq, perf.ca, perf.cb);
-    seq.bpm = perf.bpm;
-    engine_apply_sound(&proj.sound);
-    engine_motion_enable(1);
-    engine_guard_enable(1);
-}
-
-static void perf_test_start(void)
-{
-    int p;
-    if (perf.test >= 0 && perf.phase != 4)
-        return;
-    perf.pat = seq.pat;
-    for (p = 0; p < NPARTS; p++)
-        perf.ppat[p] = seq.ppat[p];
-    perf.mute = seq.mute;
-    perf.song_on = seq.song_on;
-    perf.ca = seq.chain_a;
-    perf.cb = seq.chain_b;
-    perf.bpm = seq.bpm;
-    perf_build();
-    if (seq.playing)
-        seq_stop(&seq);
-    perf.test = 0;
-    perf.phase = 0;
-    for (p = 0; p < 3; p++)
-        perf.res_load[p] = perf.res_cps[p] = perf.res_peak[p] = 0;
-}
-
-static void perf_test_abort(void)
-{
-    seq_stop(&seq);
-    perf.phase = 3;
-    perf.test = 0;
-    say("PERF TEST STOPPED", 0);
-}
-
-/* the test, one step a frame (the main loop): the transport changes take a block to land */
-static void perf_test_tick(void)
-{
-    uint32_t now = plat_ms();
-    int p;
-    if (perf.test < 0 || perf.phase == 4)
-        return;
-    switch (perf.phase) {
-    case 0:                                           /* stopped: swap in the test's patterns and sound */
-        if (seq.playing || seq.req_stop)              /* (a pending stop would cancel the start below) */
-            return;
-        for (p = 0; p < NPARTS; p++) {
-            seq.ppat[p] = 0;
-            seq.pcue[p] = 0xFF;
-        }
-        seq.pat = perf_bench;
-        seq.mute = 0;
-        seq.song_on = 0;
-        seq_chain(&seq, 0, 0);
-        seq.bpm = 125.0f;
-        engine_sound_defaults(&perf_snd);
-        engine_apply_sound(&perf_snd);
-        engine_motion_enable(0);
-        engine_guard_enable(0);
-        seq_start(&seq);
-        perf.phase = 1;
-        perf.test_t0 = now;
-        break;
-    case 1:                                           /* settle on the scenario's pattern */
-        if (!seq.playing && now - perf.test_t0 > 200u) {
-            perf_test_abort();
-            return;
-        }
-        if (now - perf.test_t0 >= 1000u && seq.ppat[PART_909] == perf.test) {
-            perf_window(1);
-            perf.phase = 2;
-            perf.test_t0 = now;
-        }
-        break;
-    case 2:                                           /* measure 3 s */
-        if (!seq.playing) {
-            perf_test_abort();
-            return;
-        }
-        if (now - perf.test_t0 >= 3000u) {
-            int k;
-            uint32_t sum = 0;
-            perf_window(1);
-            for (k = 0; k < ENG_PROF_N; k++)
-                sum += perf.stage[k];
-            perf.res_load[perf.test] = (uint16_t)sum;
-            perf.res_peak[perf.test] = perf.peak;
-            perf.res_cps[perf.test] = perf.cps;
-            if (++perf.test < 3) {
-                seq_cue(&seq, perf.test);
-                perf.phase = 1;
-                perf.test_t0 = now;
-            } else {
-                seq_stop(&seq);
-                perf.phase = 3;
-            }
-        }
-        break;
-    default:                                          /* put everything back once stopped */
-        if (seq.playing || seq.req_stop)
-            return;
-        perf_restore();
-        perf.phase = 4;
-        if (perf.test == 3) {
-            perf.test = PT_DONE;
-            say("PERF TEST DONE", 0);
-        } else {
-            perf.test = PT_IDLE;
-        }
-        break;
-    }
 }
 
 static void set_view(int v);
@@ -1814,25 +1525,16 @@ static void run_action(int act, int arg)
         engine_apply_sound(&proj.sound);
         palette_set(proj.set.palette);
         mark_dirty();
-        say("FACTORY SOUND + PATTERNS", 0);
+        say("FACTORY SOUND + SETTINGS", 0);
         break;
     case ACT_PERF:
         set_view(V_PERF);
-        break;
-    case ACT_PERF_TEST:
-        ui.overlay = O_NONE;                          /* the table is under the list */
-        perf_test_start();
-        say("PERF TEST: 15 SECONDS", 0);
         break;
     case ACT_ABOUT:
         q = put_s(t, "X0X " X0X_VERSION "  MEM ");
         q = put_s(put_i(q, project_mem_pct()), "%  CPU ");
         put_s(put_i(q, (int)plat_cpu_pct()), "%");
         say(t, 0);
-        break;
-    case ACT_CLASSIC:                                 /* T7a: swap the audio between the song and X0X */
-        ui.overlay = O_NONE;
-        studio_set_classic(ui.classic ? 0 : 1);
         break;
     default: break;
     }
@@ -2232,20 +1934,9 @@ static void bass_step_key(int white, int down)
     }
 }
 
-static int all_on(int w)                               /* every part plays pattern w */
-{
-    int p;
-    for (p = 0; p < NPARTS; p++)
-        if (seq.ppat[p] != w)
-            return 0;
-    return 1;
-}
-
 static const uint32_t MUTE_MASK[NPARTS] = {(1u << NDRUM) - 1u, ((1u << NDRUM) - 1u) << NDRUM, 1u << MUTE_BASS0,
                                            1u << (MUTE_BASS0 + 1)};
 static int part_muted(int p) { return (seq.mute & MUTE_MASK[p]) == MUTE_MASK[p]; }
-
-static int perf_testing(void) { return perf.test >= 0 && perf.phase != 4; }
 
 /* the held 303 step's note, moved by `by` semitones (KNOB 1: one; OCT: twelve); a rest or a tie
  * becomes a note of its own */
@@ -2265,28 +1956,14 @@ static void held_note_by(int by)
     }
 }
 
-static void mute_part(int p)                         /* a whole part on / off (HOME, MIX's PARTS) */
-{
-    seq.mute = part_muted(p) ? seq.mute & ~MUTE_MASK[p] : seq.mute | MUTE_MASK[p];
-    if (seq.song_rec && seq.playing && seq.song_pos < song()->len) {   /* song recording: this bar too */
-        song_bar_t *b = &song()->bar[seq.song_pos];
-        b->mute = (uint8_t)(part_muted(p) ? b->mute | 1u << p : b->mute & ~(1u << p));
-    }
-    say(part_muted(p) ? "MUTED " : "UNMUTED ", PART_N[p]);
-}
 static int track_muted(int km, int v) { return (int)(seq.vmute >> (km * NDRUM + v) & 1u); }
-static void mute_track(int km, int v)                /* one drum track on / off */
-{
-    seq.vmute ^= 1u << (km * NDRUM + v);
-    say(track_muted(km, v) ? "MUTED " : "UNMUTED ", engine_voice_name(km ? T_808 : T_909, v));
-}
 
 static void key_event(int k, int down)
 {
-    int w = KEY_WHITE[k], bl = KEY_BLACK[k], wp = w >= 0 ? ui.pbank * 16 + w : -1;   /* wp: a white key's pattern */
+    int w = KEY_WHITE[k], bl = KEY_BLACK[k];
     if (!down)
         note_key_up(k);                                /* T7a r2: a release always releases what k began */
-    if (ui.overlay == O_ASK || ui.view == V_PERF || perf_testing())
+    if (ui.overlay == O_ASK || ui.view == V_PERF)
         return;
     if (live_mode()) {                                     /* T3: LIVE owns the keys */
         live_handle_key(k, down);
@@ -2302,98 +1979,35 @@ static void key_event(int k, int down)
     }
     if (ui.view == V_CLIPSET)
         return;                                            /* the clip settings page: the keys are inert */
-    if (!ui.classic && (ui.view == V_PART || ui.view == V_SOUND)) {   /* sound pages: audition the role */
+    if (ui.view == V_PART || ui.view == V_SOUND) {         /* sound pages: audition the role */
         studio_sound_key(k, down);
         return;
     }
-    if (down && w >= 0 && (ui.btn & (1u << B_SAVE))) {     /* SAVE held + white key: paste the pattern here */
-        ui.btn_used |= 1u << B_SAVE;
-        if (all_on(wp))
-            return;
-        if (pattern_used(&proj.pat[wp])) {
-            char t[24];
-            put_s(put_i(put_s(t, "PASTE OVER P"), wp + 1), "?");
-            ask(ACT_COPY, wp, t, "IT HAS NOTES");
-        } else
-            run_action(ACT_COPY, wp);
-        return;
-    }
-    if (ui.view == V_SONG && !(ui.btn & (1u << B_HOME))) {   /* SONG: white = the bar's pattern, black = its mutes */
-        int k = ui.song_sel;
-        if (!down || k >= NSONG || (w < 0 && bl >= NPARTS))
-            return;
-        song_fill(k);
-        if (w >= 0) {
-            int p;
-            for (p = 0; p < NPARTS; p++)
-                song()->bar[k].pat[p] = (uint8_t)wp;
-            if (k + 1 < NSONG)
-                ui.song_sel = (uint8_t)(k + 1);
-        } else {
-            song()->bar[k].mute ^= (uint8_t)(1u << bl);
-        }
-        mark_dirty();
-        return;
-    }
-    if (w >= 0 && (ui.view == V_HOME || (ui.btn & (1u << B_HOME)))) {
-        if (ui.btn & (1u << B_HOME))
-            ui.btn_used |= 1u << B_HOME;
-        if (down) {
-            if (ui.chain_first >= 0 && ui.chain_first != wp) {
-                char t[16], *q = t;
-                seq_chain(&seq, ui.chain_first, wp);
-                q = put_i(q, (ui.chain_first < wp ? ui.chain_first : wp) + 1);
-                *q++ = '-';
-                put_i(q, (ui.chain_first < wp ? wp : ui.chain_first) + 1);
-                say("CHAIN P", t);
-            } else {
-                ui.chain_first = (int8_t)wp;
-                seq_chain(&seq, 0, 0);
-                seq_cue(&seq, wp);
+    /* TCLS: the X0X pattern pages are gone, so no X0X pattern, chain, cue, mute or copy gesture
+     * runs anywhere. The surviving X0X pages are setup / sound pages: the sound pages returned
+     * above, MIX keeps its own part / track pick below, and FX and GLOBAL are inert. */
+    if (ui.view == V_MIX) {
+        if (bl >= 0 && cur_page() == 0) {              /* MIX's PARTS: black keys 1-5 pick the part */
+            if (down && bl < NPARTS) {
+                ui.mixsel = (uint8_t)bl;
+                build_pages();
             }
-        } else if (ui.chain_first == wp) {
-            ui.chain_first = -1;
+            return;
         }
-        return;
-    }
-    if (bl >= 0 && (ui.btn & (1u << B_HOME)) && (drum_mix_page() >= 0 || (ui.view == V_MIX && cur_page() == 0))) {
-        ui.btn_used |= 1u << B_HOME;                  /* MIX + HOME + black key: mute that channel */
-        if (down && drum_mix_page() >= 0)
-            mute_track(drum_mix_page(), bl);
-        else if (down && bl < NPARTS)
-            mute_part(bl);
-        return;
-    }
-    if (bl >= 0 && ui.view == V_MIX && cur_page() == 0) {   /* MIX's PARTS: black keys 1-5 pick the part */
-        if (down && bl < NPARTS) {
-            ui.mixsel = (uint8_t)bl;
-            build_pages();
+        if (bl >= 0 && drum_mix_page() >= 0) {         /* MIX, a drum machine's page: black keys pick the track */
+            if (down) {
+                int km = drum_mix_page();
+                ui.sel[km] = (uint8_t)bl;
+                if (proj.set.keysound || !seq.playing)
+                    engine_drum(km, bl, 0.75f);
+                build_pages();
+            }
+            return;
         }
-        return;
+        return;                                        /* MIX's MASTER page: the keys choose nothing */
     }
-    if (bl >= 0 && drum_mix_page() >= 0) {            /* MIX, a drum machine's page: black keys pick the track */
-        if (down) {
-            int km = drum_mix_page();
-            ui.sel[km] = (uint8_t)bl;
-            if (proj.set.keysound || !seq.playing)
-                engine_drum(km, bl, 0.75f);
-            build_pages();
-        }
+    if (ui.view == V_FX || ui.view == V_GLO)           /* FX and GLOBAL: the keys are inert */
         return;
-    }
-    if (ui.view == V_HOME && bl >= 0) {
-        if (down && bl < NPARTS)
-            mute_part(bl);
-        return;
-    }
-    if (ui.view == V_MIX || ui.view == V_FX)          /* MASTER, FX: the keys choose nothing (they used to */
-        return;                                       /* play the part's steps) */
-    if (is_drum() && bl >= 0 && (ui.btn & (1u << B_HOME))) {   /* HOME + black key: mute that track */
-        ui.btn_used |= 1u << B_HOME;
-        if (down)
-            mute_track(ui.part, bl);
-        return;
-    }
     if (is_drum()) {
         if (bl >= 0)
             drum_key(bl, down);
@@ -2430,7 +2044,7 @@ static void list_enter(void)
     if (r.a == ACT_CLEAR_PAT)
         ask(ACT_CLEAR_PAT, 0, "CLEAR THIS PATTERN?", "ALL FIVE PARTS");
     else if (r.a == ACT_RESET)
-        ask(ACT_RESET, 0, "FACTORY RESET?", "SOUND, PATTERNS, SONG");
+        ask(ACT_RESET, 0, "FACTORY RESET?", "SOUNDS + SETTINGS");
     else if (r.a == ACT_SONG_CLR)
         ask(ACT_SONG_CLR, 0, "CLEAR THE SONG?", 0);
     else
@@ -2449,11 +2063,6 @@ static void close_overlay(void)
 
 static void button_tap(int b)
 {
-    if (perf_testing()) {                             /* the test owns the transport: HOME or PLAY stop it */
-        if ((b == B_HOME || b == B_PLAY) && perf.phase != 3)
-            perf_test_abort();
-        return;
-    }
     if (ui.overlay == O_ASK) {                        /* a question takes SEL or HOME only */
         if (b == B_SEL) {
             ui.overlay = O_NONE;
@@ -2471,14 +2080,9 @@ static void button_tap(int b)
         live_handle_button(b);
         return;
     }
-    /* T7a: outside Classic, HOME and SEQ on an X0X page return to the song home; inside Classic,
-     * HOME on X0X's song arranger (V_SONG) leaves Classic the same way. */
+    /* T7a/TCLS: HOME and SEQ on a surviving X0X page return to the song home. */
     if (b == B_HOME || b == B_SEQ) {
-        if (ui.classic && b == B_HOME && ui.view == V_SONG && ui.overlay == O_NONE) {
-            studio_set_classic(0);
-            return;
-        }
-        if (!ui.classic && ui.view != V_STUDIO && ui.view != V_CLIPSET && ui.view != V_LIVE &&
+        if (ui.view != V_STUDIO && ui.view != V_CLIPSET && ui.view != V_LIVE &&
             ui.view != V_CLIPEDIT && ui.view != V_CLIPMOTION) {
             if (b == B_HOME && ui.overlay != O_NONE) {
                 close_overlay();
@@ -2489,10 +2093,8 @@ static void button_tap(int b)
             return;
         }
     }
-    if (!ui.classic && b == B_ARP) {                   /* T7a D2: TB-3PO is a classic pattern tool */
-        say("CLASSIC: GLO", 0);
+    if (b == B_ARP)                                    /* TCLS: TB-3PO (a Classic pattern tool) is gone */
         return;
-    }
     if (ui.view == V_STUDIO || ui.view == V_CLIPSET || ui.view == V_SOUND) {   /* T7a: the song pages */
         if (studio_handle_button(b))
             return;
@@ -2503,23 +2105,14 @@ static void button_tap(int b)
     }
     switch (b) {
     case B_PLAY:
-        if (ui.btn & (1u << B_HOME)) {               /* HOME + PLAY: redo */
+        if (ui.btn & (1u << B_HOME)) {               /* HOME + PLAY: redo the clip edit */
             ui.btn_used |= 1u << B_HOME;
-            if (ui.classic)
-                do_undo(1);
-            else
-                studio_redo();
+            studio_redo();
             break;
         }
-        if (ui.classic) {                            /* classic: X0X's transport */
-            if (seq.playing)
-                seq_stop(&seq);
-            else {
-                seq.song_start = ui.song_sel < song()->len ? ui.song_sel : 0;
-                seq_start(&seq);
-            }
-        } else if (live_bridge_transport_playing()) {   /* T7a: the clip engine's transport, everywhere */
+        if (live_bridge_transport_playing()) {      /* T7a/TCLS: the clip engine's transport, everywhere */
             live_bridge_transport_stop();
+            engine_all_off();                       /* TCLS: STOP releases every voice, as X0X's did */
             say("STOP", 0);
         } else {
             live_bridge_transport_start();
@@ -2527,19 +2120,13 @@ static void button_tap(int b)
         }
         break;
     case B_REC:
-        if (ui.btn & (1u << B_HOME)) {               /* HOME + REC: undo */
+        if (ui.btn & (1u << B_HOME)) {               /* HOME + REC: undo the clip edit */
             ui.btn_used |= 1u << B_HOME;
-            if (ui.classic)
-                do_undo(0);
-            else
-                studio_undo();
+            studio_undo();
             break;
         }
-        if (ui.btn & (1u << B_SAVE)) {               /* SAVE + REC: clear this part (asks) */
-            char t[24];
+        if (ui.btn & (1u << B_SAVE)) {               /* TCLS: no clear-part (the X0X patterns are gone) */
             ui.btn_used |= 1u << B_SAVE;
-            put_s(put_s(t, "CLEAR "), PART_N[ui.part]);
-            ask(ACT_CLEAR_PART, ui.part, t, "IN THIS PATTERN?");
             break;
         }
         ui.rec = !ui.rec;
@@ -2605,12 +2192,11 @@ static void button_tap(int b)
     case B_OCTUP:
     case B_OCTDN: {
         int up = b == B_OCTUP;
-        if (ui.btn & (1u << B_SAVE)) {               /* SAVE + OCT: the bank a copy goes to */
-            ui.btn_used |= 1u << B_SAVE;
-            ui.pbank = (uint8_t)up;
-            say(up ? "COPY TO P17-32" : "COPY TO P1-16", 0);
-            ui.help = 0;
-        } else if (steps_view() && is_303() && !ui.rec && ui.held_step >= 0) {   /* a held step: its octave */
+        /* TCLS: the X0X step pages are gone, so OCT no longer writes a step (a tie / rest), the
+         * pattern bank or the TB-3PO line on any reachable page. */
+        if (ui.view != V_SEQ && ui.view != V_HOME && ui.view != V_SONG && ui.view != V_GEN)
+            break;
+        if (steps_view() && is_303() && !ui.rec && ui.held_step >= 0) {   /* a held step: its octave */
             held_note_by(up ? 12 : -12);
         } else if (ui.view == V_GEN) {
             bpart_t *bp = &cur_pat()->bass[bidx()];
@@ -2792,7 +2378,7 @@ static void songs_save_tick(uint32_t btn)
 {
     uint32_t now = plat_ms();
     int down = (int)((btn >> B_SAVE) & 1u);
-    if (songs_mode() || live_mode() || ui.classic) {
+    if (songs_mode() || live_mode()) {
         save_down = (uint8_t)down;
         save_holding = 0;
         return;
@@ -2871,7 +2457,7 @@ static void input(void)
     }
     if (btn || keys || btn != ui.btn || keys != ui.keys)
         ui.act_t = plat_ms();                         /* held or changed: being played */
-    if (ui.classic || !(btn & (1u << B_SAVE))) {   /* T8i: SAVE held in STUDIO: only SONGS' feedback */
+    if (!(btn & (1u << B_SAVE))) {                 /* T8i: SAVE held in STUDIO: only SONGS' feedback */
         copy_tick(btn, keys);
         help_tick(btn, keys);
     }
@@ -2885,11 +2471,6 @@ static void input(void)
     build_pages();
     seq.song_rec = (uint8_t)(seq.song_on && ui.rec);  /* SONG mode + REC: the song is being written */
     if (ui.overlay == O_ASK) {                         /* a question: the knobs wait */
-        for (i = 0; i < NE; i++)
-            enc((int)i);
-        return;
-    }
-    if (perf_testing()) {                              /* the test owns the knobs too */
         for (i = 0; i < NE; i++)
             enc((int)i);
         return;
@@ -2941,17 +2522,6 @@ static void input(void)
                         *page_of(V_MIX) = (uint8_t)k;
             }
         }
-    }
-    if ((e = enc(EN_PRESET)) != 0) {             /* PRESETS: a part's screen, that part; else all four */
-        int part = part_view() ? ui.part : PART_909, c = seq_cue_of(&seq, part);
-        int p = (c >= 0 ? c : seq.ppat[part]) + (e > 0 ? 1 : -1);
-        p = p < 0 ? 0 : p >= NPAT ? NPAT - 1 : p;
-        seq_chain(&seq, 0, 0);
-        if (part_view())
-            seq_cue_part(&seq, part, p);
-        else
-            seq_cue(&seq, p);
-        ui.pbank = (uint8_t)(p / 16);                 /* HOME shows the bank it is in */
     }
     for (i = 0; i < 4; i++) {
         if ((e = enc(EN_K1 + (int)i)) == 0)
@@ -3335,16 +2905,6 @@ static void play_icon(int32_t x, int32_t y, uint16_t c)
         }
 }
 
-/* the length of the part on screen, when its keys are steps (0: they are not) */
-static int steps_len(void)
-{
-    if (is_drum())
-        return cur_pat()->drum[ui.part].len;
-    if (is_303() && !ui.rec)
-        return cur_pat()->bass[bidx()].len;
-    return 0;
-}
-
 /* -------------------------------------------------------------- header --- */
 static void draw_header(void)
 {
@@ -3371,14 +2931,8 @@ static void draw_header(void)
         clip_draw_header();
         return;
     }
-    {   /* T7a: in classic mode a CLASSIC chip sits at the left, everything else follows it */
+    {   /* TCLS: no CLASSIC chip; the surviving pages start at the left */
         int32_t lx = 0;
-        if (ui.classic) {
-            int32_t wc = tw(&AF_S, "CLASSIC") + 8;
-            box(0, 2, (int32_t)wc, 15, TOK_RAISE);
-            cv_text(4, vc(&AF_S, 2, 15), &AF_S, "CLASSIC", TOK_MID);
-            lx = wc + 3;
-        }
         if (part_view()) {                            /* the part chip, then where we are */
             int32_t w = tw(&AF_M, PART_N[ui.part]) + 12;
             box(lx, 1, w, 17, part_col());
@@ -3395,31 +2949,6 @@ static void draw_header(void)
             if (drum_mix_page() >= 0)                 /* MIX: 909 / MIX: 808 (whose tracks these are) */
                 x = cv_text(x - 6, vc(&AF_M, 1, 17), &AF_M, drum_mix_page() ? ": 808" : ": 909",
                             PART_COL[drum_mix_page()]) + 6;
-        }
-    }
-    if (ui.view != V_SOUND && (ui.classic || ui.view != V_PART)) {
-    /* the pattern of the part on screen (else the 909's), its cue; in SONG mode the bar. T7a r2:
-     * a sound page outside Classic draws no X0X "P1" marker. */
-        int part = part_view() ? ui.part : PART_909, cue = seq_cue_of(&seq, part);
-        int32_t px = x + 6 > 132 ? x + 6 : 132;       /* T7a: the CLASSIC chip widens the left side */
-        if (seq.song_on) {
-            b[0] = 'S';
-            put_i(b + 1, (seq.playing ? seq.song_pos : ui.song_sel) + 1);
-            x = cv_text(px, vc(&AF_M, 1, 17), &AF_M, b, seq.song_rec ? RGB(255, 90, 80) : C_AMB);
-        } else {
-            b[0] = 'P';
-            put_i(b + 1, seq.ppat[part] + 1);
-            x = cv_text(px, vc(&AF_M, 1, 17), &AF_M, b, C_WHITE);
-        }
-        if (cue >= 0 && cue != seq.ppat[part] && !seq.song_on) {
-            b[0] = '>';
-            put_i(b + 1, cue + 1);
-            cv_text(x + 2, vc(&AF_S, 1, 17), &AF_S, b, (ui.frame & 16u) ? C_WHITE : C_GRAY);
-        } else if (seq.chain_a != seq.chain_b && !seq.song_on) {
-            cv_text(x + 3, vc(&AF_S, 1, 17), &AF_S, "CHN", C_AMB);
-        } else if (steps_view() && steps_len() > 16) {   /* the 16 steps the keys show */
-            put_i(put_s(put_i(b, ui.spage * 16 + 1), "-"), ui.spage * 16 + 16);
-            cv_text(x + 4, vc(&AF_S, 1, 17), &AF_S, b, C_GRAY);
         }
     }
     {   /* following an external clock, the measured tempo wanders a little from clock to clock: the
@@ -3607,9 +3136,9 @@ static void draw_home(int band)
             int in_chain = seq.chain_a != seq.chain_b &&
                            c >= (seq.chain_a < seq.chain_b ? seq.chain_a : seq.chain_b) &&
                            c <= (seq.chain_a < seq.chain_b ? seq.chain_b : seq.chain_a);
-            box(x, 3, 12, 18, pattern_used(&proj.pat[c]) ? C_DIM : C_LINE);
+            box(x, 3, 12, 18, pattern_used(project_pat(c)) ? C_DIM : C_LINE);
             for (p = 0; p < NPARTS; p++) {               /* a line per part with notes here: bright where it */
-                int used = part_used(&proj.pat[c], p);   /* plays now; a part playing it empty, a faint one */
+                int used = part_used(project_pat(c), p);   /* plays now; a part playing it empty, a faint one */
                 if (used || seq.ppat[p] == c)
                     rbox(x + 2, 5 + p * 3, 8, 2, 1, seq.ppat[p] == c ? (used ? PART_COL[p] : dim(PART_COL[p], 4))
                                                                      : dim(PART_COL[p], 7));
@@ -3835,21 +3364,6 @@ static void draw_perf(int band)
                 put_s(q, ": 2ND TIMED OUT");
             text_r(236, 6, &AF_S, t, plat_cpu2_gave_up() ? RGB(255, 80, 60) : C_GRAY);
         }
-        if (perf.test >= 0) {
-            int done = perf.phase == 4;
-            q = put_s(t, done ? "PERF TEST DONE" : "PERF TEST ");
-            if (!done) {
-                q = put_i(q, perf.test + 1);
-                q = put_s(q, "/3  ");
-                put_s(q, PT_N[perf.test < 3 ? perf.test : 2]);
-            }
-            cv_text(4, 24, &AF_S, t, done ? C_HI : C_AMB);
-            if (!done)
-                cv_text(4, 46, &AF_S, "HOME OR PLAY: STOP", C_DIM);
-            else
-                cv_text(4, 46, &AF_S, "SHARE OF THE CPU (PEAK)  CYCLES / SAMPLE", C_DIM);
-            return;
-        }
         q = put_s(t, "LOAD ");
         q = put_i(q, perf.load);
         q = put_s(q, "%  PEAK ");
@@ -3876,33 +3390,6 @@ static void draw_perf(int band)
         }
         return;
     }
-    if (perf.test >= 0) {                             /* the table, so far */
-        for (k = 0; k < 3; k++) {
-            int y = k * 14 + 2;
-            cv_text(4, y, &AF_S, PT_N[k], perf.test == k && perf.phase != 4 ? C_AMB : C_GRAY);
-            if (!perf.res_load[k])
-                continue;
-            q = put_pct10(t, perf.res_load[k]);
-            q = put_s(q, " (");
-            q = put_i(q, perf.res_peak[k]);
-            put_s(q, "%)");
-            cv_text(112, y, &AF_S, t, C_WHITE);
-            if (perf.res_cps[k]) {
-                put_i(t, perf.res_cps[k]);
-                text_r(236, y, &AF_S, t, C_HI);
-            }
-        }
-        if (perf.phase == 4)
-            cv_text(4, 50, &AF_S, "SEL: RUN IT AGAIN", C_DIM);
-        if (plat_irq_stack_size()) {                 /* the interrupts' stack, the deepest so far (after the test too) */
-            q = put_s(t, "IRQ STACK ");
-            q = put_i(q, (int)plat_irq_stack_used());
-            q = put_s(q, " / ");
-            put_s(put_i(q, (int)plat_irq_stack_size()), " B");
-            text_r(236, 50, &AF_S, t, plat_irq_stack_used() * 4u > plat_irq_stack_size() * 3u ? RGB(255, 80, 60) : C_GRAY);
-        }
-        return;
-    }
     for (k = 0; k < ENG_PROF_N; k++) {                /* each stage's share of the CPU (3 x 3) */
         int x = (k % 3) * 78 + 4, y = (k / 3) * 12;
         cv_text(x, y, &AF_S, SN[k], C_GRAY);
@@ -3918,7 +3405,6 @@ static void draw_perf(int band)
     q = put_s(t, engine_guard_active() ? "GUARD ON  " : "GUARD ");   /* the overload guard: engaged, times */
     put_s(put_i(q, (int)eng_guard_count), "x");
     text_r(236, 55, &AF_S, t, engine_guard_active() ? C_AMB : C_DIM);
-    cv_text(4, 55, &AF_S, "SEL: RUN PERF TEST", C_DIM);
 }
 
 /* the readout: the knob being turned, large, across the bottom band */
@@ -4037,65 +3523,36 @@ static void draw_ask(int band)
     }
 }
 
-static void draw_help(int band)
-{
-    const char *l[HELP_LINES];
-    int n = help_lines(ui.help - 1, l), k;
-    uint16_t c = part_col();
-    if (band == 0) {
-        box(6, 4, 228, 24, c);
-        text_c(120, vc(&AF_M, 4, 24), &AF_M, BTN_LABEL[ui.help - 1], C_BLACK);
-    }
-    for (k = 0; k < n; k++) {                            /* evenly spaced; a line across the bands in both */
-        int32_t y = 34 + k * 18 - band * BAND_H;
-        if (y > -18 && y < BAND_H)
-            text_c(120, y, &AF_S, l[k], C_WHITE);
-    }
-}
-
 #ifdef X0X_HOST
-/* every card, on every kind of screen, fits the screen: 1 = yes (prints the first that does not).
- * T11h: it also walks Classic on and off (the footer's two discovery lines) and checks the new
- * ui_help.c tables. */
+/* every footer, on every kind of screen, fits the screen: 1 = yes (prints the first that does not).
+ * TCLS: no Classic pass; every view is the clip engine's. */
 static int help_fits(void)
 {
     static const uint8_t views[] = {V_PART, V_SEQ, V_HOME, V_SONG, V_GEN, V_FX, V_MIX, V_LIVE};
-    const char *l[HELP_LINES];
     ui_t keep = ui;
     uint8_t keep_any = any_button;
-    int b, p, v, kb, cl, n, k, ok = 1;
+    int b, p, v, kb, ok = 1;
     for (v = 0; v < (int)sizeof views; v++)
         for (p = 0; p < NPARTS; p++)
             for (kb = 0; kb < 2; kb++)
-                for (cl = 0; cl < 2; cl++)
-                    for (b = 0; b < NB; b++) {
-                        const char *fa, *fb, *fc;
-                        int32_t w;
-                        ui.view = views[v];
-                        ui.part = (uint8_t)p;
-                        ui.rec = (uint8_t)kb;
-                        ui.classic = (uint8_t)cl;
-                        ui.overlay = (uint8_t)(b % 3);           /* none, a list, a question */
-                        ui.gen_stale[0] = (uint8_t)(b & 1);
-                        ui.rec = (uint8_t)(b & 2);
-                        any_button = (uint8_t)(b != 0);
-                        footer_text(&fa, &fb, &fc);
-                        w = 4 + tw(&AF_S, fa) + (fb ? FOOT_GAP + tw(&AF_S, fb) : 0) + (fc ? FOOT_GAP + tw(&AF_S, fc) : 0);
-                        if (w > 236) {
-                            if (ok)
-                                printf("footer too wide: \"%s / %s / %s\" (%d px)\n", fa, fb ? fb : "", fc ? fc : "", (int)w);
-                            ok = 0;
-                        }
-                        n = help_lines(b, l);
-                        if (n < 1 || n > HELP_LINES)
-                            ok = 0;
-                        for (k = 0; k < n; k++)
-                            if (tw(&AF_S, l[k]) > 224) {
-                                if (ok)
-                                    printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&AF_S, l[k]));
-                                ok = 0;
-                            }
+                for (b = 0; b < NB; b++) {
+                    const char *fa, *fb, *fc;
+                    int32_t w;
+                    ui.view = views[v];
+                    ui.part = (uint8_t)p;
+                    ui.rec = (uint8_t)kb;
+                    ui.overlay = (uint8_t)(b % 3);           /* none, a list, a question */
+                    ui.gen_stale[0] = (uint8_t)(b & 1);
+                    ui.rec = (uint8_t)(b & 2);
+                    any_button = (uint8_t)(b != 0);
+                    footer_text(&fa, &fb, &fc);
+                    w = 4 + tw(&AF_S, fa) + (fb ? FOOT_GAP + tw(&AF_S, fb) : 0) + (fc ? FOOT_GAP + tw(&AF_S, fc) : 0);
+                    if (w > 236) {
+                        if (ok)
+                            printf("footer too wide: \"%s / %s / %s\" (%d px)\n", fa, fb ? fb : "", fc ? fc : "", (int)w);
+                        ok = 0;
                     }
+                }
     ok = help_cards_fit() && ok;                           /* T11h: the sheet rows and the new cards */
     ui = keep;
     any_button = keep_any;
@@ -4111,12 +3568,8 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
     if (help_footer(a, b, c))                          /* T11h: the sheet / a card is up */
         return C_GRAY;
     if (!any_button) {
-        if (ui.classic) {                              /* T11h: X0X's own help still lives in Classic */
-            *a = "HOLD ANY BUTTON: WHAT IT DOES";
-        } else {                                       /* T11h: outside Classic, the ways in */
-            *a = "GLO: A CARD";
-            *b = "HOLD HOME: COMBOS";
-        }
+        *a = "GLO: A CARD";                            /* T11h: the ways in */
+        *b = "HOLD HOME: COMBOS";
         return C_GRAY;
     }
     if (ui.overlay == O_ASK) {
@@ -4132,8 +3585,8 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         return studio_footer(a, b, c);
     } else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {
         return clip_footer(a, b, c);
-    } else if (ui.view == V_SOUND || (!ui.classic && ui.view == V_PART)) {
-        return studio_footer_sound(a, b, c);        /* T7a: sound-only pages */
+    } else if (ui.view == V_SOUND || ui.view == V_PART) {
+        return studio_footer_sound(a, b, c);        /* T7a/TCLS: sound-only pages */
     } else if (ui.view == V_HOME) {
         *a = "WHITE: PATTERN";
         *b = "TWO: CHAIN";
@@ -4174,15 +3627,6 @@ static void draw_footer(void)
 {
     const char *a, *b, *c;
     uint16_t col = footer_text(&a, &b, &c);
-    if (ui.classic) {                                  /* T7a: how out of the classic pages */
-        if (ui.view == V_SONG) {
-            a = "GLO: BACK TO SONG";
-            b = c = 0;
-        } else {
-            b = "GLO: BACK TO SONG";
-            c = 0;
-        }
-    }
     segs(4, vc(&AF_S, FOOT_Y, 9), &AF_S, col, FOOT_GAP, a, b, c, 0);
 }
 
@@ -4196,8 +3640,6 @@ static void draw_main(void)
         cv_band(band * BAND_H, BAND_H);
         if (help_card_active() || help_shift_active())
             help_draw(band);                           /* T11h: the GLO card / the HOME sheet */
-        else if (ui.help)
-            draw_help(band);
         else if (ui.overlay == O_ASK)
             draw_ask(band);
         else if (ui.overlay == O_LIST)
@@ -4220,8 +3662,8 @@ static void draw_main(void)
             clip_draw(band);                                 /* T7b: the clip editors */
         else if (ui.view == V_SOUND)
             studio_draw_sound(band);
-        else if (!ui.classic && ui.view == V_PART)
-            studio_draw_part(band);                      /* T7a: sound-only, no X0X step grid */
+        else if (ui.view == V_PART)
+            studio_draw_part(band);                      /* T7a/TCLS: sound-only, no X0X step grid */
         else if (is_drum())
             draw_drum(band);
         else
@@ -4486,7 +3928,7 @@ static void leds(void)
             int pp = (bar ? sg->bar[ui.song_sel].pat[PART_909] : seq.ppat[PART_909]) - ui.pbank * 16;
             int cu = seq_cue_of(&seq, PART_909) - ui.pbank * 16;
             for (i = 0; i < 16; i++)                  /* patterns with notes */
-                if (pattern_used(&proj.pat[ui.pbank * 16 + i]))
+                if (pattern_used(project_pat(ui.pbank * 16 + i)))
                     d |= 1u << WHITE_KEY[i];
             if (pp >= 0 && pp < 16 && (ui.view == V_HOME || bar))
                 k |= 1u << WHITE_KEY[pp];
@@ -4566,11 +4008,9 @@ void ui_init(void)
     corners_init();
     ui.view = V_STUDIO;                                /* T7a: STUDIO opens on the song home */
     ui.prev_view = V_STUDIO;
-    ui.classic = 0;
     ui.part = PART_909;
     ui.held_step = -1;
     ui.hold_step = -1;
-    ui.chain_first = -1;
     ui.touched = -1;
     ui.overlay = O_NONE;
     palette_set(proj.set.palette);
@@ -4592,12 +4032,12 @@ static void autosave(void)
     uint32_t now = plat_ms();
     if (live_mode() || live_holding())                /* T3: never write flash while LIVE is active */
         return;
-    if (save_wait && !seq.playing && !seq.req_stop && !live_bridge_transport_playing()) {   /* SAVE while playing: now */
+    if (save_wait && !live_bridge_transport_playing() && !engine_voices_active()) {   /* SAVE while playing: now */
         save_project();
         return;
     }
-    if ((!ui.dirty && !song_io_wants_save()) || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop ||
-        live_bridge_transport_playing() || ui.rec || perf_testing() ||
+    if ((!ui.dirty && !song_io_wants_save()) || (proj.set.autosave_off && !ui.last_autosave) ||
+        live_bridge_transport_playing() || engine_voices_active() || ui.rec ||
         ui.overlay == O_ASK || now - ui.act_t < AUTOSAVE_QUIET || (ui.saved_t && now - ui.saved_t < AUTOSAVE_GAP))
         return;
     ui.saved_t = now;
@@ -4625,8 +4065,7 @@ void ui_frame(void)
     clip_tick();                                    /* T7b: the record-close timer, the toast */
     undo_tick();
     autosave();
-    perf_test_tick();
-    if (ui.view == V_PERF && !perf_testing())
+    if (ui.view == V_PERF)
         perf_window(0);
     for (i = 0; i < NPARTS; i++)
         eng_peak[i] = (uint16_t)(eng_peak[i] - (eng_peak[i] >> 3));

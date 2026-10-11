@@ -2,14 +2,7 @@
 # the six punches and the upper keys into role mutes; a tap latches, a hold is momentary; HOME+FX
 # resets every effect; leaving LIVE releases every effect and clears every mute.
 wait 300
-# T7a: build a 909 pattern and a 303 line in the classic pages, then seed the song's clips from them.
-tap GLO
-tap SEL
-tapkey w0
-turn ALGO 2
-tapkey w0
-turn ALGO -3
-songseed
+# TCLS: the boot song is the Starter template, so DRUMS and BASS have clips.
 # enter LIVE and start the transport with two clips playing.
 press PLAY
 wait 700

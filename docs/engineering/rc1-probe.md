@@ -64,21 +64,22 @@ a fixed 909/808 pattern (16ths, accents) and two TB-3PO 303 lines with slides, e
 same LIVE path the UI uses (live entry, clip launches, the PLAY-layer keys). A run cannot make the
 project dirty, so it cannot autosave.
 
+TCLS: the old level 1 (the X0X sequencer baseline) and its single-core twin, level 6, are gone — the
+clip engine is the only audio path. Levels now start at 2.
+
 | n | What it plays | FM6 voices | Guard |
 |---|---|---|---|
 | 0 | stops the stress and puts the sequencer and the view back | – | restored on |
-| 1 | the X0X baseline: 909 + 808 + 303 A + 303 B, the sequencer's own path | – | on |
 | 2 | LIVE: a busy clip on DRUMS/BASS/LEAD/FX, **CHORDS a held 4-note FM6 chord**, FX on NOISE | **4** | on |
 | 3 | level 2 plus every wired punch FX (T10i has not wired any yet, so it equals 2 for now) | 4 | on |
 | 4 | level 2 with the FM6 cap raised to `cap` (default 6; `cap` 6 or 8) | `cap` | **off** (the guard would shed FM6 to two voices, which is not what "the cap" means) |
 | 5 | level 2 with **core 1 forced off** (T5perf: the single-core numbers) | 4 | on |
-| 6 | level 1 with **core 1 forced off** (T5perf) | – | on |
 
 Level 2 holds exactly **four** notes on purpose: a release build's `ENG_FM6_VOICES` is 4, so level 2
 measures what a release build would actually play, even though the debug array is 8. Level 4 is the
-headroom experiment. Levels 5 and 6 (T5perf) are levels 2 and 1 with the core-1 job kept on core 0, so
-RC1 can report the single-core numbers a unit that cannot run core 1 would see; they do not stop
-core 1 (no ISR race), they just do not hand it work, and `ED_STATS`' `cpu2` field reads 0 for them.
+headroom experiment. Level 5 (T5perf) is level 2 with the core-1 job kept on core 0, so RC1 can report
+the single-core numbers a unit that cannot run core 1 would see; it does not stop core 1 (no ISR
+race), it just does not hand it work, and `ED_STATS`' `cpu2` field reads 0 for it.
 
 ## Running the probe
 

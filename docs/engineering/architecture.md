@@ -90,9 +90,11 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 | Undo ring | −12,240 |
 | T7b clip editor: the clip engine's per-role playing copy and launch staging (`clip_t play[5]` + `next[5]`) | −5,280 |
 | FM6 + NOISE state, moved to the pool if `.bss` is tight | about −3,000 |
-| **Left after the 8 KiB spare** | **about 18 KB** |
+| TCLS: the delay line 1.0 s → 0.75 s (33,075 int16) | **+22,050** freed |
+| TCLS: X0X's project pattern bank removed (its diff-undo shadow shrinks) | **+16,896** freed |
+| **Left after the 8 KiB spare** | **about 49 KB** |
 
-Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new large buffer goes in the pool through X0X's pool mechanism. Any task that adds more than 1 KB of RAM must update this table.
+Owner-visible effect: the longest delay time is 0.75 s (it was 1.0 s, and 2.0 s before T3). Every new large buffer goes in the pool through X0X's pool mechanism. Any task that adds more than 1 KB of RAM must update this table.
 
 **Measured after T3** (`make fw` on deltron): the POOL is **254,636 B of 344,064** (was 328,052 B) and `.data+.bss` is **95,124 B of 98,304** (was 95,044 B). The 1.0 s delay line freed ~86 KiB; the LIVE `song_t` (14,352 B) and the clip engine (440 B), both in the `.pool`, take ~15 KiB of it back, leaving roughly 89 KiB of pool against the 8 KiB spare.
 
@@ -103,6 +105,8 @@ Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new 
 **Measured after T11i** (`make fw` and `make fw-debug` on deltron): the release POOL is **328,304 B of 344,064** (**15,760 B** spare) and `.data+.bss` is **95,968 B of 98,304**; the debug POOL is **330,096 B of 344,064** (**13,968 B** spare) and `.data+.bss` is **96,068 B**. T11i's MIDI rings — the 256-slot input ring with its arrival stamps and the 256-slot output ring, 3,072 B — are in the pool (the input ring was 64 slots in `.bss`; the extra `midi_live` state and the sample clock, about 350 B, are the only `.bss` growth, so `.bss` actually fell). Both builds keep the 8 KiB pool spare. The MIDI producers stamp each packet with `plat_sample_now`, whose publish/read (`core/midi/sample_clock.h`) is a seqlock a reader never waits on: `render_block` sets `in_audio` before publishing, so the TIMER5 producer defers, and a reader that preempted the writer uses the writer's previous complete pair instead of spinning.
 
 **Measured after T7b + T11i** (`make fw` and `make fw-debug` on deltron): the release POOL is **333,692 B of 344,064** (**10,372 B** spare, over the 8 KiB requirement) and `.data+.bss` is **96,228 B of 98,304**; the debug POOL is **335,484 B of 344,064** (**8,580 B** spare) and `.data+.bss` is **96,344 B**. T7b's per-role `play[]`/`next[]` clip copies in the clip engine (two `clip_t` per role, ~8.8 KB) are the pool growth; T11i's rings and state are as above.
+
+**Measured after TCLS** (`make fw` and `make fw-debug` on deltron): the release POOL is **294,748 B of 344,064** (**49,316 B** spare) and `.data+.bss` is **75,748 B of 98,304**; the debug POOL is **296,540 B of 344,064** (**47,524 B** spare) and `.data+.bss` is **75,848 B**. TCLS/ADR-0004 frees **38,944 B** of pool (~39 KB) and 20,480 B of `.data+.bss`: the delay line `dly_buf` shrinks from 1.0 s to **0.75 s** (44,100 → 33,075 int16, **22,050 B**) and `project_t` loses its 32-pattern bank (16,896 B), which shrinks the X0X diff-undo shadow in the pool by the same 16,896 B; `.data+.bss` loses the pattern bank itself. X0X's project patterns are no longer stored, loaded or mapped (a first boot builds the **Starter** song from `song_templates.c`), and the X0X project region on the flash is left untouched.
 
 ## Invariant: no hung notes (2026-10-11)
 Reviews found hung notes in T3, T7a and T7a's re-review, each through a different view or mode change. The rule:

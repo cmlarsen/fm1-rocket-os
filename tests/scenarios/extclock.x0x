@@ -1,13 +1,5 @@
 # External MIDI clock: start, 24 ppqn at 140 BPM (787.5 samples = 17.857 ms per tick), stop.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
-tapkey b0
-tapkey w0
-tapkey w4
-tapkey w8
-tapkey w12
 midi FA 00 00
 midi F8 00 00
 wait 18

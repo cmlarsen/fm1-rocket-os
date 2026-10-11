@@ -1,0 +1,26 @@
+# TCLS r1: MIX. HOME + a black key used to mute a dead X0X part / drum track. It must do nothing now;
+# the black keys still pick the MIX part / track (stereo.x0x).
+wait 300
+tap LFO
+expect view 4
+expect mute 0
+expect vmute 0
+press HOME
+tapkey b0
+expect mute 0                # the HOME + black key would have muted part 0
+expect vmute 0
+release HOME
+expect view 10
+# a drum machine's page: the black keys still pick the track, and HOME + one no longer mutes it
+tap LFO
+expect view 4
+turn ALGO 1
+expect part 1
+expect vmute 0
+press HOME
+tapkey b3
+expect vmute 0
+expect mute 0
+release HOME
+expect view 10
+dump mix_home_mute.json

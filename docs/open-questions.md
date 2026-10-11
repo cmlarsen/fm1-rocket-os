@@ -7,13 +7,13 @@ These questions are still unresolved. When one is answered, record the answer in
 - **FM sound design.** We keep the inherited engine and leave it out of the performance path. See [ADR-0003](decisions/0003-sound-design-scope.md).
 - **Live playing.** A long press on PLAY enters LIVE, and SEL toggles between PADS and PLAY. See the [interaction model](product/interaction-model.md#live-mode).
 
-## Resolved 2026-10-11 (T7a)
+## Resolved 2026-10-11 (T7a, extended by TCLS)
 - **LIVE → STUDIO transport (was #6).** The song is the edited object and the clip engine is the
-  only audio source in every normal view, so **playing clips carry on across mode changes**: LIVE
-  entered from the song home keeps what is playing and leaving keeps it playing. The classic X0X
-  pattern pages (GLOBAL → Classic patterns) hand the audio to X0X's sequencer instead; leaving
-  them gives it back. See the [interaction model](product/interaction-model.md#classic-patterns).
-  Extended by a coordinator decision for the owner to confirm.
+  only audio source in every view, so **playing clips carry on across mode changes**: LIVE entered
+  from the song home keeps what is playing and leaving keeps it playing. T7a first put X0X's pattern
+  pages behind GLOBAL → Classic patterns; **TCLS removed them entirely** ([ADR-0004](decisions/0004-remove-classic-shorten-delay.md)),
+  so there is no third context and no hand-over. See the
+  [interaction model](product/interaction-model.md#classic-patterns-removed).
 
 ## Resolved 2026-10-11 (plan review)
 - **Build host.** deltron.local: x86_64, Ubuntu 26.04, glibc 2.43, 12 cores, 30 GB RAM, 49 GB free, with Docker, gcc, rsync and qemu. SSH works as `caleb`. KVM doesn't speed up the pi32v2 emulator, because QEMU has to emulate the instructions in software.

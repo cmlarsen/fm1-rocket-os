@@ -52,11 +52,15 @@ typedef struct {
 typedef struct {
     settings_t set;
     sound_t sound;
-    pattern_t pat[NPAT];
     arrange_t arr;
 } project_t;
 
 extern project_t proj;
+
+/* TCLS: X0X's project pattern bank is no longer stored (ADR-0004). The inherited pattern-editor
+ * code is unreachable now, but a few paths still name a pattern; they share one scratch pattern,
+ * which is why this is not the 32-pattern bank. `i` is ignored. */
+pattern_t *project_pat(int i);
 
 void project_defaults(void);
 int project_load(void);                  /* 0 = loaded; else defaults are in place */

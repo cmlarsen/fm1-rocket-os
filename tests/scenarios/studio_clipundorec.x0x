@@ -1,6 +1,7 @@
 # T7b: a record pass on an empty slot is one undo entry, and the creation is inside it: HOME + REC
 # leaves the slot empty again and stops the role.
 wait 300
+newsong 0
 cursor 1 0
 tap REC
 key w0 down

@@ -1,0 +1,21 @@
+# TCLS r1: FX is a surviving setup page, not an X0X pattern page. SAVE + a white key used to paste
+# the pattern here ("P1 PASTED TO P3": ACT_COPY on the dead scratch pattern, mark_dirty). It must do
+# nothing now: the project stays clean and no pattern state moves.
+wait 300
+tap FX
+expect view 3
+expect pattern 1
+expect cue 0
+expect lanes 0
+expect dirty 0
+press SAVE
+tapkey w2
+expect dirty 0                 # the paste would have marked the project dirty
+expect pattern 1
+expect cue 0
+expect lanes 0
+release SAVE
+expect pattern 1
+expect cue 0
+expect lanes 0
+dump fx_save_paste.json

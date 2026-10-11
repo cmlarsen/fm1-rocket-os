@@ -1,0 +1,16 @@
+# TCLS r1: FX. HOME + a white key used to chain / cue an X0X pattern (and lit a "P1 >N" pattern chip
+# in the inherited header). No chain, cue or chip may run here now.
+wait 300
+tap FX
+expect view 3
+expect pattern 1
+expect cue 0
+press HOME
+tapkey w3
+expect cue 0                 # the chain / cue would have moved the part's cue to P4
+expect pattern 1
+release HOME
+expect view 10               # HOME returns to the song home
+expect cue 0
+expect pattern 1
+dump fx_home_chain.json

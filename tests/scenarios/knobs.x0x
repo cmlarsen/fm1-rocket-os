@@ -1,8 +1,9 @@
-# Knob acceleration: a few clicks are exact at any speed, a quick spin sweeps. 909 BD Tune (0..127) starts at 34.
+# Knob acceleration: a few clicks are exact at any speed, a quick spin sweeps. On the DRUMS sound
+# page, 909 BD Tune (0..127) starts at 34.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
+# TCLS: EDIT opens the cursor role's sound page (DRUMS -> the 909; the selected track is BD).
+tap EDIT
+expect view 1
 expect sound0.0.0 34
 # slow, 80 ms a detent: one step each
 turn K1 5 80
@@ -21,10 +22,9 @@ expect sound0.0.0 0
 wait 500
 turn K1 2 100
 expect sound0.0.0 2
-# tempo (wide range): slow is 1 BPM a detent; a quick spin, after its first three, 16
-press HOME
-turn SELECT 3 100
-expect tempo 128
-turn SELECT 4 10
-release HOME
-expect tempo 147
+# the wide-range TEMPO knob on GLOBAL's PERFORM page: a slow turn is one BPM a detent
+tap HOME
+tap GLO
+expect view 5
+turn K1 5 100
+expect tempo 130

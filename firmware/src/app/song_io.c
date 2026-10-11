@@ -56,7 +56,7 @@ static int first_free_slot(void)
     return -1;
 }
 
-void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred)
+void song_io_boot(uint16_t bpm_x10, int preferred)
 {
     int slot;
     song_store_init(&store, &FB);
@@ -78,13 +78,10 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred)
         cur_slot = 0;
         live_bridge_song_baseline(0);
     } else {
-        live_bridge_rebuild(pats);                      /* one-time seed: the project, when no song */
-        if (bpm_x10 < 200u)
-            bpm_x10 = 200u;
-        else if (bpm_x10 > 3000u)
-            bpm_x10 = 3000u;
-        song()->bpm_x10 = bpm_x10;
-        cur_slot = -1;                                  /* T8i: still the project mapping */
+        /* TCLS: no stored song and no project mapping any more — the first boot (or an empty store)
+         * starts from the Starter template, which clamps the tempo itself. */
+        song_template_starter(song(), bpm_x10, SONG_TMPL_DEFAULT_KEY);
+        cur_slot = -1;
         dirty = 1;                                      /* it must be written back */
     }
     ready = 1;

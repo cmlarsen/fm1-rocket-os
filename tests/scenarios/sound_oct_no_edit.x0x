@@ -1,0 +1,25 @@
+# TCLS r1: a sound page's keys audition; the X0X step editor is gone. On a 303's sound page with
+# REC on, LFO + OCT used to write a tie and ENV + OCT a rest into the shared scratch pattern
+# (mark_dirty). Nothing may change now: the step stays a rest and the project stays clean.
+wait 300
+cursor 1 0
+tap EDIT
+expect view 1
+expect part 2
+expect gate0.0 0
+expect dirty 0
+tap REC
+expect rec 1
+press LFO
+tap OCT+
+expect gate0.0 0
+expect dirty 0
+release LFO
+press ENV
+tap OCT-
+expect gate0.0 0
+expect dirty 0
+release ENV
+tap REC
+expect rec 0
+dump sound_oct_no_edit.json
