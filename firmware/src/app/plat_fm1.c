@@ -99,6 +99,29 @@ void plat_midi_out(uint32_t pkt) { midi_out_event(pkt); }
 int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? st_load(obj, dst, max) : -1; }
 int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
 
+/* T6i: the song store's flash backend. The region 0xA0000..0xDBFFF is pinned here (FL_SONG_OK);
+ * st_erase/st_prog add X0X's own FL_STORE_OK check and the IRQ-off / audio-silence path, so the
+ * song writes are the same kind of flash access as a project save. Offsets are absolute.
+ * Erase and program are refused when the flash was not identified at boot (as plat_store_*). */
+int plat_song_read(uint32_t off, void *dst, uint32_t n)
+{
+    if (!flash_ok || !FL_SONG_OK(off, n))
+        return -1;
+    return st_read(off, dst, n);
+}
+int plat_song_erase(uint32_t off)
+{
+    if (!flash_ok || !FL_SONG_OK(off, PLAT_SONG_SECTOR) || (off & (PLAT_SONG_SECTOR - 1u)))
+        return -1;
+    return st_erase(off);
+}
+int plat_song_program(uint32_t off, const void *src, uint32_t n)
+{
+    if (!flash_ok || !FL_SONG_OK(off, n) || n == 0 || n > 256u || ((off & 0xFFu) + n) > 256u)
+        return -1;
+    return st_prog(off, src, n);
+}
+
 /* the FM6 patch sector (T5i): read in place through the XIP window, as the user samples are */
 const uint8_t *plat_fm6_vbank(uint32_t *len)
 {
