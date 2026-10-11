@@ -88,3 +88,27 @@ check: fw
 
 clean-remote:
 	@$(SSH) 'rm -rf $(REMOTE_DIR)/build'
+
+# ---------------------------------------------------------------------------
+# T6c core lanes: the song/take store and the undo stack. Host tests run on the
+# Mac. The store includes X0X's lz.c, so it is its own translation unit.
+CC           ?= cc
+CFLAGS       ?= -std=c99 -O2 -ffp-contract=off -Wall -Wextra -Wdouble-promotion
+STORE_SAN    := -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -I.
+
+.PHONY: unit-store
+unit-store:
+	@mkdir -p build/host
+	$(CC) $(CFLAGS) -Werror -I. -o build/host/song_store_test tests/host/song_store_test.c core/model/song_store.c
+	build/host/song_store_test
+	$(CC) $(CFLAGS) -Werror -I. -o build/host/undo_stack_test tests/host/undo_stack_test.c core/model/undo_stack.c core/model/song_store.c
+	build/host/undo_stack_test
+	$(CC) $(CFLAGS) -Werror -I. -o build/host/song_fuzz tests/host/song_fuzz.c core/model/song_store.c
+	build/host/song_fuzz
+	@echo "store: ASan/UBSan"
+	$(CC) $(STORE_SAN) -o build/host/song_store_test_san tests/host/song_store_test.c core/model/song_store.c
+	build/host/song_store_test_san
+	$(CC) $(STORE_SAN) -o build/host/undo_stack_test_san tests/host/undo_stack_test.c core/model/undo_stack.c core/model/song_store.c
+	build/host/undo_stack_test_san
+	$(CC) $(STORE_SAN) -o build/host/song_fuzz_san tests/host/song_fuzz.c core/model/song_store.c
+	build/host/song_fuzz_san
