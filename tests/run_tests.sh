@@ -87,6 +87,8 @@ if [ -f build/x0x.fwsc ]; then
 else
     echo "  skip update-path tests (no build/x0x.fwsc: run ./build.sh)"
 fi
+# T11h: every gesture-table button in the interaction model has a help card
+run check-help python3 tools/check_help.py
 run host-build sh host/build_host.sh
 if [ "$UNIT_ONLY" = 1 ]; then
     [ $FAIL -eq 0 ] && echo "unit tests passed" || echo "UNIT TESTS FAILED"

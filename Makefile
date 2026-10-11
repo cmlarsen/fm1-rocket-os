@@ -169,6 +169,8 @@ check: fw
 	@sh tests/lint/flash_guard_test.sh
 	@echo "check: the user-sample upload (a second writer in the song region) is gone"
 	@sh tests/lint/no_sample_writers_test.sh
+	@echo "check: every gesture-table button has a help card"
+	@python3 tools/check_help.py
 	@echo "check: make fw passed the build's own checks (soft-double routines, image/RAM/pool size)"
 
 # T2b: render the screen tour with a host build that records every text draw (-DX0X_LINT), then
