@@ -52,26 +52,47 @@ static void push(uint32_t pkt, uint32_t ts) { rq_pkt[rq_w % RQ] = pkt; rq_ts[rq_
 
 static int fails;
 
-static void check(double bpm, double frame_ms, double jit_ms, int stall_ms)
+/* A deterministic [0,1) source for the anchor latency jitter. */
+static uint32_t jrng = 7;
+static double U(void) { jrng ^= jrng << 13; jrng ^= jrng >> 17; jrng ^= jrng << 5; return (jrng % 100000u) / 100000.0; }
+
+/* clk3: the audio ISR publishes a (block start, timer) anchor every 256 frames with latency jitter
+ * up to jit_us; the TIMER5 producer polls every 0.5 ms, takes each tick (USB arrivals first
+ * quantized to the next 1 ms frame) and stamps it with the anchor plus the elapsed samples to the
+ * poll. The main loop drains every 0.5 ms except a redraw stall of draw_ms every 16 ms, and the
+ * followed tempo must stay within 1 bpm. */
+static void check(double bpm, double draw_ms, double jit_us, int usb)
 {
-    double tick = 60.0 * 44100.0 / (bpm * 24.0);
-    double next = 0.0, t = 0.0, lastf = 0.0, per = 22.0;
-    uint32_t seed = 1;
+    double tick = 60.0 * 44100.0 / (bpm * 24.0), next = 0.0, t = 0.0, lastf = 0.0;
+    double anchor_frames = 0, anchor_time = 0, nextblk = 256;
     int lo = 99999, hi = 0;
-    for (t = 0.0; t < 44100.0 * 20.0; ) {
-        seed = seed * 1103515245u + 12345u;
+    for (t = 0.0; t < 44100.0 * 30.0; ) {
+        double per = 22.05, tend, p;
         if (t - lastf >= 16.0 * 44.1) {
             lastf = t;
-            per = (frame_ms + (double)(seed % 1000) / 1000.0 * jit_ms) * 44.1;
+            per = draw_ms * 44.1;
         }
-        if (t > 44100.0 * 10.0 && t < 44100.0 * 10.0 + per)
-            per += stall_ms * 44.1;
-        t += per;
-        while (next <= t) {                        /* the producer: a tick at its true arrival */
-            push(0x0000F80Fu, (uint32_t)next);
-            next += tick;
+        tend = t + per;
+        for (p = t; p < tend; p += 22.05) {            /* the producer polls every 0.5 ms */
+            while (nextblk <= p) {
+                anchor_frames = nextblk;
+                anchor_time = nextblk + U() * jit_us * 0.0441;   /* us -> samples */
+                nextblk += 256;
+            }
+            while (next <= p) {
+                double arr = next;
+                if (usb) {                              /* USB frames are 1 ms */
+                    double fr = ((long)(arr / 44.1) + 1) * 44.1;
+                    if (fr > p)
+                        break;
+                    arr = fr;
+                }
+                push(0x0000F80Fu, (uint32_t)(anchor_frames + (p - anchor_time)));
+                next += tick;
+            }
         }
-        midi_live_poll((uint32_t)t);               /* the consumer: this main-loop iteration */
+        midi_live_poll((uint32_t)(anchor_frames + (tend - anchor_time)));
+        t = tend;
         {
             int b = (int)midi_live_bpm_x10();
             if (t > 44100.0 * 3.0 && b) {
@@ -83,8 +104,8 @@ static void check(double bpm, double frame_ms, double jit_ms, int stall_ms)
     {
         int want = (int)(bpm * 10.0 + 0.5);
         int ok = lo >= want - 10 && hi <= want + 10;
-        printf("  %s bpm=%.0f frame=%.0fms jit=%.1fms stall=%dms: bpm_x10 %d..%d (want %d +/-10)\n",
-               ok ? "ok  " : "FAIL", bpm, frame_ms, jit_ms, stall_ms, lo, hi, want);
+        printf("  %s bpm=%.0f draw=%.0fms jit=%.0fus usb=%d: bpm_x10 %d..%d (want %d +/-10)\n",
+               ok ? "ok  " : "FAIL", bpm, draw_ms, jit_us, usb, lo, hi, want);
         if (!ok)
             fails++;
     }
@@ -95,15 +116,17 @@ int main(void)
     song_t *s = &g_song;
     memset(s, 0, sizeof *s);
     s->bpm_x10 = 1200;
-    printf("midi_live: the followed clock under main-loop stalls\n");
-    check(120, 8, 1, 20);
-    check(120, 12, 1, 20);
-    check(120, 20, 1, 20);
-    check(120, 8, 1, 0);
-    check(174, 8, 1, 20);
-    check(174, 12, 1, 20);
-    check(174, 20, 1, 20);
-    check(174, 8, 1, 0);
+    printf("midi_live: the followed clock under main-loop stalls and anchor jitter (clk3)\n");
+    check(120, 8, 100, 0);
+    check(120, 12, 100, 0);
+    check(120, 20, 100, 0);
+    check(120, 8, 500, 0);
+    check(120, 8, 100, 1);
+    check(174, 8, 100, 0);
+    check(174, 12, 100, 0);
+    check(174, 20, 100, 0);
+    check(174, 8, 500, 0);
+    check(174, 12, 100, 1);
     if (fails) {
         printf("midi_live: %d case(s) failed\n", fails);
         return 1;

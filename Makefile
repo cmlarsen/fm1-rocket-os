@@ -293,7 +293,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-fx unit-name unit-songs
+unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-name unit-songs
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens
@@ -330,6 +330,17 @@ unit-midilive:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src -o build/host/midi_live_test_san \
 	    tests/host/midi_live_test.c firmware/src/app/midi_live.c core/midi/midi_in.c
 	build/host/midi_live_test_san
+
+# T11i: the sample clock's lock-free publish, with a reader interleaved at every writer store.
+.PHONY: unit-sampleclk
+unit-sampleclk:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/sample_clock_test \
+	    tests/host/sample_clock_test.c
+	build/host/sample_clock_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/sample_clock_test_san \
+	    tests/host/sample_clock_test.c
+	build/host/sample_clock_test_san
 
 .PHONY: unit-fx
 unit-fx:

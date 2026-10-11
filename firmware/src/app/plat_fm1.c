@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* X0X platform on the FM-1: plat.h over Felucca's HAL, panel map, USB rings and storage.
  * Part of the unity build (x0x.c), after the HAL, usb.c, storage.c and panel.c. */
+#include "core/midi/sample_clock.h"
 
 uint32_t plat_ms(void) { return fm1_ms; }
 
@@ -105,30 +106,15 @@ void plat_midi_out(uint32_t pkt) { midi_out_event(pkt); }
 
 /* T11i: the audio sample counter now, sub-block. The audio ISR anchors it to the block it just
  * rendered (eng_prof_frames + fm1_ticks); between blocks the 24 MHz timer advances it, so a MIDI
- * producer (TIMER5, which can preempt the render) can stamp a packet at its own instant. The pair
- * is read under a seqlock: the reader may be preempted by the writer. */
-static volatile uint32_t sc_sample, sc_tick;
-static volatile uint8_t sc_gen;
-void plat_sample_sync(void)
-{
-    uint32_t t = fm1_ticks();
-    sc_gen++;
-    sc_sample = eng_prof_frames;
-    sc_tick = t;
-    sc_gen++;
-}
+ * producer (TIMER5, which can preempt the render) can stamp a packet at its own instant.
+ * core/midi/sample_clock.h holds the lock-free publish/read; its reader never waits on the writer,
+ * so a TIMER5 that preempted a publish returns the previous value instead of spinning. */
+static sample_clock_t sc;
+void plat_sample_sync(void) { sample_clock_publish(&sc, eng_prof_frames, fm1_ticks()); }
 uint32_t plat_sample_now(void)
 {
-    uint32_t s, t;
-    uint8_t g1, g2;
-    do {
-        g1 = sc_gen;
-        s = sc_sample;
-        t = sc_tick;
-        g2 = sc_gen;
-    } while (g1 != g2 || (g1 & 1u));
-    /* 44100 / 24000000 = 147 / 80000 (32-bit; the delta is well under the wraparound) */
-    return s + (uint32_t)(((fm1_ticks() - t) * 147u) / 80000u);
+    static uint32_t last;
+    return sample_clock_now(&sc, fm1_ticks(), &last);
 }
 
 int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? st_load(obj, dst, max) : -1; }

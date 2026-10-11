@@ -37,8 +37,9 @@ struct x0x_worst_s {
 static void render_block(int32_t *o)                /* ALNK0: one half, measured */
 {
     uint32_t t0 = fm1_ticks(), us, budget = HALF_FRAMES * 1000000u / FS;
+    x0x_dbg.in_audio = 1;                           /* T11i: before the sync, so the TIMER5 MIDI
+                                                     * producer defers its poll while we publish */
     plat_sample_sync();                             /* T11i: anchor the MIDI timestamp clock to this half */
-    x0x_dbg.in_audio = 1;
 #if FELUCCA_UAC
     uac_render_start();
 #endif
