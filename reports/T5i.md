@@ -104,34 +104,77 @@ now: `fm6_voice[4]`, the 4,100-byte RAM voice bank, a 1 KiB int32 block, plus th
    init `{ANLG, 64, 70, 100, 127, 0, 70, 0}`). Tested on the 0.10.2 fixture: `migrate0102` now expects
    the new values and that they survive a save/reboot.
 6. **RAM**: see the table above (`nz_v`, `fm6_tail`, `fm6_lfo` into the pool).
-7. **Not merged**, as instructed. When the merge happens: keep **both** sides of `engine_init` (T3's
-   clip-engine / `dly_buf` cut and T5i's `eng_fm6_init`/`eng_noise_init`/`fm6_bank_boot` and the mix
-   glide loop), and CHORDS/FX use `engine_note_on`/`engine_note_off` (or `engine_set(T_RSV, …)`), not
-   `engine_bass_on`.
+7. **Done: `integration` is merged and CHORDS/FX reach FM6/NOISE through the live path** — see
+   **Item 7** below.
+
+## Item 7: `integration` merged; CHORDS and FX in LIVE
+
+`integration` (T3 LIVE + the follow-ups) is merged into this branch. The conflicts — `engine.c`,
+`Makefile`, `host/build_host.sh`, `tools/build.py`, `web/emu/build.sh` — were resolved by keeping both
+sides: `engine_init` has T3's `live_bridge_init()` **and** T5i's `ENG_NPARTS` mixer loop; the build
+lists carry both the live_bridge/clip_engine units and the fm6/noise units; `engine.h` has one
+`engine_all_off()` declaration; and `engine_render` keeps T3's LIVE branch (T5i's duplicate
+`all_off_req` consume was dropped — T3's single `all_off_now`, now extended to release FM6 and NOISE,
+does it).
+
+**Audio.** Clip events are applied in T3's ISR-direct `live_apply`, never queued: **CHORDS →
+`eng_fm6_note_on/off`** (part 4) and **FX → `eng_noise_note_on/off`** (part 5), with the note's
+velocity, and the same `live_tap` event word as the 303s. `live_bridge_play_key` also plays CHORDS/FX
+on the PLAY layer, and `live_bridge_exit` calls `engine_all_off()` (after the 303 releases, so their
+events stay), so entering or leaving LIVE silences FM6 and NOISE.
+
+**Content (interim, until T6i/T8's starter songs).** One small function, `map_chords_fx()` in
+`live_bridge.c`: the **CHORDS** clips are derived from the **BASS** clips (each bass note a chord at
+root+12, +19 and +24, velocity 90, the same step and length, ties as in the bass); the three **FX**
+clips are generated — **A** off-beat eighths (1 bar, note 60, vel 100, len 1), **B** a 1-bar riser
+(16 steps, note 60, vel 20→127, len 1), **C** a sparse 2-bar texture (steps 0/11/22 of 32, note 48,
+vel 80, len 4). `tests/host/live_bridge_test.c` asserts the exact CHORDS notes and all three FX
+clips.
+
+**Scenario.** `tests/scenarios/live_chordfx.x0x` builds a 303 A line (so a CHORDS clip is derived),
+enters LIVE, launches CHORDS A and FX A, and asserts the FM6 (`bon 4 … vel90`) and NOISE
+(`bon 5 60 vel100`) events, `liveclip3`/`liveclip4`, and non-silent audio (peak −8.0 dBFS). Its
+goldens are `tests/golden/live_chordfx/` (`live_chordfx_events.txt`, `live_chordfx.json`,
+`live_chordfx.png`, `audio.json`).
+
+**Re-seeded goldens** (the FX/CHORDS clips are now loaded, so their LIVE LEDs and pad cells change) —
+the Opus reviewer should view these at 1:1:
+
+| Golden | What changed |
+|---|---|
+| `tests/golden/live_chordfx/*` | **new**: the CHORDS/FX pads and the FM6/NOISE event stream |
+| `tests/golden/live_leds/live_leds.{png,json}` | keys 24–26 (FX A–C) loaded: dim, not off |
+| `tests/golden/live_pads/live_pads.{json}` `live_pads_{playing,stopped}.png` | key 19 (CHORDS A) and 24–26 loaded; the CHORDS/FX pad cells |
+| `tests/golden/live_press/live_press.png`, `live_autosave/live_autosave.png`, `live_entry_stop/live_entry_stop.png` | the FX (and CHORDS) pad cells are loaded |
+
+The RAM after the merge: **`.data+.bss` 96,204, POOL 261,296** (T3's `dly_buf` cut and the LIVE
+`song`/clip engine in the pool free ~89 KB; pool spare 82,768).
 
 ## Files
 
 New: `tests/host/fm6_bank_test.c`, `tests/scenarios/t5i_engines.x0x`,
-`tests/scenarios/t5i_parts.x0x`, `tests/golden/t5i_engines/{ev.txt,audio.json}`, this report.
+`tests/scenarios/t5i_parts.x0x`, `tests/scenarios/live_chordfx.x0x`,
+`tests/golden/t5i_engines/{ev.txt,audio.json}`, `tests/golden/live_chordfx/`, this report.
 Changed: `firmware/src/app/engine.{c,h}` (parts, dispatch, mix strips, params, the guard, the PROF
-buckets, the note clamp, `engine_all_off`), `firmware/src/app/x0x.h` (`PROJ_SND_REV 5`),
-`firmware/src/app/project.c` (`sound_rev5`), `firmware/src/app/ui.c` (the PERF stage names and grid),
-`plat.h` / `plat_fm1.c` (`plat_fm6_vbank`), `host/x0x_host.c` (`plat_fm6_vbank`, `note`, `alloff`,
-`fm6voices`/`fm6held`/`nzvoices` expects, the event tap, the profile names),
-`firmware/src/dsp/eng_fm6.{c,h}` (`eng_fm6_load_preset`, `eng_fm6_limit_voices`,
-`eng_fm6_voices_held`, `ENG_FM6_VOICES`, the pool), `firmware/src/dsp/eng_noise.{c,h}`
-(`eng_noise_set_guard`, the pool), `firmware/src/dsp/fm6_vbank.{c,h}` (`fm6_vbank_import`),
-`firmware/src/dsp/fm6_tables.h` + `tools/gen_fm6_tables.py` (`#ifndef FS`), the build lists
-(`tools/build.py`, `host/build_host.sh`, `web/emu/build.sh`, `Makefile`), `docs/engineering/model.md`,
-`tests/scenarios/migrate0102.x0x`.
+buckets, the note clamp, `engine_all_off`, and the ISR-direct CHORDS→FM6 / FX→NOISE in `live_apply`),
+`firmware/src/app/live_bridge.c` (`map_chords_fx`, the CHORDS/FX PLAY keys, the exit all-off),
+`firmware/src/app/x0x.h` (`PROJ_SND_REV 5`), `firmware/src/app/project.c` (`sound_rev5`),
+`firmware/src/app/ui.c` (the PERF stage names and grid), `plat.h` / `plat_fm1.c` (`plat_fm6_vbank`),
+`host/x0x_host.c` (`plat_fm6_vbank`, `note`, `alloff`, `fm6voices`/`fm6held`/`nzvoices` expects, the
+event tap, the profile names), `firmware/src/dsp/eng_fm6.{c,h}` (`eng_fm6_load_preset`,
+`eng_fm6_limit_voices`, `eng_fm6_voices_held`, `ENG_FM6_VOICES`, the pool),
+`firmware/src/dsp/eng_noise.{c,h}` (`eng_noise_set_guard`, the pool),
+`firmware/src/dsp/fm6_vbank.{c,h}` (`fm6_vbank_import`), `firmware/src/dsp/fm6_tables.h` +
+`tools/gen_fm6_tables.py` (`#ifndef FS`), the build lists (`tools/build.py`, `host/build_host.sh`,
+`web/emu/build.sh`, `Makefile`), `docs/engineering/model.md`, `tests/scenarios/migrate0102.x0x`,
+`tests/host/live_bridge_test.c`, and the re-seeded LIVE goldens above.
 
-## For the coordinator (merge)
+## For the coordinator
 
-- **T3.** Shared file is `engine.c`; T5i touches the parts, `drain`, `apply_param`, `render_sub`,
-  `engine_render`'s meter tail and `engine_init`. T3's block-render hook and the `dly_buf` cut are
-  untouched. The clip engine's CHORDS/FX events should call `engine_note_on(PART_FM6, …)` /
-  `engine_note_off`. **`ui.c` now also has T5i's edit** (the PERF stage names and the 3×3 grid), and
-  `x0x.h`/`project.c` carry the rev-5 migration.
+- **T3 is merged.** `engine.c` keeps T3's LIVE branch and calls `all_off_now()` on the transport-stop
+  transition; `all_off_now()` now also releases FM6/NOISE. CHORDS/FX arrive through `live_apply`'s
+  direct calls, never `engine_note_on` (which queues); the PLAY-layer keys use the queued
+  `engine_note_on`. `live_bridge_exit()` calls `engine_all_off()`.
 - **`plat.h`** gained `plat_fm6_vbank` (device XIP read, host none) and the `PLAT_FM6_VBANK_*` macros.
 - **No stored format changed** (`NPARTS`, `sound_t`, `settings_t`, `pattern_t` all pinned as before);
   the only format-visible change is the sound revision's *content* (migrated on load).

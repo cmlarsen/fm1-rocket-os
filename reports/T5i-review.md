@@ -11,3 +11,11 @@ The build is safe to install, because FM6 and NOISE can't be reached on the devi
 7. **Don't merge integration yet.** T3 merges first; then I'll ask you to merge integration and resolve the conflicts. When you do, keep both sides of `engine_init`, and CHORDS/FX use `engine_note_on`.
 
 Then run `make unit-core scenarios check parity fw` and `tools/check_loader.sh build/x0x.fwsc`, commit, update reports/T5i.md, and send worker_done.
+
+## Item 7, now: merge integration (T3 has merged)
+- Merge `integration` into your branch.
+  - In `engine_init`, keep both sides: `live_bridge_init()` and the `ENG_NPARTS` loop.
+  - T3 replaced the ISR path. Clip events are applied directly to the voices at their sample offsets (`live_apply` in `engine.c`), never through `cq_put`. Add FM6 and NOISE to that direct path the same way (direct `eng_fm6`/`eng_noise` calls in the ISR), not through `engine_note_on`, because `engine_note_on` queues.
+- In `live_bridge.c`, map **CHORDS → FM6** (part 4) and **FX → NOISE** (part 5). Note events with velocity become note on/off on those parts. T3's `all_off_now` must also call your `engine_all_off` path, so leaving or entering LIVE silences FM6 and NOISE.
+- Add a LIVE scenario that launches a CHORDS clip and an FX clip and asserts the FM6/NOISE events and non-silent audio. Re-seed only what changes.
+- Run `make unit-core scenarios screens-lint parity check fw` and `tools/check_loader.sh build/x0x.fwsc`. Commit, update reports/T5i.md, and send worker_done.
