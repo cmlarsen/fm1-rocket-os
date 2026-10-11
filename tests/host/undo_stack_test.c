@@ -247,6 +247,26 @@ int main(void)
     check("second undo cannot (only the newest take entry is live)",
           undo_stack_undo(&u, &song, &store, &TS) == UNDO_CANNOT && cur(2) == 2u);
 
+    /* T9i r4 NIT: the deferred take flush inserts the take entry *behind* a later clip edit. When
+     * that edit has been undone (a redo tail above `cur`), the flush must keep it redoable instead
+     * of truncating the tail (the old code set n = cur unconditionally). */
+    {
+        clip_t e0, e1, e2;
+        uint32_t ser;
+        undo_stack_init(&u);
+        take(1, 111);
+        take(1, 222);                                  /* slot 1 has a restorable previous take */
+        fill_clip(&e0, 60); fill_clip(&e1, 61); fill_clip(&e2, 62);
+        undo_stack_push_clear(&u, 3, &e0);             /* E0: cur = 1 */
+        ser = undo_stack_serial(&u);                   /* the take ended here (serial 1) */
+        undo_stack_push_clear(&u, 3, &e1);             /* E1: cur = 2 */
+        undo_stack_push_clear(&u, 3, &e2);             /* E2: cur = 3 */
+        check("flush: undo E2", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE);
+        undo_stack_push_take_at(&u, &store, 1, ser);   /* the deferred flush: pos 1 < cur 2 */
+        check("flush: the redo tail is kept", undo_stack_redo_type(&u) == UNDO_CLEAR_CLIP);
+        check("flush: the tail redoes", undo_stack_redo(&u, &song, 0, 0) == UNDO_DONE);
+    }
+
     /* delete: persists, undoes and redoes with the sequence-number check */
     {
         song_t other;

@@ -381,3 +381,87 @@ builds keep the 8 KiB rule.
 
 `make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass on the committed
 tree, and `tools/check_loader.sh` is ok on both packages (release and debug). Nothing was flashed.
+
+
+## r4: the two-deep take staging FIFO, the take-owned tempo, and the undo-flush NIT
+
+Merges TCLS (`6fefb2a`: Classic removed, the X0X sequencer and its ISR MIDI-in deleted, the delay
+shrunk to 0.75 s, ~39 KB of pool freed) into this branch first (`git merge --no-ff integration`,
+`d652219`), then fixes the r1-r3 staging bug structurally. The merge kept T9i's code on every
+conflict: `engine.c`'s `apply_raw`/`engine_take_cmd` and the take pump stay, X0X's `midi_in`/`SINK`
+go; `ui_live.c` keeps the take state and drops the `classic`/`back_classic` branches;
+`rc1_probe.{x0x,md}` drop the stress-1 and stress-6 levels. The T9i take goldens were re-seeded for
+the TCLS boot song (`76ca9bc`: the STARTER clips and the Classic-free UI change the take scenarios'
+`leds`/song-name output; every scenario assertion still passes). Nothing was flashed.
+
+- Files: `core/seq/clip_engine.{c,h}`, `firmware/src/app/live_bridge.c`, `core/model/undo_stack.c`,
+  `tests/host/live_bridge_test.c`, `tests/host/undo_stack_test.c`, `docs/engineering/model.md`
+  (plus the merge's `engine.c`, `ui_live.c`, `rc1_probe.*` and the goldens).
+
+### The structural fix: two staging copies per role
+
+r1-r3 shared one `next[role]` staging slot: the main loop could only stage a launch's copy after the
+previous one applied, so a launch that followed a queued one within a single UI frame had no copy
+staged in time and was dropped (the reviewer's playing-role repro). r4 gives each role a **2-deep
+staging FIFO** (`clip_t ts[role][2]`, `ts_clip`, `ts_n`, `ts_queued`) owned by the clip engine:
+
+- The main loop (`live_bridge_take_stage`) fills the free slots with the next un-staged launch
+  events in take order, as far ahead as the two slots allow. It only ever writes an empty slot.
+- The ISR (`clip_engine_take_launch`) takes the copy from the front (slot 0) when no launch is
+  queued for the role, or from slot 1 when a queued launch is still waiting (that event overrides
+  it). A copy that is not staged drops the launch and counts it (`take_drop`).
+- `apply_role` pops slot 0 into `play[]` at the boundary, then slot 1 becomes slot 0. The invariant
+  `cur[role] == the clip in play[role]` holds byte-for-byte (`live_bridge_test_consistent`).
+- `clip_engine_take_stop` discards a superseded queued copy; a relay launch consumes both staged
+  copies; `clip_engine_take_stage_clear` drops every copy at a take end/stop and at the reset.
+
+The one-slot `que_ready` / overwrite-guard / pre-commit special cases are gone; the FIFO subsumes
+them. Live (non-take) user launches keep their existing `next[]` path (`launch_cmd`/`apply_role`).
+
+### Tempo during take playback (reverses r3)
+
+The take's recorded tempo now wins. `clip_engine_take_bpm`/`_hold` save the pre-take `bpm_ext`
+(`bpm_ext_saved`) and set the recorded tempo unconditionally; `consume_cmds` ignores both
+`CLIP_CMD_SET_BPM` (the song/UI edit) and `CLIP_CMD_SET_BPM_SOFT` (the external clock) for the
+transport while `bpm_take_on` is set. At the end/stop `clip_engine_take_bpm_clear` restores the
+saved source (the followed clock, or the song's tempo). `model.md`'s "replays at the clock's tempo"
+text is replaced.
+
+### NIT: the deferred take flush kept the redo tail
+
+`undo_push_at` truncated the redo tail (`u->n = u->cur`) on every push. When the deferred take
+flush inserted the take entry *behind* `cur` (a clip edit made after the take, then undone), the
+truncation silently dropped that edit's redo. The truncation now runs only for a top push
+(`pos >= cur`); an insert behind shifts `cur` up with the entries above it, so the redo tail
+survives.
+
+### Tests and the proof
+
+`unit-live`'s `r4_playing_role_test` is the reviewer's repro: `r3_late_run` with a prelude
+`TAKE_LAUNCH_NOW` of clip 1 on drums, then A (clip 0, bar) and C (clip 2) `D` samples after A's
+boundary, swept over every phase at 16/40/100 ms UI frames for `D` = 500 and 3,000. The existing
+silent-role tests (`r3_s1_late_press_test`, `r3_s2_stall_test`) still pass; all report zero drops
+and a consistent invariant. `r4_tempo_test` pins the take-owned tempo (a clock change and a UI edit
+mid-replay are ignored; the pre-take clock returns at the stop), and `r4_relay_test` pins the relay
+cancellation through the FIFO. `unit-store`'s new flush test pins the redo tail.
+
+Compiled against `e3e54f8`'s `live_bridge.c`/`clip_engine.c`/`take.c` (with the new test file), the
+playing-role repro fails in **every** phase — 28 `sawA` and 28 `drops == 0` check failures across
+the 28 runs — and `r4_tempo_test` fails its four checks (the old code let the clock win).
+`unit-store`'s flush test against `e3e54f8`'s `undo_stack.c` fails *the redo tail is kept* and *the
+tail redoes*.
+
+### RAM
+
+| build | pool | spare | margin over 8 KiB |
+|---|---|---|---|
+| release | 301,920 / 344,064 | **42,144** | **33,952** |
+| debug (`X0X_DEBUG=1`) | 301,920 / 344,064 | **42,144** | **33,952** |
+
+The FIFO adds two `clip_t` per role (10 × 528 B = 5,280 B, plus 15 B of indices): 296,628 → 301,920 B
+used. TCLS's ~39 KB freed keeps both builds far above the 8 KiB rule. No user-facing buffer was cut.
+
+### Ladder
+
+`make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass on the committed
+tree, and `tools/check_loader.sh` is ok on both packages (release and debug). Nothing was flashed.

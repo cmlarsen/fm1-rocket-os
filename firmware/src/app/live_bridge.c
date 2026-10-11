@@ -37,6 +37,7 @@ static uint32_t g_take_block_base;                    /* the block base the sink
 static uint8_t g_take_live;                           /* T9i: LIVE is active: the take may record */
 static volatile uint8_t g_take_end_req;               /* the ISR's natural take end, polled by the main loop */
 static uint8_t g_take_reload_req;                     /* an arm was cancelled: reload the song's take (NIT) */
+static uint16_t g_take_stage_i[NROLES];               /* T9i r4: the next take event index to stage per role */
 #ifdef X0X_HOST
 /* T9i r1: the host test traps a main-loop ring push from the audio-ISR side (the take sink). */
 volatile int live_bridge_isr;
@@ -178,11 +179,13 @@ static void eng_reset_transport(void)
         g_eng.pos[r] = 0;
         g_eng.que[r] = CLIP_NONE;
         g_eng.que_set[r] = 0;
-        g_eng.que_ready[r] = 0;                       /* T9i r3/S1: no pre-committed launch survives a reset */
         g_eng.muted[r] = 0;
         g_eng.next_set[r] = 0;                        /* T9i: no stale staged launch survives a reset */
         g_eng.take_mute[r] = 0;
     }
+    clip_engine_take_stage_clear(&g_eng);             /* T9i r4: drop every staged take copy */
+    for (r = 0; r < (int)NROLES; r++)
+        g_take_stage_i[r] = 0;                        /* T9i r4: restage from the first event */
     g_eng.take_mute_set = 0;
     for (i = 0; i < (int)CLIP_ENGINE_MAX_VOICES; i++)
         g_eng.note[i].used = 0;
@@ -195,15 +198,6 @@ static void eng_reset_transport(void)
 #define CLIP_ENGINE_FS 48000u
 #endif
 _Static_assert(CLIP_ENGINE_FS == FS, "CLIP_ENGINE_FS must match the sample counter's FS");
-
-/* T9i r3/S2: the main loop stages the next recorded launch for a role as soon as that role has no
- * launch already queued in the ISR, however far ahead the event is (S2: a full 77 ms redraw can
- * outlast the old ~28 ms lookahead window, and a missed window drops the launch). The staging copy
- * is only ever used for a launch that has not been replayed yet (its event is still at/after
- * play_i), so staging it early is harmless. When a *different* launch is queued but not yet applied,
- * the copy must NOT be stolen (S1): next[role] holds that launch's sound until it applies. The only
- * exception is an event that is due before the queued launch's boundary, which supersedes it. */
-#define TAKE_STAGE_MARGIN (CLIP_ENGINE_FS / 32u)
 
 /* ---------------------------------------------------------------- mapping --- */
 
@@ -449,6 +443,11 @@ void live_bridge_take_init(void)
     g_take_end_req = 0;
     g_take_reload_req = 0;
     tp_h = tp_t = 0;
+    {
+        int r;
+        for (r = 0; r < (int)NROLES; r++)
+            g_take_stage_i[r] = 0;
+    }
 }
 
 /* T9i: record only user actions, and coalesce parameter changes to the same parameter within one
@@ -518,6 +517,7 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
          * loop notice through g_take_end_req. */
         take_stop_play(&g_take);
         clip_engine_take_bpm_clear(&g_eng);              /* B2: the song's tempo comes back */
+        clip_engine_take_stage_clear(&g_eng);            /* T9i r4: drop the staged take copies */
         g_eng.playing = 0;
         clip_engine_take_mute_clear(&g_eng);
         engine_take_perform_reset();
@@ -629,6 +629,7 @@ void live_bridge_take_stop_play(void)
         /* NIT: take_bpm_clear rewrites the transport words the audio ISR reads; mask it. */
         uint32_t f = engine_crit_enter();
         clip_engine_take_bpm_clear(&g_eng);               /* B2: hand the tempo back to the song */
+        clip_engine_take_stage_clear(&g_eng);             /* T9i r4: drop the staged take copies */
         engine_crit_exit(f);
     }
     engine_all_off();
@@ -636,60 +637,40 @@ void live_bridge_take_stop_play(void)
     engine_perform_reset();                               /* ... and its FX (after the stop) */
 }
 
-/* B1/S2: the next recorded launch for a role that the ISR has not replayed yet, with the event's
- * sample. Staged however far ahead (S2). take_play also calls this before playing=1 for the
- * offset-0 prelude launches. */
-static uint8_t take_next_launch(uint8_t role, uint16_t from, uint32_t *at)
-{
-    uint16_t i;
-    for (i = from; i < g_take.n; i++) {
-        uint32_t cmd = g_take.ev[i].cmd;
-        if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH) {
-            uint8_t how = (uint8_t)TAKE_CMD_B(cmd);
-            if (how != TAKE_LAUNCH_STOP && (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == role) {
-                if (at)
-                    *at = g_take.ev[i].sample;
-                return (uint8_t)TAKE_CMD_A(cmd);
-            }
-        }
-    }
-    return CLIP_NONE;
-}
+/* T9i r4: the main loop stages the take's launch copies into the clip engine's two-deep FIFO. It
+ * fills each role's free slots with the next un-staged launch events (in take order), as far ahead
+ * as the FIFO allows, so a launch that follows a queued one within a single UI frame (or across a
+ * stalled frame) still has its copy in place when its event replays. A copy is only ever written
+ * into an empty slot; the ISR pops slot 0 into play[] at the boundary and shifts slot 1 down. */
 
 void live_bridge_take_stage(void)
 {
     int r;
-    uint32_t play_pos;
     if (!take_playing(&g_take))
         return;
-    play_pos = g_take.play_pos;                          /* the replay playhead (block-aligned) */
     for (r = 0; r < NROLES; r++) {
-        uint32_t ev_at = 0;
-        uint8_t clip = take_next_launch((uint8_t)r, g_take.play_i, &ev_at);
-        uint32_t f;
-        if (clip == CLIP_NONE || clip >= NCLIPS)
-            continue;
-        if (g_eng.next_set[r] && g_eng.next_clip[r] == clip)
-            continue;                                    /* the copy is already staged */
-        f = engine_crit_enter();
-        /* S1: next[r] carries the sound of a launch the ISR has queued but not applied yet. Do not
-         * steal it for a *different* launch unless either (a) the queued launch's bytes are already
-         * committed in play[] (que_ready: nothing was playing for the role when it was queued, so
-         * next[r] is free), or (b) this event is due before that launch's boundary, so it will be
-         * replayed first and supersede it. The margin keeps a far-off event from being staged over a
-         * launch about to apply; a genuinely missed window is still a drop. */
-        if (!g_eng.que_ready[r] &&
-            g_eng.que_set[r] && g_eng.que[r] != CLIP_NONE && g_eng.que[r] != clip) {
-            uint32_t qb = clip_engine_step_sample(&g_eng, g_eng.que_at[r]);
-            if ((int32_t)(ev_at - (play_pos + TAKE_STAGE_MARGIN)) > 0 ||
-                (int32_t)(ev_at - qb) >= 0) {
-                engine_crit_exit(f);
-                continue;
+        uint32_t f = engine_crit_enter();
+        int free_slots = clip_engine_take_stage_free(&g_eng, (uint8_t)r);
+        while (free_slots > 0) {
+            uint16_t i;
+            uint8_t clip = CLIP_NONE;
+            for (i = g_take_stage_i[r]; i < g_take.n; i++) {
+                uint32_t cmd = g_take.ev[i].cmd;
+                if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH) {
+                    uint8_t how = (uint8_t)TAKE_CMD_B(cmd);
+                    if (how != TAKE_LAUNCH_STOP && (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == (uint8_t)r) {
+                        clip = (uint8_t)TAKE_CMD_A(cmd);
+                        g_take_stage_i[r] = (uint16_t)(i + 1u);
+                        break;
+                    }
+                }
             }
+            if (clip == CLIP_NONE || clip >= NCLIPS)
+                break;                                    /* no more launches for this role */
+            if (!clip_engine_take_stage(&g_eng, (uint8_t)r, clip, &g_song.clip[clip]))
+                break;
+            free_slots--;
         }
-        g_eng.next[r] = g_song.clip[clip];               /* the ISR never reads song->clip[] */
-        g_eng.next_clip[r] = clip;
-        g_eng.next_set[r] = 1;
         engine_crit_exit(f);
 #ifdef X0X_HOST
         if (live_bridge_test_hook)                       /* T9i r2: a test's ISR between roles */
@@ -724,10 +705,13 @@ int live_bridge_take_end_pending(void)
 
 void live_bridge_take_clear_ram(void)
 {
+    int r;
     take_init(&g_take);
     take_set_bar_fn(&g_take, bridge_bar_fn, 0);
     take_set_prelude(&g_take, bridge_prelude, 0);
     g_take_arm_at_start = 0;
+    for (r = 0; r < (int)NROLES; r++)
+        g_take_stage_i[r] = 0;
 }
 
 void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_x10)

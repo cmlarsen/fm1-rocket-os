@@ -365,6 +365,63 @@ static void r3_s2_stall_test(void)
         }
 }
 
+/* ---- T9i r4: the playing-role repro ------------------------------------- */
+
+/* The r3_late_run scenario, but the role is ALREADY PLAYING at the take start: the prelude is a
+ * TAKE_LAUNCH_NOW of clip 1 on drums, then A (clip 0, bar) at sample 200 and C (clip 2, bar) at
+ * 88200 + D. With one staging slot the main loop can only stage C after A applies, so a C that
+ * lands within a single UI frame of A's boundary (D = 500, 60 Hz) has no copy staged in time and
+ * is dropped. The two-deep FIFO stages C before A's boundary, so no launch is dropped. */
+static int r4_playing_run(uint32_t D, uint32_t frame, uint32_t phase, int *drops, int *cons)
+{
+    uint32_t *ev, s, next_ui;
+    int d0, sawA = 0;
+    live_bridge_take_init();
+    live_bridge_enter();
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;         ev[1] = TAKE_MARK_TEMPO(1200u);   /* pin 120 bpm, so the bar lands at 88,200 */
+    ev[2] = 0u;         ev[3] = TAKE_LAUNCH(1u, TAKE_LAUNCH_NOW, LIVE_DRUMS);   /* the role plays */
+    ev[4] = 200u;       ev[5] = TAKE_LAUNCH_Q(0u, Q_BAR, LIVE_DRUMS);            /* A: the bar */
+    ev[6] = 88200u + D; ev[7] = TAKE_LAUNCH_Q(2u, Q_BAR, LIVE_DRUMS);            /* C: just after */
+    ev[8] = 400000u;    ev[9] = TAKE_MARK_END;
+    live_bridge_take_loaded(5, 800000u, 1200u);
+    d0 = live_bridge_take_drops();
+    live_bridge_take_play();
+    next_ui = phase;
+    for (s = 0; s < 200000u; s += 128u) {
+        if (s >= next_ui) { live_bridge_take_stage(); next_ui += frame; }
+        run_isr_block(s, 128u);
+        if (s > 90000u && s < 180000u && live_bridge_playing_clip(LIVE_DRUMS) == 0)
+            sawA = 1;
+    }
+    *drops = live_bridge_take_drops() - d0;
+    *cons = live_bridge_test_consistent();
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+    return sawA;
+}
+
+/* The playing-role repro must survive every phase at 16/40/100 ms UI frames, for a C that lands
+ * 500 and 3,000 samples after A's boundary (the r3 defect drops it at the short gap). */
+static void r4_playing_role_test(void)
+{
+    static const uint32_t frames[3] = { 705u, 1764u, 4410u };   /* 16, 40, 100 ms at 44.1 kHz */
+    static const uint32_t Ds[2] = { 500u, 3000u };
+    int fi, di;
+    uint32_t ph;
+    for (fi = 0; fi < 3; fi++)
+        for (di = 0; di < 2; di++)
+            for (ph = 0; ph < frames[fi]; ph += frames[fi] / 4u) {
+                int drops = -1, cons = 0;
+                int sawA = r4_playing_run(Ds[di], frames[fi], ph, &drops, &cons);
+                CHECK(sawA);                             /* A is heard ... */
+                CHECK(drops == 0);                       /* ... and no launch was dropped */
+                CHECK(cons);
+            }
+}
+
 /* NIT: the take_stage injection point must be live (it runs between roles, outside the role's
  * critical section) — arm it and prove it fires. */
 static void r3_stage_hook_test(void)
@@ -391,32 +448,70 @@ static void r3_stage_hook_test(void)
     live_bridge_exit();
 }
 
-/* NIT: an external clock the user follows wins over the take's recorded tempo (the take replays at
- * clock tempo), and clearing the take's hold restores the followed clock, not the song's tempo. */
-static void r3_ext_clock_test(void)
+/* T9i r4: while a take plays, its recorded tempo wins: an external clock the user follows and a UI
+ * tempo edit are both ignored for the transport. At the stop the pre-take source (the followed
+ * clock) is restored. (This reverses r3's "the clock wins".) */
+static void r4_tempo_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
     live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
     g_now = 0;
+    /* follow an external clock at 160 bpm before the take */
+    live_bridge_set_bpm_soft(1600u);
+    run_isr_block(0, 128);
+    CHECK(live_bridge_bpm_x10() == 1600u);
     ev = (uint32_t *)live_bridge_take_events_mut();
     ev[0] = 0u;   ev[1] = TAKE_MARK_TEMPO(1200u);
     ev[2] = 200u; ev[3] = TAKE_MARK_TEMPO(1400u);        /* the recorded change */
     ev[4] = 400000u; ev[5] = TAKE_MARK_END;
     live_bridge_take_loaded(3, 800000u, 1200u);
-    live_bridge_take_play();
-    run_isr_block(0, 128);
-    CHECK(live_bridge_bpm_x10() == 1200u);
-    live_bridge_set_bpm_soft(1600u);             /* the user follows a 160-bpm clock mid-replay */
+    live_bridge_take_play();                     /* the take's recorded tempo owns the transport */
     run_isr_block(128, 128);
-    CHECK(live_bridge_bpm_x10() == 1600u);
-    run_isr_block(256, 6000);                    /* the recorded 1400 mark arrives: the clock wins */
-    CHECK(live_bridge_bpm_x10() == 1600u);
+    CHECK(live_bridge_bpm_x10() == 1200u);       /* the recorded tempo, not the 160-bpm clock */
+    live_bridge_set_bpm_soft(1500u);             /* a clock change mid-replay is ignored */
+    live_bridge_set_bpm(1800u);                  /* a UI tempo edit is ignored for the transport */
+    run_isr_block(256, 128);
+    CHECK(live_bridge_bpm_x10() == 1400u);       /* the recorded change, not the edits */
+    run_isr_block(384, 6000);
+    CHECK(live_bridge_bpm_x10() == 1400u);       /* it holds */
     live_bridge_take_stop_play();
-    CHECK(live_bridge_bpm_x10() == 1600u);       /* the hold clears, the followed clock stays */
-    live_bridge_set_bpm(1200u);                  /* drop the clock: the song's tempo comes back */
-    run_isr_block(6400, 128);
-    CHECK(live_bridge_bpm_x10() == 1200u);
+    CHECK(live_bridge_bpm_x10() == 1600u);       /* the pre-take followed clock comes back */
+    live_bridge_exit();
+}
+
+/* T9i r4: a relay launch (the same clip pressed again while the first is still queued) cancels the
+ * queue. The FIFO must consume both staged copies so a later launch still stages cleanly. */
+static void r4_relay_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter();
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;      ev[1] = TAKE_MARK_TEMPO(1200u);
+    ev[2] = 200u;    ev[3] = TAKE_LAUNCH_Q(0u, Q_BAR, LIVE_DRUMS);   /* A: the bar */
+    ev[4] = 400u;    ev[5] = TAKE_LAUNCH_Q(0u, Q_BAR, LIVE_DRUMS);   /* the relay: cancels A */
+    ev[6] = 90000u;  ev[7] = TAKE_LAUNCH_Q(2u, Q_BAR, LIVE_DRUMS);   /* a later launch still works */
+    ev[8] = 400000u; ev[9] = TAKE_MARK_END;
+    live_bridge_take_loaded(5, 800000u, 1200u);
+    {
+        int d0 = live_bridge_take_drops();
+        live_bridge_take_play();
+        run_isr_block(0, 128);
+        live_bridge_take_stage();
+        run_isr_block(128, 512);                 /* A and its relay replay */
+        CHECK(live_bridge_queued_clip(LIVE_DRUMS) == CLIP_NONE);   /* A was cancelled */
+        live_bridge_take_stage();
+        run_isr_block(640, 90000);               /* up to the later launch */
+        live_bridge_take_stage();
+        run_isr_block(90640, 128);
+        CHECK(live_bridge_take_drops() - d0 == 0);
+        CHECK(live_bridge_test_consistent());
+        live_bridge_take_stop_play();
+    }
     live_bridge_exit();
 }
 
@@ -584,9 +679,13 @@ int main(void)
 
     /* T9i r3: the late press and the stalled-UI staging, the live take_stage hook, the clock. */
     r3_stage_hook_test();
-    r3_ext_clock_test();
     r3_s1_late_press_test();
     r3_s2_stall_test();
+
+    /* T9i r4: the playing-role repro (the two-deep staging FIFO) and the take-owned tempo. */
+    r4_playing_role_test();
+    r4_tempo_test();
+    r4_relay_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

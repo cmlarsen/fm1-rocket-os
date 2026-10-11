@@ -77,12 +77,12 @@ typedef struct {
     uint8_t  cur[NROLES];    /* playing clip, or CLIP_NONE */
     uint8_t  que[NROLES];    /* target clip of the pending action, or CLIP_NONE */
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
-    uint8_t  que_ready[NROLES]; /* T9i r3/S1: que[role]'s bytes are already committed in play[] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
     uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
     uint8_t  take_mute[NROLES]; /* T9i: a take mute latched for the next render (the release needs the sink) */
     uint8_t  take_mute_set;
     uint8_t  bpm_take_on;    /* T9i r2/B2: a take playback owns the tempo (the song's must not clobber it) */
+    uint16_t bpm_ext_saved;  /* T9i r4: the bpm_ext to restore when the take's tempo hold clears */
     uint16_t take_drop;      /* T9i r2: take launches dropped because their staged copy was missing */
 
     /* T11i: MIDI Start / Continue. start() resets to bar 1, step 0; continue() resumes from the
@@ -111,6 +111,17 @@ typedef struct {
     clip_t next[NROLES];
     uint8_t next_set[NROLES];   /* next[role] holds a staged launch target */
     uint8_t next_clip[NROLES];  /* the clip index staged in next[role] */
+
+    /* T9i r4: the take staging FIFO (two clip copies per role), owned by this engine. The main loop
+     * stages the next take-launch copies here, ahead of the replayed launch events; the ISR queues a
+     * launch from the front and pops slot 0 into play[] at its boundary, then slot 1 becomes slot 0.
+     * slot 0 holds the queued launch's copy while ts_queued[role] is set, otherwise the next event's
+     * copy; slot 1 holds the one after. The producer only ever writes an empty slot; the ISR only
+     * pops. A launch whose copy is not staged is dropped and counted (take_drop). */
+    clip_t  ts[NROLES][2];
+    uint8_t ts_clip[NROLES][2]; /* the clip index of each staged copy */
+    uint8_t ts_n[NROLES];       /* copies staged: 0, 1 or 2 */
+    uint8_t ts_queued[NROLES];  /* slot 0 holds a queued launch awaiting its boundary */
 } clip_engine_t;
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
@@ -181,25 +192,35 @@ void clip_engine_mute_clear(clip_engine_t *e);
 
 /* T9i: the take player's ISR-side entry points. A take replays launches/mutes/tempo sample-exactly
  * from the audio ISR, but it must not push onto the command ring (that is the main loop's) or read
- * song->clip[] (the invariant). The main loop stages the launch's clip copy in next[role] ahead of
- * the event time; these apply directly, exactly as consume_cmds would, and never call push_cmd.
+ * song->clip[] (the invariant). The main loop stages the launch's clip copies in the two-deep take
+ * FIFO (ts[]) ahead of the event time; these apply directly, exactly as consume_cmds would, and
+ * never call push_cmd.
  *   take_launch: how 0 = queue at `quant` (0xFF = the staged copy's own quantize), 1 = next step.
- *                HARD INVARIANT (r2): cur[role] and play[role] always describe the same clip. If
- *                the staged copy (next_set[role] && next_clip[role] == clip) is not there, the
- *                launch is dropped (returns 0, take_drop++) rather than queued against a stale
- *                play[] copy. apply_role() enforces the same on the boundary.
+ *                HARD INVARIANT (r4): cur[role] and play[role] always describe the same clip. The
+ *                copy for a launch is the front of the FIFO when no launch is queued, or slot 1
+ *                when a queued launch is still waiting (this event overrides it). If the copy is
+ *                not there, the launch is dropped (returns 0, take_drop++). apply_role() pops slot 0
+ *                into play[] at the boundary and shifts slot 1 down.
  *   take_mute:   latched; clip_engine_render() applies it at the window start so the release's
  *                note-offs reach the sink (`on` = 0/1).
- *   take_bpm:    sets the running tempo AND holds it (bpm_take_on) against the song's own tempo;
- *                take_bpm_clear restores the song's tempo at the take's end/stop.  */
+ *   take_bpm:    sets the running tempo AND holds it (bpm_take_on) against the song's own tempo AND
+ *                an external clock; take_bpm_clear restores the pre-take source at end/stop.  */
 int  clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant);
 void clip_engine_take_stop(clip_engine_t *e, uint8_t role);
 void clip_engine_take_mute(clip_engine_t *e, uint8_t role, int on);
 void clip_engine_take_mute_clear(clip_engine_t *e);   /* leaving/ending a take: no ring, ISR-safe */
 void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10);
 void clip_engine_take_bpm_hold(clip_engine_t *e);     /* B2: the take owns the tempo from PLAY on */
-void clip_engine_take_bpm_clear(clip_engine_t *e);    /* B2: restore the song's tempo (ISR-safe) */
+void clip_engine_take_bpm_clear(clip_engine_t *e);    /* B2: restore the pre-take tempo (ISR-safe) */
 int  clip_engine_take_drops(const clip_engine_t *e);  /* T9i r2: launches dropped for a missing copy */
+
+/* T9i r4: the take staging FIFO's producer (main loop, audio IRQs masked by the caller). Stage the
+ * copy of `clip` (usually &song->clip[clip]) into the role's next free slot; returns 1 when staged,
+ * 0 when both slots are full. take_stage_free reports the free slots; take_stage_clear drops every
+ * staged copy (a reset/stop, so no stale copy survives into the next pass). */
+int  clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const clip_t *copy);
+int  clip_engine_take_stage_free(const clip_engine_t *e, uint8_t role);
+void clip_engine_take_stage_clear(clip_engine_t *e);
 
 /* Add nframes of transport and call the sink for every event in that window, with its
  * exact sample offset into the window. */

@@ -18,10 +18,14 @@ static void undo_push_at(undo_stack_t *u, uint32_t pos, uint8_t type, uint8_t in
     undo_entry_t *e;
     undo_entry_t tmp;
     uint32_t i;
-    /* T6c fix: a new edit discards the redo tail. Without it, an entry above `cur` (a state undone
-     * before this edit) would be restored by a later undo, replaying a branch that no longer exists
-     * (edit v0->v1, undo, edit v0->v2, undo, undo restored v1). */
-    u->n = u->cur;
+    int behind = pos < u->cur;            /* T9i r4: an entry inserted behind `cur` keeps the tail */
+    /* T6c fix: a new edit at the top discards the redo tail. Without it, an entry above `cur` (a
+     * state undone before this edit) would be restored by a later undo, replaying a branch that no
+     * longer exists (edit v0->v1, undo, edit v0->v2, undo, undo restored v1).
+     * T9i r4 NIT: an entry inserted *behind* the current position (the deferred take flush) must
+     * keep the tail, so an edit made after the take and undone stays redoable. */
+    if (pos >= u->cur)
+        u->n = u->cur;
     if (pos > u->n)
         pos = u->n;
     if (u->n >= UNDO_STACK_DEPTH) {
@@ -48,7 +52,9 @@ static void undo_push_at(undo_stack_t *u, uint32_t pos, uint8_t type, uint8_t in
     e = &u->e[pos];
     *e = tmp;
     u->n++;
-    u->cur = u->n;
+    /* T9i r4: the entries above `pos` shifted up by one, so the current position follows them; a
+     * top push lands at the new top instead. */
+    u->cur = behind ? u->cur + 1u : u->n;
 }
 
 static void undo_push(undo_stack_t *u, uint8_t type, uint8_t index, uint8_t aux, const clip_t *clip, uint32_t seq)
