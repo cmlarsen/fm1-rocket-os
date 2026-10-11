@@ -3,6 +3,9 @@
 # sounding at (almost) any entry phase; the old code left it hung (seq_advance stopped, so the
 # gate never fell). Ten entry phases sweep a whole 16th.
 wait 300
+# T7a: into the classic X0X pages (GLOBAL -> Classic patterns)
+tap GLO
+tap SEL
 # a 303 A line: a note on every step (unaccented: the 1 ms release is the fast one)
 turn ALGO 2
 tap REC

@@ -2,6 +2,9 @@
 # the 909 SD before its DECAY) loads into 64 steps and 32 patterns as it was, and saves packed.
 storeload tests/fixtures/v1_store.bin
 wait 100
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 # pattern 1: BD on steps 1 and 32, the 303's note on step 1, nothing past 32
 expect pattern 1
 expect hit0.0.0 1
@@ -31,6 +34,9 @@ expect hit0.0.1 1
 # saved in the new format and booted again: all the same
 tap SAVE
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 wait 100
 expect pattern 1
 expect hit0.0.31 1

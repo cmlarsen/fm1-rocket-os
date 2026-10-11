@@ -1,6 +1,9 @@
 # PERF: the performance screen, and PERF TEST (three patterns of its own on the factory sound), which
 # must put back everything it changed: the patterns, the sound, the tempo, the mutes, the song mode.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 tapkey b0
 tapkey w0
 tapkey w8

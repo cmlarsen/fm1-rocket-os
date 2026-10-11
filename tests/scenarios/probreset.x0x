@@ -2,6 +2,9 @@
 # 1:4 in pattern 1, copied to pattern 2; six bars of P1 (kicks on bars 1 and 5), then P2 from bar 7: its
 # first pass, so a kick there. Through bar 8: 3 kicks (the 909 kept counting before: 2).
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 tapkey b0
 tapkey w0
 key w0 down

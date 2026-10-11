@@ -280,6 +280,8 @@ static int rc_host_words;                            /* fields the last `stats` 
 static FILE *events_log;
 static uint32_t host_sample;             /* frames rendered since boot: the only clock */
 static uint32_t bar_count;               /* the 909's wraps since the transport started */
+static uint32_t boffs;                   /* T7a: note-offs the tap has seen (leaving LIVE releases) */
+static uint8_t bass_on[2];               /* T7a r2: the 303 gates the tap has seen stick (expect bassheld) */
 static uint8_t tr_prev_pos;
 static int was_playing;
 static uint8_t prev_pcue[NPARTS];
@@ -295,14 +297,21 @@ static void host_engine_tap(uint32_t sample, uint32_t cmd)
     case 9:
         if (a == PART_FM6 || a == PART_NOISE)              /* T5i: c = velocity */
             fprintf(events_log, "%u bon %u %u vel%u\n", sample, a, b, v);
-        else
+        else {
+            if (a < 2u)
+                bass_on[a] = 1;                            /* T7a r2: a 303 gate is held */
             fprintf(events_log, "%u bon %u %u %u %u\n", sample, a, b, v & 1u, (v >> 1) & 1u);
+        }
         break;
     case 10:
+        boffs++;
         if (a == PART_FM6 || a == PART_NOISE)              /* T5i: b = note */
             fprintf(events_log, "%u boff %u %u\n", sample, a, b);
-        else
+        else {
+            if (a < 2u)
+                bass_on[a] = 0;                            /* T7a r2: the gate released */
             fprintf(events_log, "%u boff %u\n", sample, a);
+        }
         break;
     default: fprintf(events_log, "%u param %u %u %u %u\n", sample, type, a, b, v); break;
     }
@@ -654,8 +663,16 @@ static int expect(const char *what, const char *val)
         got = live_bridge_active() ? live_beat() : seq.t[TRK_DRUM].pos / 4;
     else if (!strcmp(what, "step"))
         got = live_bridge_active() ? live_step() : seq.t[TRK_DRUM].pos;
-    else if (!strcmp(what, "mode"))
-        got = live_bridge_active() ? 1 : 0;
+    else if (!strcmp(what, "mode"))                /* T7a: "mode" is the LIVE view, not the audio owner */
+        got = ui.view == V_LIVE ? 1 : 0;
+    else if (!strcmp(what, "classic"))             /* T7a: the classic X0X pages own the audio */
+        got = ui.classic;
+    else if (!strcmp(what, "studiorole"))
+        got = studio_cursor_role();
+    else if (!strcmp(what, "studiocol"))
+        got = studio_cursor() & 0xFF;
+    else if (!strcmp(what, "studioclip"))
+        got = studio_cursor_clip();
     else if (!strcmp(what, "layer"))
         got = live_layer();
     else if (!strcmp(what, "focus"))
@@ -759,6 +776,32 @@ static int expect(const char *what, const char *val)
         got = song_io_loaded();
     else if (!strncmp(what, "keyclip", 7))         /* T6i: keyclipK, the current song's key -> clip map */
         got = live_bridge_key_clip(atoi(what + 7));
+    else if (!strncmp(what, "clipused", 8))        /* T7a: clipusedC */
+        got = song_io_clip_used(atoi(what + 8));
+    else if (!strncmp(what, "cliplen", 7))
+        got = song_io_clip_len(atoi(what + 7));
+    else if (!strncmp(what, "clipmode", 8))
+        got = song_io_clip_mode(atoi(what + 8));
+    else if (!strncmp(what, "clipquant", 9))
+        got = song_io_clip_quant(atoi(what + 9));
+    else if (!strncmp(what, "clipnotes", 9))
+        got = song_io_clip_nnotes(atoi(what + 9));
+    else if (!strncmp(what, "clipmotion", 10))
+        got = song_io_clip_motion(atoi(what + 10));
+    else if (!strcmp(what, "songswing"))
+        got = song_io_swing();
+    else if (!strcmp(what, "songkey"))             /* T7a follow-up: the song's key (0..11) and scale */
+        got = song_io_key();
+    else if (!strcmp(what, "songscale"))
+        got = song_io_scale();
+    else if (!strcmp(what, "boffs"))               /* T7a D1: note-offs the tap logged */
+        got = (int)boffs;
+    else if (!strcmp(what, "bassheld"))            /* T7a r2: 303 gates still held */
+        got = (int)(bass_on[0] + bass_on[1]);
+    else if (!strcmp(what, "undodepth"))
+        got = song_io_undo_depth();
+    else if (!strcmp(what, "undopos"))
+        got = song_io_undo_pos();
     else if (!strcmp(what, "peak_db_max")) {
         double db = 20.0 * log10(peak_out > 1e-9f ? peak_out : 1e-9f);
         if (db > atof(val)) {
@@ -887,6 +930,8 @@ static void dump_json(const char *path)
         fprintf(f, "%s\n    {\"part\": %d, \"ppat\": %u, \"pcue\": %d, \"mute\": %d}", p ? "," : "", p, seq.ppat[p],
                 seq.pcue[p] < NPAT ? (int)seq.pcue[p] : -1, seq_part_muted(&seq, p));
     fprintf(f, "\n  ],\n  \"view\": %d,\n", ui.view);
+    fprintf(f, "  \"studio\": {\"role\": %d, \"col\": %d, \"clip\": %d, \"classic\": %d},\n",
+            studio_cursor_role(), studio_cursor() & 0xFF, studio_cursor_clip(), ui.classic);
     if (lv) {                                          /* T3: the LIVE state */
         fprintf(f, "  \"live\": {\"active\": %d, \"layer\": %d, \"focus\": %d, \"transport\": %d, \"roles\": [",
                 lv, live_layer(), live_focus(), live_bridge_transport_playing());
@@ -1198,6 +1243,11 @@ int main(int argc, char **argv)
             plat_cpu2_set(atoi(a));
         } else if (!strcmp(cmd, "assignkey")) {         /* T6i: T10's assign-keys, through song_io */
             song_io_set_key_clip(atoi(a), atoi(b));
+        } else if (!strcmp(cmd, "songseed")) {          /* T7a: test setup only, re-derive clips from proj.pat */
+            live_bridge_rebuild(&proj.pat[0]);
+            song_io_mark_dirty();
+        } else if (!strcmp(cmd, "cursor")) {            /* T7a: set the song-home cursor (role, col) */
+            studio_set_cursor(atoi(a), b[0] ? atoi(b) : 0);
         } else if (!strcmp(cmd, "songcorrupt")) {       /* T6i: flip every song record's magic */
             uint32_t o;
             for (o = 0; o + 4u <= HOST_SONG_SIZE; o += 4096u) {

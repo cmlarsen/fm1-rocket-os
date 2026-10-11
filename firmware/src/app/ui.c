@@ -15,6 +15,7 @@
 #include "../dsp/master.h"
 #include "../dsp/bass303.h"                    /* BASS303_* (the 303's pages) */
 #include "song_io.h"                           /* T6i: the current song on flash */
+#include "live_bridge.h"                       /* T3/T7a: the clip engine and the song it owns */
 #include "undo.c"
 
 /* ================================================================ model === */
@@ -22,8 +23,11 @@ static const int8_t KEY_WHITE[NKEYS] = {0, -1, 1, -1, 2, -1, 3, 4, -1, 5, -1, 6,
 static const int8_t KEY_BLACK[NKEYS] = {-1, 0, -1, 1, -1, 2, -1, -1, 3, -1, 4, -1, -1, 5, -1, 6, -1, 7, -1, -1, 8, -1, 9, -1, -1, 10, -1};
 static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
-enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, NVIEWS };
-static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE"};
+enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND, NVIEWS };
+static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND"};
+/* T7a: the classic X0X pages (the pattern editors) are not on the normal button paths any more;
+ * they are reached from the GLOBAL list's "Classic patterns" row. `classic` is that mode: X0X's
+ * sequencer is the audio source and its views behave exactly as before. */
 static const uint16_t PART_COL[NPARTS] = {TOK_DRUM, TOK_FX, TOK_BASS, TOK_LEAD};   /* T2b: the design's role colours */
 static const char *const PART_N[NPARTS] = {"909", "808", "303A", "303B"};
 static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4 chars: lane labels */
@@ -31,7 +35,7 @@ static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4
 /* overlays drawn over the main area */
 enum { O_NONE, O_LIST, O_ASK };
 enum { ACT_NONE, ACT_SAVE, ACT_CLEAR_PART, ACT_CLEAR_PAT, ACT_COPY, ACT_RESET, ACT_ABOUT, ACT_SONG_INS,
-       ACT_SONG_DEL, ACT_SONG_CLR, ACT_PERF, ACT_PERF_TEST };
+       ACT_SONG_DEL, ACT_SONG_CLR, ACT_PERF, ACT_PERF_TEST, ACT_CLASSIC };
 
 typedef struct {
     uint8_t view, part, prev_view;
@@ -74,6 +78,8 @@ typedef struct {
     uint32_t down_t[NB];               /* when each button went down */
     uint32_t turn_t;                   /* the last encoder turn */
     uint8_t song_sel;                  /* the SONG screen's bar */
+    uint8_t classic;                   /* T7a: the classic X0X pages own the audio (X0X's sequencer) */
+    uint8_t sound_role;                /* T7a: the role whose FM6/NOISE sound card V_SOUND shows (3/4) */
 } ui_t;
 static ui_t ui;
 static uint8_t any_button;             /* a button has been pressed since power-on (the footer's first line) */
@@ -101,6 +107,69 @@ static uint16_t live_footer(const char **a, const char **b, const char **c);
 /* the runner (host/x0x_host.c) reads the layer and the focused role through these */
 int  live_layer(void);
 int  live_focus(void);
+
+/* ============================================================ T7a: STUDIO === */
+/* ui_studio.c is included near the bottom (after ui_live.c). The song home is the default view:
+ * the song card, the role x clip grid with its cursor, the clip settings page and the clear /
+ * copy / undo gestures. The clip under the cursor is reached through song_io (plain void *), so
+ * none of this needs model.h. */
+static int  studio_mode(void);                /* ui.view == V_STUDIO */
+static void studio_enter(void);               /* from boot / from LIVE / when the cursor lands */
+static void studio_handle_key(int k, int down);
+static int  studio_handle_button(int b);      /* 1 = consumed */
+static void studio_input(void);
+static void studio_draw_header(void);
+static void studio_draw(int band);
+static void studio_draw_ring(void);
+static uint16_t studio_footer(const char **a, const char **b, const char **c);
+static void studio_leds(uint32_t *btn, uint32_t *key, uint32_t *dim);
+int  studio_cursor_clip(void);                /* the clip under the cursor, -1 none */
+int  studio_cursor_role(void);
+void studio_set_cursor(int role, int col);    /* the runner's test setup */
+static int  studio_holding(void);             /* a clear/copy hold is in progress */
+static int  studio_classic(void);             /* whether the classic pages own the audio */
+void studio_tick(void);                        /* the clear / copy hold timers */
+void studio_set_classic(int on);
+int  studio_cursor(void);                      /* packed role<<8 | clip, for the runner */
+static void studio_sound_key(int k, int down); /* the sound page's keys audition the role */
+static void studio_undo(void);
+static void studio_redo(void);
+static void studio_draw_part(int band);        /* V_PART outside Classic: a sound card, no step grid */
+static void studio_draw_sound(int band);       /* V_SOUND: the FM6/NOISE sound card */
+static uint16_t studio_footer_sound(const char **a, const char **b, const char **c);
+/* the clip-setting knob refs (R_CLIP_*), used by build_pages / pref_* in ui.c */
+enum { RK_CLIP_LEN, RK_CLIP_MODE, RK_CLIP_QUANT, RK_CLIP_SWING };
+
+/* ====================================== T7a round 2: the held-note table === */
+/* One table for every "a key plays a note" path (LIVE's PLAY layer, the sound pages, and any
+ * future one). A key maps to what it started — the role and note — so a release always releases
+ * what that key began, whatever view, layer or mode is showing. Home/SEQ handoffs, set_view and
+ * the STUDIO/LIVE/Classic switches release everything still held. */
+static uint8_t hn_on[NKEYS], hn_role[NKEYS], hn_note[NKEYS];
+static void note_key_up(int k)
+{
+    if (k < 0 || k >= NKEYS || !hn_on[k])
+        return;
+    live_bridge_play_key(hn_role[k], hn_note[k], 0, 0);
+    hn_on[k] = 0;
+}
+static void note_key_down(int k, uint8_t role, uint8_t note)
+{
+    if (k < 0 || k >= NKEYS)
+        return;
+    if (hn_on[k])
+        note_key_up(k);                              /* a retrigger releases the old note first */
+    hn_role[k] = role;
+    hn_note[k] = note;
+    hn_on[k] = 1;
+    live_bridge_play_key(role, note, 1, 88);
+}
+static void note_release_all(void)
+{
+    int k;
+    for (k = 0; k < NKEYS; k++)
+        note_key_up(k);
+}
 
 /* the encoders, read for the UI: a turn counts as being touched (the autosave waits for quiet) */
 static int32_t enc(int role)
@@ -191,7 +260,8 @@ static void say(const char *a, const char *b)
 /* =============================================================== param refs === */
 enum { R_NONE, R_ENG, R_SWING, R_DLEN, R_DRATE, R_BLEN, R_BRATE, R_BDIR, R_BTRANS, R_GEN,
        R_TEMPO, R_ACCENT, R_CLKOUT, R_NOTEOUT, R_PALETTE, R_KEYLED, R_KEYSOUND, R_AUTOSAVE, R_ACT, R_SBAR, R_SPAT, R_SMODE,
-       R_SLEN, R_STALLS, R_HDR, R_TAPE, R_MIDICH, R_OUTLOUD, R_SREP, R_BATT };   /* R_TAPE: FX's one-knob TAPE (DIGI .. worn tape) */          /* R_HDR: a list's section header (a = its group), never selected */
+       R_SLEN, R_STALLS, R_HDR, R_TAPE, R_MIDICH, R_OUTLOUD, R_SREP, R_BATT,
+       R_CLIP_LEN, R_CLIP_MODE, R_CLIP_QUANT, R_CLIP_SWING };   /* T7a: the cursor clip's settings */   /* R_TAPE: FX's one-knob TAPE (DIGI .. worn tape) */          /* R_HDR: a list's section header (a = its group), never selected */
 typedef struct { uint8_t kind, a, b, c; } pref_t;
 #define PR(k, a, b, c) ((pref_t){(k), (a), (b), (c)})
 #define NONE PR(R_NONE, 0, 0, 0)
@@ -201,6 +271,14 @@ static const char *const DIR_N[] = {"FWD", "REV", "PING", "RND"};
 static const char *const ONOFF_N[] = {"OFF", "ON"};
 static const char *const ROOT_N[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const THEME_N[] = {"GREY", "AMBER", "CYAN", "RED", "MONO"};
+/* T7a: the cursor clip's settings (STUDIO 5). The launch order follows the design: beat, bar,
+ * end of clip; the model's Q_* order is Bar, Beat, End. */
+static const char *const CLIPMODE_N[] = {"Loop", "Once"};
+static const char *const QUANT_N[] = {"Bar", "Beat", "End"};   /* the model's Q_* order */
+static const x0x_param_t CLIP_LEN_P = {"LENGTH", 63, 0, 0};
+static const x0x_param_t CLIP_MODE_P = {"MODE", 1, 0, CLIPMODE_N};
+static const x0x_param_t CLIP_QUANT_P = {"LAUNCH", 2, 0, QUANT_N};
+static const x0x_param_t CLIP_SWING_P = {"SWING", 100, 0, 0};
 enum { G_DENS, G_ACC, G_SLIDE, G_OCTS, G_ROOT, G_SCALE, G_BASE, G_MUT, NGEN };
 static const x0x_param_t GEN_P[NGEN] = {
     {"DENS", 100, 70, 0}, {"ACCENT", 100, 40, 0}, {"SLIDE", 100, 25, 0}, {"OCTS", 2, 1, 0},
@@ -222,6 +300,7 @@ static const x0x_param_t ACT_P[] = {
     {"", 0, 0, 0}, {"SAVE PROJECT", 0, 0, 0}, {"CLEAR THIS PART", 0, 0, 0}, {"CLEAR PATTERN", 0, 0, 0},
     {"COPY PATTERN", 0, 0, 0}, {"FACTORY RESET", 0, 0, 0}, {"ABOUT X0X", 0, 0, 0}, {"INSERT BAR", 0, 0, 0},
     {"DELETE BAR", 0, 0, 0}, {"CLEAR SONG", 0, 0, 0}, {"PERFORMANCE", 0, 0, 0}, {"RUN PERF TEST", 0, 0, 0},
+    {"CLASSIC PATTERNS", 0, 0, 0},
 };
 static const x0x_param_t STALLS_P = {"STALLS", 1, 0, ONOFF_N};
 static const x0x_param_t MIDICH_P[NPARTS] = {   /* 0 = OFF (no notes in or out), 1-16 */
@@ -295,6 +374,10 @@ static const x0x_param_t *pref_desc(pref_t r)
         static const x0x_param_t d = {"TAPE", 127, 72, 0};
         return &d;
     }
+    case R_CLIP_LEN: return &CLIP_LEN_P;
+    case R_CLIP_MODE: return &CLIP_MODE_P;
+    case R_CLIP_QUANT: return &CLIP_QUANT_P;
+    case R_CLIP_SWING: return &CLIP_SWING_P;
     default: return 0;
     }
 }
@@ -324,7 +407,11 @@ static int pref_get(pref_t r)
         default: return g->mutate_bars;
         }
     }
-    case R_TEMPO: return (int)(seq.bpm + 0.5f) - 20;
+    case R_TEMPO:
+        if (ui.classic)
+            return (int)(seq.bpm + 0.5f) - 20;
+        return (int)(live_bridge_bpm_x10() / 10u) - 20;
+
     case R_ACCENT: return seq.accent_q7;
     case R_CLKOUT: return seq.send_clock;
     case R_NOTEOUT: return seq.send_notes;
@@ -346,6 +433,19 @@ static int pref_get(pref_t r)
     case R_SLEN: return song()->len;
     case R_STALLS: return perf.stalls_on;
     case R_TAPE: return proj.sound.v[T_FX][1][0];       /* (kept in an engine slot nothing reads) */
+    case R_CLIP_LEN: {
+        int c = studio_cursor_clip(), l = c < 0 ? 0 : song_io_clip_len(c);
+        return l > 0 ? l - 1 : 15;                   /* an empty slot reads as the 1-bar default */
+    }
+    case R_CLIP_MODE: {
+        int c = studio_cursor_clip();
+        return c < 0 ? 0 : song_io_clip_mode(c);
+    }
+    case R_CLIP_QUANT: {
+        int c = studio_cursor_clip();
+        return c < 0 ? 0 : song_io_clip_quant(c);
+    }
+    case R_CLIP_SWING: return song_io_swing();
     default: return 0;
     }
 }
@@ -391,7 +491,15 @@ static void pref_set(pref_t r, int v)
             ui.gen_stale[r.a] = 1;
         break;
     }
-    case R_TEMPO: seq.bpm = (float)(v + 20); break;
+    case R_TEMPO:
+        if (ui.classic)
+            seq.bpm = (float)(v + 20);
+        else {                                         /* T7a: the song's tempo, everywhere */
+            song_io_set_bpm((v + 20) * 10);
+            live_bridge_set_bpm((uint16_t)((v + 20) * 10));
+            live_bridge_sync_tempo();
+        }
+        break;
     case R_ACCENT: seq.accent_q7 = (uint8_t)v; break;
     case R_CLKOUT: seq.send_clock = (uint8_t)v; break;
     case R_NOTEOUT: seq.send_notes = (uint8_t)v; break;
@@ -437,6 +545,25 @@ static void pref_set(pref_t r, int v)
         if (ui.song_sel > song()->len)
             ui.song_sel = (uint8_t)(song()->len < NSONG ? song()->len : NSONG - 1);
         break;
+    case R_CLIP_LEN: {
+        int c = studio_cursor_clip();
+        if (c >= 0)
+            song_io_clip_set_len(c, v + 1);
+        break;
+    }
+    case R_CLIP_MODE: {
+        int c = studio_cursor_clip();
+        if (c >= 0)
+            song_io_clip_set_mode(c, v);
+        break;
+    }
+    case R_CLIP_QUANT: {
+        int c = studio_cursor_clip();
+        if (c >= 0)
+            song_io_clip_set_quant(c, v);
+        break;
+    }
+    case R_CLIP_SWING: song_io_set_swing(v); break;
     default: break;
     }
 }
@@ -477,6 +604,10 @@ static const char *pref_name(pref_t r)
     static const char *const CHN[MX_NPARAMS] = {"LEVEL", "REV", "DLY", "PAN"};
     const x0x_param_t *d = pref_desc(r);
     static const char *const SEQN[6] = {"LENGTH", "RATE", "LENGTH", "RATE", "DIRECT", "TRANSP"};
+    if (r.kind == R_CLIP_LEN || r.kind == R_CLIP_MODE || r.kind == R_CLIP_QUANT || r.kind == R_CLIP_SWING)
+        return d->name;
+    if (r.kind == R_ACT && r.a == ACT_CLASSIC)       /* T7a: enter Classic, or back to the song home */
+        return ui.classic ? "BACK TO SONG" : "CLASSIC PATTERNS";
     if (ui.view == V_LIVE && r.kind == R_ENG) {       /* T3: the LIVE performance knobs' design labels */
         if (r.a == T_MST && r.c == MST_DJF)
             return "FILTER";
@@ -559,6 +690,18 @@ static void pref_value_of(pref_t r, int v, char *num, char *unit)
         return;
     }
     switch (r.kind) {
+    case R_CLIP_LEN: {
+        int steps = v + 1;
+        if (steps % 16 == 0) {
+            put_i(num, steps / 16);
+            put_s(unit, steps == 16 ? "bar" : "bars");
+        } else {
+            put_i(num, steps);
+            put_s(unit, "st");
+        }
+        return;
+    }
+    case R_CLIP_SWING: put_i(num, v); put_s(unit, "%"); return;
     case R_ENG:
         if (r.a == T_MST) {                              /* the master formats itself: "-12dB" */
             char t[16], *q = t;
@@ -828,6 +971,19 @@ static void build_pages(void)
                  PR(R_SPAT, PART_303A, 0, 0));
         add_page("BAR", PR(R_SBAR, 0, 0, 0), PR(R_SPAT, PART_303B, 0, 0), NONE, PR(R_SREP, 0, 0, 0));
         break;
+    case V_STUDIO:
+    case V_CLIPSET:                                    /* T7a: the cursor clip's settings (STUDIO 5) */
+        add_page("CLIP", PR(R_CLIP_LEN, 0, 0, 0), PR(R_CLIP_MODE, 0, 0, 0), PR(R_CLIP_QUANT, 0, 0, 0),
+                 PR(R_CLIP_SWING, 0, 0, 0));
+        break;
+    case V_SOUND: {                                    /* T7a: CHORDS/FM6 and FX/NOISE, T_RSV macros */
+        int v = ui.sound_role == 3 ? 0 : 1;
+        add_page(v ? "NOISE" : "FM6", PR(R_ENG, T_RSV, v, 0), PR(R_ENG, T_RSV, v, 1),
+                 PR(R_ENG, T_RSV, v, 2), PR(R_ENG, T_RSV, v, 3));
+        add_page(v ? "NOISE" : "FM6", PR(R_ENG, T_RSV, v, 4), PR(R_ENG, T_RSV, v, 5),
+                 PR(R_ENG, T_RSV, v, 6), PR(R_ENG, T_RSV, v, 7));
+        break;
+    }
     default: break;
     }
     if (pg.n == 0)
@@ -926,6 +1082,8 @@ static void open_list_of_pages(void)
 static void open_global(void)
 {
     ui.list_n = 0;
+    if (!ui.classic)                               /* T7a: the way into the classic pages, first */
+        list_add(PR(R_ACT, ACT_CLASSIC, 0, 0));
     list_add(PR(R_CLKOUT, 0, 0, 0));
     list_add(PR(R_NOTEOUT, 0, 0, 0));
     for (int p = 0; p < NPARTS; p++)
@@ -942,6 +1100,8 @@ static void open_global(void)
     list_add(PR(R_ACT, ACT_PERF, 0, 0));
     list_add(PR(R_ACT, ACT_ABOUT, 0, 0));
     list_add(PR(R_BATT, 0, 0, 0));
+    if (ui.classic)                                /* T7a: the way back, last (keeps the rows above) */
+        list_add(PR(R_ACT, ACT_CLASSIC, 0, 0));
     put_s(list_title, "GLOBAL");
     ui.list_sel = ui.list_top = 0;
     ui.overlay = O_LIST;
@@ -1556,6 +1716,10 @@ static void run_action(int act, int arg)
         put_s(put_i(q, (int)plat_cpu_pct()), "%");
         say(t, 0);
         break;
+    case ACT_CLASSIC:                                 /* T7a: swap the audio between the song and X0X */
+        ui.overlay = O_NONE;
+        studio_set_classic(ui.classic ? 0 : 1);
+        break;
     default: break;
     }
 }
@@ -1586,6 +1750,7 @@ static int32_t accel(int role, int32_t s, int range)
 
 static void set_view(int v)
 {
+    note_release_all();                           /* T7a r2: a view change releases every held note */
     if (v != ui.view)
         ui.prev_view = ui.view;
     ui.view = (uint8_t)v;
@@ -2004,10 +2169,22 @@ static void mute_track(int km, int v)                /* one drum track on / off 
 static void key_event(int k, int down)
 {
     int w = KEY_WHITE[k], bl = KEY_BLACK[k], wp = w >= 0 ? ui.pbank * 16 + w : -1;   /* wp: a white key's pattern */
+    if (!down)
+        note_key_up(k);                                /* T7a r2: a release always releases what k began */
     if (ui.overlay == O_ASK || ui.view == V_PERF || perf_testing())
         return;
     if (live_mode()) {                                     /* T3: LIVE owns the keys */
         live_handle_key(k, down);
+        return;
+    }
+    if (studio_mode()) {                                   /* T7a: the song home's keys are its clips */
+        studio_handle_key(k, down);
+        return;
+    }
+    if (ui.view == V_CLIPSET)
+        return;                                            /* the clip settings page: the keys are inert */
+    if (!ui.classic && (ui.view == V_PART || ui.view == V_SOUND)) {   /* sound pages: audition the role */
+        studio_sound_key(k, down);
         return;
     }
     if (down && w >= 0 && (ui.btn & (1u << B_SAVE))) {     /* SAVE held + white key: paste the pattern here */
@@ -2175,24 +2352,63 @@ static void button_tap(int b)
         live_handle_button(b);
         return;
     }
+    /* T7a: outside Classic, HOME and SEQ on an X0X page return to the song home; inside Classic,
+     * HOME on X0X's song arranger (V_SONG) leaves Classic the same way. */
+    if (b == B_HOME || b == B_SEQ) {
+        if (ui.classic && b == B_HOME && ui.view == V_SONG && ui.overlay == O_NONE) {
+            studio_set_classic(0);
+            return;
+        }
+        if (!ui.classic && ui.view != V_STUDIO && ui.view != V_CLIPSET && ui.view != V_LIVE) {
+            if (b == B_HOME && ui.overlay != O_NONE) {
+                close_overlay();
+                return;
+            }
+            set_view(V_STUDIO);
+            studio_enter();
+            return;
+        }
+    }
+    if (!ui.classic && b == B_ARP) {                   /* T7a D2: TB-3PO is a classic pattern tool */
+        say("CLASSIC: GLO", 0);
+        return;
+    }
+    if (ui.view == V_STUDIO || ui.view == V_CLIPSET || ui.view == V_SOUND) {   /* T7a: the song pages */
+        if (studio_handle_button(b))
+            return;
+    }
     switch (b) {
     case B_PLAY:
         if (ui.btn & (1u << B_HOME)) {               /* HOME + PLAY: redo */
             ui.btn_used |= 1u << B_HOME;
-            do_undo(1);
+            if (ui.classic)
+                do_undo(1);
+            else
+                studio_redo();
             break;
         }
-        if (seq.playing)
-            seq_stop(&seq);
-        else {
-            seq.song_start = ui.song_sel < song()->len ? ui.song_sel : 0;
-            seq_start(&seq);
+        if (ui.classic) {                            /* classic: X0X's transport */
+            if (seq.playing)
+                seq_stop(&seq);
+            else {
+                seq.song_start = ui.song_sel < song()->len ? ui.song_sel : 0;
+                seq_start(&seq);
+            }
+        } else if (live_bridge_transport_playing()) {   /* T7a: the clip engine's transport, everywhere */
+            live_bridge_transport_stop();
+            say("STOP", 0);
+        } else {
+            live_bridge_transport_start();
+            say("PLAY", 0);
         }
         break;
     case B_REC:
         if (ui.btn & (1u << B_HOME)) {               /* HOME + REC: undo */
             ui.btn_used |= 1u << B_HOME;
-            do_undo(0);
+            if (ui.classic)
+                do_undo(0);
+            else
+                studio_undo();
             break;
         }
         if (ui.btn & (1u << B_SAVE)) {               /* SAVE + REC: clear this part (asks) */
@@ -2362,6 +2578,10 @@ static void input(void)
     }
     if (live_mode()) {                                 /* T3: SELECT and SEL are inert in LIVE */
         live_input();
+        return;
+    }
+    if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {   /* T7a: the song home's encoders */
+        studio_input();
         return;
     }
     if ((e = enc(EN_SELECT)) != 0) {             /* SELECT: move; with HOME held: tempo */
@@ -2812,33 +3032,49 @@ static void draw_header(void)
         live_draw_header();
         return;
     }
-    if (part_view()) {                                /* the part chip, then where we are */
-        int32_t w = tw(&AF_M, PART_N[ui.part]) + 12;
-        box(0, 1, w, 17, part_col());
-        cv_text(6, vc(&AF_M, 1, 17), &AF_M, PART_N[ui.part], C_BLACK);
-        x = w + 6;
-        if (ui.view == V_GEN)
-            x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, "TB-3PO", C_HI) + 6;
-        else if (ui.view == V_SEQ)
-            x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, is_303() && ui.rec ? "SEQ KEYS" : "SEQ", is_303() && ui.rec ? C_AMB : C_HI) + 6;
-        else if (is_303() && ui.rec)
-            x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, "KEYS", C_AMB) + 6;
-    } else {
-        x = cv_text(4, vc(&AF_M, 1, 17), &AF_M, VIEW_N[ui.view], C_HI) + 6;
-        if (drum_mix_page() >= 0)                     /* MIX: 909 / MIX: 808 (whose tracks these are) */
-            x = cv_text(x - 6, vc(&AF_M, 1, 17), &AF_M, drum_mix_page() ? ": 808" : ": 909",
-                        PART_COL[drum_mix_page()]) + 6;
+    if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {   /* T7a: the song home's header */
+        studio_draw_header();
+        return;
     }
-    {   /* the pattern of the part on screen (else the 909's), its cue; in SONG mode the bar */
+    {   /* T7a: in classic mode a CLASSIC chip sits at the left, everything else follows it */
+        int32_t lx = 0;
+        if (ui.classic) {
+            int32_t wc = tw(&AF_S, "CLASSIC") + 8;
+            box(0, 2, (int32_t)wc, 15, TOK_RAISE);
+            cv_text(4, vc(&AF_S, 2, 15), &AF_S, "CLASSIC", TOK_MID);
+            lx = wc + 3;
+        }
+        if (part_view()) {                            /* the part chip, then where we are */
+            int32_t w = tw(&AF_M, PART_N[ui.part]) + 12;
+            box(lx, 1, w, 17, part_col());
+            cv_text(lx + 6, vc(&AF_M, 1, 17), &AF_M, PART_N[ui.part], C_BLACK);
+            x = lx + w + 6;
+            if (ui.view == V_GEN)
+                x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, "TB-3PO", C_HI) + 6;
+            else if (ui.view == V_SEQ)
+                x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, is_303() && ui.rec ? "SEQ KEYS" : "SEQ", is_303() && ui.rec ? C_AMB : C_HI) + 6;
+            else if (is_303() && ui.rec)
+                x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, "KEYS", C_AMB) + 6;
+        } else {
+            x = cv_text(lx + 4, vc(&AF_M, 1, 17), &AF_M, VIEW_N[ui.view], C_HI) + 6;
+            if (drum_mix_page() >= 0)                 /* MIX: 909 / MIX: 808 (whose tracks these are) */
+                x = cv_text(x - 6, vc(&AF_M, 1, 17), &AF_M, drum_mix_page() ? ": 808" : ": 909",
+                            PART_COL[drum_mix_page()]) + 6;
+        }
+    }
+    if (ui.view != V_SOUND && (ui.classic || ui.view != V_PART)) {
+    /* the pattern of the part on screen (else the 909's), its cue; in SONG mode the bar. T7a r2:
+     * a sound page outside Classic draws no X0X "P1" marker. */
         int part = part_view() ? ui.part : PART_909, cue = seq_cue_of(&seq, part);
+        int32_t px = x + 6 > 132 ? x + 6 : 132;       /* T7a: the CLASSIC chip widens the left side */
         if (seq.song_on) {
             b[0] = 'S';
             put_i(b + 1, (seq.playing ? seq.song_pos : ui.song_sel) + 1);
-            x = cv_text(132, vc(&AF_M, 1, 17), &AF_M, b, seq.song_rec ? RGB(255, 90, 80) : C_AMB);
+            x = cv_text(px, vc(&AF_M, 1, 17), &AF_M, b, seq.song_rec ? RGB(255, 90, 80) : C_AMB);
         } else {
             b[0] = 'P';
             put_i(b + 1, seq.ppat[part] + 1);
-            x = cv_text(132, vc(&AF_M, 1, 17), &AF_M, b, C_WHITE);
+            x = cv_text(px, vc(&AF_M, 1, 17), &AF_M, b, C_WHITE);
         }
         if (cue >= 0 && cue != seq.ppat[part] && !seq.song_on) {
             b[0] = '>';
@@ -3547,6 +3783,10 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         *c = "HOME: BACK";
     } else if (ui.view == V_LIVE) {
         return live_footer(a, b, c);
+    } else if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {
+        return studio_footer(a, b, c);
+    } else if (ui.view == V_SOUND || (!ui.classic && ui.view == V_PART)) {
+        return studio_footer_sound(a, b, c);        /* T7a: sound-only pages */
     } else if (ui.view == V_HOME) {
         *a = "WHITE: PATTERN";
         *b = "TWO: CHAIN";
@@ -3587,6 +3827,15 @@ static void draw_footer(void)
 {
     const char *a, *b, *c;
     uint16_t col = footer_text(&a, &b, &c);
+    if (ui.classic) {                                  /* T7a: how out of the classic pages */
+        if (ui.view == V_SONG) {
+            a = "GLO: BACK TO SONG";
+            b = c = 0;
+        } else {
+            b = "GLO: BACK TO SONG";
+            c = 0;
+        }
+    }
     segs(4, vc(&AF_S, FOOT_Y, 9), &AF_S, col, FOOT_GAP, a, b, c, 0);
 }
 
@@ -3616,6 +3865,12 @@ static void draw_main(void)
             draw_perf(band);
         else if (ui.view == V_LIVE)
             live_draw(band);
+        else if (ui.view == V_STUDIO || ui.view == V_CLIPSET)
+            studio_draw(band);
+        else if (ui.view == V_SOUND)
+            studio_draw_sound(band);
+        else if (!ui.classic && ui.view == V_PART)
+            studio_draw_part(band);                      /* T7a: sound-only, no X0X step grid */
         else if (is_drum())
             draw_drum(band);
         else
@@ -3626,6 +3881,8 @@ static void draw_main(void)
     cv_band(0, 2 * BAND_H);                            /* the ring, if filling: over both bands */
     if (live_holding())
         live_draw_ring();
+    else if (studio_holding())
+        studio_draw_ring();
     cv_commit_rect(1, 0, MAIN_Y);
 }
 
@@ -3655,6 +3912,7 @@ static uint32_t knobs_sig(void)
     MIXIN(ui.sel[0] | ui.sel[1] << 8);
     MIXIN(seq.ppat[ui.part]);
     MIXIN(ui.song_sel);
+    MIXIN(studio_cursor());
     {
         const char *fa, *fb, *fc;
         MIXIN(footer_text(&fa, &fb, &fc));
@@ -3807,6 +4065,8 @@ static void draw_knobs(void)
 }
 
 /* ===================================================================== LEDs === */
+/* T7a: the STUDIO song home (its own file, included like ui_live.c below). */
+#include "ui_studio.c"
 /* T3: the LIVE view lives in its own file, included here so it can use every helper above
  * (its entry points are forward-declared at the top of ui.c). */
 #include "ui_live.c"
@@ -3842,6 +4102,8 @@ static void leds(void)
     if (proj.set.keyled) {                           /* bright: on / chosen; dim: there, not chosen */
         if (ui.view == V_LIVE) {
             live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SCL shows the layer */
+        } else if (ui.view == V_STUDIO) {
+            studio_leds(&b, &k, &d);                 /* T7a: the clip grid's states on the keys */
         } else if (ui.view == V_HOME || ui.view == V_SONG) {
             const song_t *sg = song();
             int bar = ui.view == V_SONG && ui.song_sel < sg->len;
@@ -3926,8 +4188,9 @@ void ui_init(void)
             BLACK_KEY[KEY_BLACK[i]] = (uint8_t)i;
     }
     corners_init();
-    ui.view = V_PART;
-    ui.prev_view = V_PART;
+    ui.view = V_STUDIO;                                /* T7a: STUDIO opens on the song home */
+    ui.prev_view = V_STUDIO;
+    ui.classic = 0;
     ui.part = PART_909;
     ui.held_step = -1;
     ui.hold_step = -1;
@@ -3939,6 +4202,7 @@ void ui_init(void)
         blit_hash[i] = 0;
     build_pages();
     undo_start();                                   /* the project as loaded is where undo stops */
+    studio_enter();                                 /* T7a: the song home's cursor */
 }
 
 /* AUTOSAVE: changes are saved by themselves while the pattern is stopped and nothing has been touched
@@ -3950,13 +4214,14 @@ void ui_init(void)
 static void autosave(void)
 {
     uint32_t now = plat_ms();
-    if (live_mode() || live_bridge_active())         /* T3: never write flash while LIVE is active */
+    if (live_mode() || live_holding())                /* T3: never write flash while LIVE is active */
         return;
-    if (save_wait && !seq.playing && !seq.req_stop) { /* SAVE pressed while playing: now */
+    if (save_wait && !seq.playing && !seq.req_stop && !live_bridge_transport_playing()) {   /* SAVE while playing: now */
         save_project();
         return;
     }
-    if ((!ui.dirty && !song_io_wants_save()) || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop || ui.rec || perf_testing() ||
+    if ((!ui.dirty && !song_io_wants_save()) || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop ||
+        live_bridge_transport_playing() || ui.rec || perf_testing() ||
         ui.overlay == O_ASK || now - ui.act_t < AUTOSAVE_QUIET || (ui.saved_t && now - ui.saved_t < AUTOSAVE_GAP))
         return;
     ui.saved_t = now;
@@ -3979,6 +4244,7 @@ void ui_frame(void)
 {
     uint32_t i;
     input();
+    studio_tick();                                  /* T7a: the clear / copy hold timers */
     undo_tick();
     autosave();
     perf_test_tick();

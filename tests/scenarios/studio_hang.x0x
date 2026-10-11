@@ -1,0 +1,33 @@
+# T7a follow-up D1: leaving LIVE releases the note a held key started. Enter LIVE from the song
+# home, switch to PLAY, hold a key, long-press PLAY, and the note-off follows.
+wait 300
+tap SEQ
+tap HOME
+tap SEL
+tap PLAY
+wait-bar 1
+# into LIVE (a clip is playing; leaving must keep it playing, but release the held key)
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 1
+expect liveclip0 0
+tap SEL
+expect layer 1
+events studio_hang_events.txt
+key 0 down
+wait 100
+press PLAY
+wait 700
+release PLAY
+key 0 up
+wait 500
+eventsstop
+expect mode 0
+expect view 10
+expect boffs >0
+expect liveclip0 0
+dump studio_hang.json
+tap PLAY
+expect playing 0

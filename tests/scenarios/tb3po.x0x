@@ -1,6 +1,9 @@
 # TB-3PO: the settings are the next line's. Turning them leaves the line as it is (and marks the
 # screen); OCT+ writes a new line, OCT- mutates it.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 turn ALGO 2
 expect part 2
 tap ARP

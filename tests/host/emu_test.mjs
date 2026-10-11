@@ -21,9 +21,13 @@ const render = (ms) => {
     out.push(...new Float32Array(mem.buffer, ex.web_out_l(), k));
   }
 };
-// as the host script's tapkey (60 ms held, 30 released) and tap (40, 40): kick, steps 1 and 9, PLAY
+// as the host script's tapkey (60 ms held, 30 released) and tap (40, 40): into the classic pages
+// (GLO + SEL; T7a's song home is the boot view), a kick on steps 1 and 9, then PLAY
 const tapkey = (k) => { ex.web_keys(1 << k); render(60); ex.web_keys(0); render(30); };
+const tapbtn = (b) => { ex.web_buttons(1 << b); render(40); ex.web_buttons(0); render(40); };
 render(500);
+tapbtn(5);                                  /* GLO */
+tapbtn(1);                                  /* SEL: the Classic patterns row */
 tapkey(1);
 tapkey(0);
 tapkey(14);

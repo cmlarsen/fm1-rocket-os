@@ -1,0 +1,28 @@
+# T7a follow-up D4 + D3: a SEL tap is only a launch (no clear ring); the ring appears after a 250 ms
+# hold and cancels on release; "can't undo" is its own toast, drawn inside the band.
+wait 300
+tap SEQ
+tap HOME
+wait 1400
+expect clipused0 1
+# a tap on SEL launches the cursor clip, no ring
+press SEL
+wait 120
+shot studio_seltap.png
+release SEL
+expect clipused0 1
+# a 400 ms hold shows the ring, but releasing early cancels
+press SEL
+wait 400
+shot studio_seltap_ring.png
+release SEL
+wait 100
+expect clipused0 1
+# nothing to undo: the "can't undo" toast shows
+press HOME
+tap REC
+release HOME
+wait 150
+shot studio_cantundo.png
+expect clipused0 1
+dump studio_seltap.json

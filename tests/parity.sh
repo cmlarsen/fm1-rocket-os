@@ -10,7 +10,7 @@ command -v node >/dev/null 2>&1 || { echo "parity: node is not on PATH (install 
 command -v emcc >/dev/null 2>&1 || { echo "parity: emcc is not on PATH (install the Emscripten SDK)"; exit 2; }
 mkdir -p build/host
 sh host/build_host.sh >/dev/null
-printf 'wav emu_ref.wav\nwait 500\ntapkey b0\ntapkey w0\ntapkey w8\ntap PLAY\nwait 2960\nwavstop\n' > build/host/emu_ref.x0x
+printf 'wav emu_ref.wav\nwait 500\n# T7a: into the classic pages, so the keys edit the 909 (a non-silent signal)\ntap GLO\ntap SEL\ntapkey b0\ntapkey w0\ntapkey w8\ntap PLAY\nwait 2960\nwavstop\n' > build/host/emu_ref.x0x
 sh web/emu/build.sh >/dev/null 2>&1
 build/host/x0x_host build/host/emu_ref.x0x build/host >/dev/null
 node tests/host/emu_test.mjs build/emu/x0x.wasm build/host/emu_ref.wav

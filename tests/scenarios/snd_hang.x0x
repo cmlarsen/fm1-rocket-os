@@ -1,0 +1,31 @@
+# T7a round 2: a note held on a sound page is released when the view changes, not left hanging.
+# EDIT -> HOME from the BASS sound page and from the CHORDS/FM6 card.
+wait 300
+# BASS sound page: hold a key, HOME back, release
+cursor 1 0
+tap EDIT
+expect view 1
+expect part 2
+wait 1400
+shot snd_hang_bass.png
+events snd_hang_events.txt
+key 0 down
+wait 100
+tap HOME
+key 0 up
+wait 300
+expect view 10
+expect bassheld 0
+# CHORDS/FM6 card: hold a key, HOME back, release
+cursor 3 0
+tap EDIT
+expect view 12
+key 2 down
+wait 100
+tap HOME
+key 2 up
+wait 300
+expect view 10
+expect fm6held 0
+eventsstop
+dump snd_hang.json

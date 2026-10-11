@@ -102,7 +102,8 @@ static void rc_live_enter(void)
     live.layer = LIVE_PADS;
     live.focus = LIVE_BASS;
     live.octv = 0;
-    live_clear_held();
+    note_release_all();
+    live_bridge_rebuild(rc_pat);           /* T7a: map the stress patterns explicitly (no auto-remap) */
     live_bridge_enter(rc_pat, bpm ? bpm : 1200u);
     set_view(V_LIVE);
     say("LIVE", 0);
@@ -206,7 +207,7 @@ static void rc_stop(void)
         return;
     if (live_bridge_active()) {
         live_bridge_exit();
-        live_clear_held();
+        note_release_all();
         set_view(rc_sav_view == V_LIVE ? V_HOME : rc_sav_view);
         rc_settle();                    /* T5perf: let the exit land, as the sequencer stop below does */
     } else if (seq.playing || seq.req_start || seq.req_stop) {

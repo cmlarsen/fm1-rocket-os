@@ -1,5 +1,5 @@
 {
-  "transport": {"playing": 1, "bpm": 125.0, "bar": 1, "beat": 0, "step": 0, "sample": 107776},
+  "transport": {"playing": 1, "bpm": 125.0, "bar": 1, "beat": 0, "step": 0, "sample": 114944},
   "parts": [
     {"part": 0, "ppat": 0, "pcue": -1, "mute": 0},
     {"part": 1, "ppat": 0, "pcue": -1, "mute": 0},
@@ -7,6 +7,7 @@
     {"part": 3, "ppat": 0, "pcue": -1, "mute": 0}
   ],
   "view": 1,
+  "studio": {"role": 0, "col": 0, "clip": 0, "classic": 1},
   "leds": {
     "keys": [2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
     "buttons": {"EDIT": 1}

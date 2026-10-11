@@ -1,5 +1,8 @@
 # Part patterns, the song, knob motion: each part its own pattern, bars arranged, moves recorded.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 # the 909 (on screen at boot): a kick on the quarters
 tapkey b0
 tapkey w0
@@ -73,7 +76,7 @@ turn ALGO -1
 tap HOME
 expect songon 0
 # motion: 303 A's cutoff, swept while recording, one turn a step (16 steps of 125 ms)
-tap HOME
+# T7a: HOME on X0X's SONG page now leaves Classic, so EDIT straight from SONG opens 303 A's page.
 tap EDIT
 expect part 2
 expect sound2.0.0 48
@@ -140,6 +143,9 @@ expect lanes 1
 tap SAVE
 expect store_writes 6
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 expect lanes 1
 expect songlen 3
 expect songbar2.3 5

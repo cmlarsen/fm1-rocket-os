@@ -1,6 +1,9 @@
 # T5i follow-up: the note clamp, the overload guard's FM6 cap and NOISE shed, and the all-notes-off
 # (engine_all_off): the panic path and the transport-stop path.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 param 5 4 0 100
 param 5 5 0 100
 param 3 0 7 0

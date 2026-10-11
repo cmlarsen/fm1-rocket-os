@@ -1,0 +1,35 @@
+# T7a decision 7: LIVE uses the same song with no remap. A clip launched on the song home keeps
+# playing through a STUDIO -> LIVE -> STUDIO mode change (the clip engine keeps running).
+wait 300
+tap SEQ
+tap HOME
+tap SEL
+expect liveque0 0
+tap PLAY
+expect playing 1
+wait-bar 1
+expect liveclip0 0
+wait 1400
+shot studio_live_studio.png
+# long-press PLAY into LIVE; the clip is still playing
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 1
+expect liveclip0 0
+expect playing 1
+shot studio_live_live.png
+# and back: it is still playing
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 0
+expect view 10
+expect liveclip0 0
+expect playing 1
+shot studio_live_back.png
+dump studio_live.json
+tap PLAY
+expect playing 0

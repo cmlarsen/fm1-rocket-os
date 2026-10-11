@@ -1,0 +1,50 @@
+# T7a STUDIO 9 + 10: HOME + hold a pad fills a ring that names the clip; on completion the clip
+# clears with an undo entry. Releasing early cancels. HOME+REC undoes, HOME+PLAY redoes.
+wait 300
+tap SEQ
+tap HOME
+wait 1400
+expect clipused0 1
+# releasing early cancels
+press HOME
+key w0 down
+wait 400
+key w0 up
+release HOME
+expect clipused0 1
+# HOME + hold the pad: the ring fills over ~1.5 s
+press HOME
+key w0 down
+wait 700
+shot studio_clear_ring.png
+wait 1000
+key w0 up
+release HOME
+expect clipused0 0
+expect undodepth 1
+# undo restores the clip, names the action
+press HOME
+tap REC
+release HOME
+expect clipused0 1
+expect undopos 0
+wait 1400
+shot studio_undo.png
+# redo clears it again
+press HOME
+tap PLAY
+release HOME
+expect clipused0 0
+expect undopos 1
+wait 1400
+shot studio_redo.png
+# SEL held on the cursor clears too (the ring names the clip under it)
+press HOME
+tap REC
+release HOME
+expect clipused0 1
+press SEL
+wait 1600
+release SEL
+expect clipused0 0
+dump studio_clear.json

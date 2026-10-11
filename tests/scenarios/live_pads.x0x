@@ -1,6 +1,9 @@
 # T3 LIVE, the PADS layer: build two 909 patterns and a 303 line in STUDIO, enter LIVE on a
 # long PLAY press, launch and switch clips on the bar, stop a role, and read the key LEDs.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 # pattern 1 of the 909 gets a kick on step 3 (so LIVE has two drum clips)
 tapkey w0
 tapkey w4
@@ -18,6 +21,8 @@ turn ALGO -3
 expect part 0
 
 # --- enter LIVE: a long press on PLAY, the ring fills ---
+# T7a: the song is the edited object; seed its clips from the patterns just built.
+songseed
 press PLAY
 wait 300
 shot live_enter.png

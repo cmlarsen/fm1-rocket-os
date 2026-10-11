@@ -1,6 +1,9 @@
 # AUTOSAVE (default ON): unsaved changes are saved by themselves while stopped, once nothing has been
 # touched for 4 s, writing only the objects that changed; never while playing; never when OFF.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect store_writes 0
 # a kick on steps 1 and 9, stopped
 tapkey b0
@@ -12,6 +15,9 @@ wait 1500
 # the first save writes every object (nothing was on the flash yet)
 expect store_writes 6
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 expect hit0.0.0 1
 expect hit0.0.8 1
 # one more step: only the patterns' object changes, so one write
@@ -42,6 +48,9 @@ tapkey w2
 wait 25000
 expect store_writes 9
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 expect hit0.0.2 0
 tapkey w2
 wait 25000

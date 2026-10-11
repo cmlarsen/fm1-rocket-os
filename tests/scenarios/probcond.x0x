@@ -2,6 +2,9 @@
 # the A-th of every B passes of its part's pattern. A kick on 1, 5, 9, 13; step 1 at 1:4 (passes 1 and 5 of
 # 8), step 9 at 2:2 (passes 2, 4, 6, 8): with NOTES OUT, 2 + 8 + 4 + 8 = 22 kicks in 8 bars.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 tapkey b0
 tapkey w0
 tapkey w4

@@ -20,6 +20,7 @@ typedef struct {
     uint8_t holding, to_live;             /* the ring is filling; 1 = entering LIVE */
     uint8_t long_done;                    /* the 600 ms point was reached */
     uint8_t back;                         /* the view to come back to */
+    uint8_t back_classic;                 /* T7a: LIVE was entered from the classic pages */
     uint32_t t0;
     int8_t octv;                          /* the PLAY layer's octave */
 } live_ui_t;
@@ -30,39 +31,43 @@ static int live_holding(void) { return live.holding != 0; }
 int live_layer(void) { return live.layer; }
 int live_focus(void) { return live.focus; }
 
-/* T3 review: a key's note is tracked per key, whatever the layer/focus/octave does while it is
- * held. A release always releases the note that key started (never the current focus's). */
-static uint8_t held_role[NKEYS], held_note[NKEYS], held_on[NKEYS];
-static void live_clear_held(void)
-{
-    int k;
-    for (k = 0; k < NKEYS; k++)
-        held_on[k] = 0;
-}
+/* T7a round 2: the held-note table lives in the shared key path (ui.c), so a key's note is tracked
+ * per key whatever the layer/focus/octave does, and a release (or a view/mode change) always
+ * releases what that key started. */
 
 /* ---- mode in and out ---- */
 
 static void live_enter(void)
 {
-    uint16_t bpm = (uint16_t)(seq.bpm * 10.0f + 0.5f);
     live.back = ui.view;
+    live.back_classic = ui.classic;       /* T7a: remember whether we came from the classic pages */
     live.layer = LIVE_PADS;               /* the PADS layer is the default on entry */
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
-    live_clear_held();
-    if (live_bridge_enter(&proj.pat[0], bpm))   /* stops X0X's transport and releases its voices
-                                                 * (engine_all_off); 1 = it rebuilt the clips from the
-                                                 * project, so the song changed (T6i) */
-        song_io_mark_dirty();
+    note_release_all();                   /* T7a r2: changing mode releases every held note */
+    ui.classic = 0;                       /* LIVE is the clip engine, wherever it was entered from */
+    live_bridge_enter(&proj.pat[0], 0);   /* T7a: make the clip engine the source; it does not
+                                           * rebuild and does not reset the transport, so clips keep
+                                           * playing across the mode change */
     set_view(V_LIVE);
     say("LIVE", 0);
 }
 
 static void live_leave(void)
 {
-    live_bridge_exit();                   /* stops the clip transport and releases any held note */
-    live_clear_held();
-    set_view(live.back == V_LIVE ? V_HOME : live.back);
+    note_release_all();                   /* T7a D1/r2: leaving LIVE releases every held note */
+    if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
+        ui.classic = 1;
+        live_bridge_exit();
+        engine_all_off();
+        set_view(live.back == V_LIVE ? V_HOME : live.back);
+    } else {                              /* back to the song: the clips keep playing (T7a dec. 7) */
+        if (!live_bridge_transport_playing())
+            engine_all_off();             /* safety: release any other held voice when stopped */
+        set_view(live.back == V_LIVE ? V_STUDIO : live.back);
+        if (ui.view == V_STUDIO)
+            studio_enter();
+    }
     say("STUDIO", 0);
 }
 
@@ -105,23 +110,15 @@ static void live_play_tick(uint32_t btn)
 
 static int live_handle_key(int k, int down)
 {
-    if (!down) {                          /* a release always releases the note this key started */
-        if (held_on[k]) {
-            live_bridge_play_key(held_role[k], held_note[k], 0, 0);
-            held_on[k] = 0;
-        }
-        return 1;
-    }
+    if (!down)
+        return 1;                         /* the release is done by the shared table (ui.c) */
     if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, chromatically */
         int note = 41 + k + 12 * live.octv;
         if (note < 0)
             note = 0;
         if (note > 127)
             note = 127;
-        held_role[k] = live.focus;        /* the layer/focus/octave may change while it is held */
-        held_note[k] = (uint8_t)note;
-        held_on[k] = 1;
-        live_bridge_play_key(held_role[k], held_note[k], 1, 88);
+        note_key_down(k, live.focus, (uint8_t)note);   /* the layer/focus may change while it is held */
         return 1;
     }
     {                                     /* PADS: each key is a clip in its zone (press only) */

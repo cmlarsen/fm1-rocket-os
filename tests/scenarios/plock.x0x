@@ -1,6 +1,9 @@
 # P-locks: on EDIT, hold a step that is on and turn a sound knob: that step gets its own value (one
 # step of the knob's lane); a tap still toggles. SAVE + the knob, holding the step, clears it.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect view 1
 expect part 0
 expect sound0.0.0 34

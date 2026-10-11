@@ -1,5 +1,8 @@
 # Knob acceleration: a few clicks are exact at any speed, a quick spin sweeps. 909 BD Tune (0..127) starts at 34.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect sound0.0.0 34
 # slow, 80 ms a detent: one step each
 turn K1 5 80
