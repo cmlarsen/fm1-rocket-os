@@ -145,6 +145,14 @@ Owner decisions for unattended work:
 - **The repo is public** on GitHub (cmlarsen/fm1-rocket-os, GPL-3.0). The coordinator merges reviewed work into `integration` and fast-forwards `main` at the end of each task; there is no owner-approved PR step tonight.
 - **Review:** every worker result gets an Opus 5.5 review subagent plus the test ladder before merge.
 
+## Lanes (v3, 2026-10-11)
+Overnight the owner asked for more parallelism. Each task with a self-contained core is split into a **core** part (new files and unit tests, nothing shared) and an **integration** part (the wiring into `ui.c` and the sequencer).
+- **Core lanes run in parallel:** clip engine (T4c), FM6 + NOISE (T5c), storage + undo (T6c), take recorder/player (T9c), punch FX DSP (T10c), MIDI-in parser (T11c), name entry port (T8c).
+- **The integration lane runs serially:** T2 → T3 → T4i → T5i → T6i → T7 → T8 → T9i → T10i → T11i. Each step wires cores that are already tested.
+- **The unlock** is `core/model/model.h` (Song, Role, Clip, Take types and limits), written and frozen by the coordinator right after T1. Changing it later needs the coordinator.
+- **At most 4 workers run at once:** the integration lane plus 3 core lanes. Core lanes go in critical-path order: T4c, T5c, T6c, then T9c, T10c, T11c, T8c.
+- **Reviews scale with risk.** Sequencer, storage and loader changes get a full Opus review. Deletions, docs and standalone modules get a quick pass.
+
 ## Riskiest tasks
 | Task | Risk | When we'll know |
 |---|---|---|
