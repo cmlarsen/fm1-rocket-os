@@ -484,6 +484,14 @@ int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t
     if (clip >= NCLIPS)
         return 0;
     role = clip_role(clip);
+    /* T9i r2/B1: the hard invariant. The ISR may only queue a launch whose staged copy is in
+     * next[role]; apply_role() will swap it into play[] at the boundary. If the main loop did not
+     * stage it (a missed lookahead window), DROP the launch: cur stays, play stays, and the drop is
+     * counted. Never queue against a stale play[] copy. */
+    if (!e->next_set[role] || e->next_clip[role] != clip) {
+        e->take_drop++;
+        return 0;
+    }
     /* a relay launch of the already-queued clip cancels it, as consume_cmds does (not for NOW) */
     if (how == 0 && e->que_set[role] && e->que[role] == clip) {
         e->que_set[role] = 0;
@@ -534,7 +542,28 @@ void clip_engine_take_mute_clear(clip_engine_t *e)
     e->take_mute_set = 0;
 }
 
-void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10) { set_bpm(e, bpm_x10); }
+void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10)
+{
+    e->bpm_take_on = 1;                                /* B2: hold the take's tempo, not the song's */
+    set_bpm(e, bpm_x10);
+}
+
+/* B2: the take playback begins: hold whatever tempo is running (the prelude's tempo mark follows at
+ * offset 0) so the song's own tempo cannot clobber it in the meantime. */
+void clip_engine_take_bpm_hold(clip_engine_t *e) { e->bpm_take_on = 1; }
+
+/* B2: the take ended/stopped: release the hold and go back to the song's own tempo. Pure
+ * arithmetic (no ring), so the take's natural ISR end may call it. */
+void clip_engine_take_bpm_clear(clip_engine_t *e)
+{
+    e->bpm_take_on = 0;
+    if (e->song && e->song->bpm_x10) {
+        e->bpm_ext = 0;
+        set_bpm(e, e->song->bpm_x10);
+    }
+}
+
+int clip_engine_take_drops(const clip_engine_t *e) { return e ? e->take_drop : 0; }
 
 /* ---- the render loop ----------------------------------------------------- */
 
@@ -552,13 +581,16 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
         }
         e->pos[role] = 0;
     } else {
+        /* T9i r2/B1: the hard invariant. Only a target whose staged copy is present may become
+         * cur[role]; the ISR never sets cur without swapping the matching play[] copy in. If the
+         * staging is missing (a missed window), drop the launch and keep cur/play consistent. */
         if (e->next_set[role] && e->next_clip[role] == target) {   /* T7b: next -> play swap */
             e->play[role] = e->next[role];
             e->next_set[role] = 0;
+            e->cur[role] = target;
+            e->pos[role] = 0;
+            ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
         }
-        e->cur[role] = target;
-        e->pos[role] = 0;
-        ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
     }
 }
 
@@ -763,13 +795,15 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
     }
 
     /* the song is the tempo source of truth: the UI writes song->bpm_x10 directly, or a
-     * ring tempo command writes it (in consume_cmds) */
+     * ring tempo command writes it (in consume_cmds). T9i r2/B2: while a take playback owns the
+     * tempo (bpm_take_on), the song's tempo (and an edited/stored value) must NOT clobber it. */
     if (e->song->bpm_x10 && e->song->bpm_x10 != e->song_bpm) {
         e->song_bpm = e->song->bpm_x10;     /* T11i: a loaded or edited song's tempo wins over a
                                              * clock that is no longer present */
-        e->bpm_ext = 0;
+        if (!e->bpm_take_on)
+            e->bpm_ext = 0;
     }
-    if (e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src && !e->bpm_ext)
+    if (!e->bpm_take_on && e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src && !e->bpm_ext)
         set_bpm(e, e->song->bpm_x10);
 
     consume_cmds(e, sink);

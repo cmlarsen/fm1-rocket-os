@@ -8,6 +8,7 @@ void undo_stack_init(undo_stack_t *u)
 {
     u->n = 0u;
     u->cur = 0u;
+    u->base_ser = 0u;
 }
 
 /* store one entry and clear the redo tail; drop the oldest when full */
@@ -19,6 +20,8 @@ static void undo_push(undo_stack_t *u, uint8_t type, uint8_t index, uint8_t aux,
         for (i = 1u; i < UNDO_STACK_DEPTH; i++)
             u->e[i - 1u] = u->e[i];
         u->n = UNDO_STACK_DEPTH - 1u;
+        u->base_ser++;                    /* S5: a push still advances the position stamp when the
+                                           * full ring drops the oldest entry (cur alone saturates) */
         if (u->cur)
             u->cur--;
     }
@@ -186,3 +189,5 @@ uint8_t undo_stack_redo_type(const undo_stack_t *u)
 {
     return (u && u->cur < u->n) ? u->e[u->cur].type : (uint8_t)UNDO_NONE;
 }
+
+uint32_t undo_stack_serial(const undo_stack_t *u) { return u ? u->base_ser + u->cur : 0u; }

@@ -178,6 +178,7 @@ int  live_bridge_take_playing(void);
 int  live_bridge_take_full(void);
 int  live_bridge_take_has(void);
 int  live_bridge_take_nevents(void);
+int  live_bridge_take_drops(void);          /* T9i r2: launches dropped for a missing staged copy */
 uint16_t live_bridge_take_bpm_x10(void);
 uint32_t live_bridge_take_length_samples(void);
 int  live_bridge_take_bars(void);

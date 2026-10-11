@@ -43,7 +43,7 @@ static uint32_t saves;
 enum { TAKE_NONE, TAKE_SAVE, TAKE_CLEAR };
 static uint8_t take_pending;
 static uint8_t take_ram_ok;
-static uint8_t take_pending_cur;        /* undo.cur when the pending write was queued (S6 ordering) */
+static uint32_t take_pending_ser;       /* S5: undo_stack_serial() when the pending write was queued */
 
 static song_t *song(void) { return (song_t *)live_bridge_song(); }
 
@@ -95,7 +95,7 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred)
     ready = 1;
     live_bridge_song_reload();                          /* the clip engine follows the new song */
     take_pending = TAKE_NONE;                           /* T9i: the take is the song's own */
-    take_pending_cur = 0;
+    take_pending_ser = 0;
     song_io_take_load_ram();
 }
 
@@ -564,12 +564,13 @@ static int undo_run(int redo)
 
 int song_io_undo(void)
 {
-    if (take_pending != TAKE_NONE && undo.cur <= take_pending_cur) {
+    if (take_pending != TAKE_NONE && undo_stack_serial(&undo) <= take_pending_ser) {
         if (live_bridge_take_recording() || live_bridge_take_armed() || live_bridge_take_playing())
             return UNDO_CANNOT;                         /* B2: the live take owns the buffer */
         /* T9i: a record/clear not yet flushed, and no newer edit sits above it. The store still
-         * holds the previous take, so undo is "cancel the pending write and reload it". S6: if a
-         * newer clip edit exists (undo.cur > take_pending_cur), undo that first — true order. */
+         * holds the previous take, so undo is "cancel the pending write and reload it". S5: the
+         * stamp (not undo.cur, which saturates on a full ring) tells whether a newer clip edit
+         * exists; if it does, undo that first — true order. */
         take_pending = TAKE_NONE;
         song()->has_take = 1;                           /* a clear had cleared it; the load corrects it */
         if (song_io_take_load_ram() != 0)
@@ -610,7 +611,7 @@ void song_io_take_request_save(void)
 {
     take_pending = TAKE_SAVE;
     take_ram_ok = 1;
-    take_pending_cur = undo.cur;                        /* S6: where this op sits in undo order */
+    take_pending_ser = undo_stack_serial(&undo);        /* S5: where this op sits in undo order */
     song()->has_take = (uint8_t)(live_bridge_take_nevents() > 0 ? 1 : 0);
     dirty = 1;
     failed = 0;
@@ -620,7 +621,7 @@ void song_io_take_request_clear(void)
     live_bridge_take_clear_ram();
     take_pending = TAKE_CLEAR;
     take_ram_ok = 1;
-    take_pending_cur = undo.cur;                        /* S6 */
+    take_pending_ser = undo_stack_serial(&undo);        /* S5 */
     song()->has_take = 0;
     dirty = 1;
     failed = 0;
@@ -742,7 +743,7 @@ int song_io_songs_open(void *ctx, int slot)
     live_bridge_song_reload();
     live_bridge_song_baseline(song_store_tag(&store, slot));
     take_pending = TAKE_NONE;                            /* T9i: the new song's own take */
-    take_pending_cur = 0;
+    take_pending_ser = 0;
     song_io_take_load_ram();
     return 0;
 }

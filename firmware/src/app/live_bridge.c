@@ -41,6 +41,11 @@ static uint8_t g_take_reload_req;                     /* an arm was cancelled: r
 #ifdef X0X_HOST
 /* T9i r1: the host test traps a main-loop ring push from the audio-ISR side (the take sink). */
 volatile int live_bridge_isr;
+/* T9i r2: a host test's preemption injector. It is called at race points inside the main-loop
+ * take functions (take_play / take_stage) to model the audio ISR firing there; the test's handler
+ * runs an ISR block. It skips itself while the host critical section is held (a real ISR cannot
+ * preempt a masked section), so the fix is exercised, not the model. Never set on the device. */
+void (*live_bridge_test_hook)(void);
 #endif
 
 /* The main loop's launch / mute / FX intents, stamped by the ISR at the block boundary where
@@ -126,7 +131,8 @@ static void bridge_prelude(void *ctx, struct take *t)
 /* The playback sink: one recorded command, at its exact window offset. Parameters and notes go
  * straight to the engines (ISR); launches, mutes, FX and tempo drive the clip engine and perform
  * through their ISR-side apply functions. Nothing here pushes onto a main-loop ring or reads
- * song->clip[]: the main loop stages the launch copies in next[] ahead of the event time. */
+ * song->clip[]: the main loop stages the launch copies in next[] ahead of the event time, and a
+ * launch whose copy is not staged is dropped by clip_engine_take_launch (the invariant). */
 static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
 {
     uint32_t type = TAKE_CMD_TYPE(cmd), a = TAKE_CMD_A(cmd), b = TAKE_CMD_B(cmd), c = TAKE_CMD_C(cmd);
@@ -185,6 +191,14 @@ static void eng_reset_transport(void)
 #define CLIP_ENGINE_FS 48000u
 #endif
 _Static_assert(CLIP_ENGINE_FS == FS, "CLIP_ENGINE_FS must match the sample counter's FS");
+
+/* T9i r2/S3: the main loop stages a recorded launch into next[role] only once its event is within
+ * this many samples of the replay playhead (about two 60 Hz UI frames). Staging it any earlier
+ * would let a later launch for the same role overwrite the copy of a launch that has not applied
+ * yet; the invariant in clip_engine_take_launch turns a missed window into a drop, never a stale
+ * play[] copy. Kept below one 16th at the 300 BPM maximum (FS/20) so a staged launch still fires
+ * before an earlier queued launch's boundary. */
+#define TAKE_STAGE_MARGIN (CLIP_ENGINE_FS / 32u)
 
 /* ---------------------------------------------------------------- mapping --- */
 
@@ -499,6 +513,7 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
          * (the next clip render releases every role), clear what the take set, and let the main
          * loop notice through g_take_end_req. */
         take_stop_play(&g_take);
+        clip_engine_take_bpm_clear(&g_eng);              /* B2: the song's tempo comes back */
         g_eng.playing = 0;
         clip_engine_take_mute_clear(&g_eng);
         engine_take_perform_reset();
@@ -557,12 +572,17 @@ int live_bridge_take_reload_pending(void)
 }
 
 /* B2: leaving LIVE closes the take at once (the store write is queued by the UI's tick), so the
- * recording is neither lost nor carried into STUDIO. */
+ * recording is neither lost nor carried into STUDIO. S4: take_finish writes the END mark and the
+ * length and moves the take to IDLE; an ISR take_feed in between (take_tick -> take_put) would
+ * clobber the END mark or n, so the whole close runs with the audio IRQs masked. */
 void live_bridge_take_finish(void)
 {
+    uint32_t f;
     g_take_arm_at_start = 0;
+    f = engine_crit_enter();
     if (take_recording(&g_take) || take_armed(&g_take))
         take_finish(&g_take, engine_sample_now());
+    engine_crit_exit(f);
 }
 
 void live_bridge_take_play(void)
@@ -574,40 +594,52 @@ void live_bridge_take_play(void)
     }
     if (!take_has(&g_take))
         return;
-    /* S4: the reset, the PLAY publish and the transport start are one critical section, so the
-     * ISR never sees PLAY before the transport is at bar 0 (or a stale staged copy). */
+    /* S4/B1: the reset, the PLAY publish and the offset-0 staging are ONE critical section. The
+     * prelude writes a TAKE_LAUNCH(now) for every role that is playing, and the first ISR block
+     * would fire them with next_set[role] still 0; staging them here, before playing=1, is what
+     * keeps the invariant (the ISR can never see PLAY without the matching staged copy). */
     f = engine_crit_enter();
     eng_reset_transport();                                /* bar 0 for the pass */
     take_play(&g_take, engine_sample_now());
+    clip_engine_take_bpm_hold(&g_eng);                    /* B2: the take owns the tempo from here */
+    live_bridge_take_stage();                             /* stage the prelude (offset-0) launches */
+#ifdef X0X_HOST
+    if (live_bridge_test_hook)                            /* T9i r2: a test's ISR at the PLAY point */
+        live_bridge_test_hook();
+#endif
     g_eng.playing = 1;
     engine_crit_exit(f);
     engine_all_off();
-    live_bridge_take_stage();                             /* stage the prelude's launches (offset 0) */
 }
 
 void live_bridge_take_stop_play(void)
 {
     take_stop_play(&g_take);
     clip_engine_transport_stop(&g_eng);                   /* main loop: the ring is fine here */
+    clip_engine_take_bpm_clear(&g_eng);                   /* B2: hand the tempo back to the song */
     engine_all_off();
     clip_engine_mute_clear(&g_eng);                       /* S3: the take's mutes go ... */
     engine_perform_reset();                               /* ... and its FX (after the stop) */
 }
 
-/* B1: the main loop stages each launch's clip copy into next[role] ahead of the boundary, so the
- * take sink only ever swaps play[]/next[] and never reads song->clip[]. The UI calls this every
- * frame while a take plays. It stages the ISR's queued target when one is pending, and otherwise the
- * next launch event for each role the ISR has not replayed yet (so the offset-0 prelude launches
- * are staged before the first block). */
-static uint8_t take_next_launch_clip(uint8_t role, uint16_t from)
+/* B1/S3: the main loop stages the next recorded launch for a role into next[role] once its event
+ * is within TAKE_STAGE_MARGIN of the replay playhead, so the take sink only ever swaps play[]/next[]
+ * and never reads song->clip[]. Staging the *next* launch any earlier (fdbfa34 staged the first one
+ * after play_i, however far away) would overwrite the copy of a launch the ISR has queued but not
+ * applied; the invariant in clip_engine_take_launch turns a missed window into a drop, never a stale
+ * play[] copy. take_play also calls this before playing=1 for the offset-0 prelude launches. */
+static uint8_t take_next_launch_clip(uint8_t role, uint16_t from, uint32_t play_pos)
 {
     uint16_t i;
     for (i = from; i < g_take.n; i++) {
         uint32_t cmd = g_take.ev[i].cmd;
         if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH) {
             uint8_t how = (uint8_t)TAKE_CMD_B(cmd);
-            if (how != TAKE_LAUNCH_STOP && (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == role)
-                return (uint8_t)TAKE_CMD_A(cmd);
+            if (how != TAKE_LAUNCH_STOP && (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == role) {
+                if ((int32_t)(g_take.ev[i].sample - (play_pos + TAKE_STAGE_MARGIN)) <= 0)
+                    return (uint8_t)TAKE_CMD_A(cmd);
+                return CLIP_NONE;                     /* the next launch is still far off */
+            }
         }
     }
     return CLIP_NONE;
@@ -616,26 +648,26 @@ static uint8_t take_next_launch_clip(uint8_t role, uint16_t from)
 void live_bridge_take_stage(void)
 {
     int r;
+    uint32_t play_pos;
     if (!take_playing(&g_take))
         return;
+    play_pos = g_take.play_pos;                          /* the replay playhead (block-aligned) */
     for (r = 0; r < NROLES; r++) {
-        uint8_t clip;
+        uint8_t clip = take_next_launch_clip((uint8_t)r, g_take.play_i, play_pos);
         uint32_t f;
-        if (g_eng.que_set[r] && g_eng.que[r] != CLIP_NONE)
-            clip = g_eng.que[r];                          /* a launch already seen by the ISR */
-        else
-            clip = take_next_launch_clip((uint8_t)r, g_take.play_i);   /* the next one to fire */
         if (clip == CLIP_NONE || clip >= NCLIPS)
             continue;
         if (g_eng.next_set[r] && g_eng.next_clip[r] == clip)
-            continue;                                     /* already staged for the queued clip */
+            continue;                                    /* the copy is already staged */
         f = engine_crit_enter();
-        if (!(g_eng.que_set[r] && g_eng.que[r] != CLIP_NONE && g_eng.que[r] != clip)) {
-            g_eng.next[r] = g_song.clip[clip];            /* the ISR did not move: stage it */
-            g_eng.next_clip[r] = clip;
-            g_eng.next_set[r] = 1;
-        }
+        g_eng.next[r] = g_song.clip[clip];               /* the ISR never reads song->clip[] */
+        g_eng.next_clip[r] = clip;
+        g_eng.next_set[r] = 1;
         engine_crit_exit(f);
+#ifdef X0X_HOST
+        if (live_bridge_test_hook)                       /* T9i r2: a test's ISR between roles */
+            live_bridge_test_hook();
+#endif
     }
 }
 
@@ -693,6 +725,31 @@ int live_bridge_take_playing(void) { return take_playing(&g_take); }
 int live_bridge_take_full(void) { return take_full(&g_take); }
 int live_bridge_take_has(void) { return take_has(&g_take); }
 int live_bridge_take_nevents(void) { return (int)g_take.n; }
+int live_bridge_take_drops(void) { return clip_engine_take_drops(&g_eng); }
+
+#ifdef X0X_HOST
+/* T9i r2: the host tests' window on the hard invariant. For every role, cur[role] must be CLIP_NONE
+ * or play[] must be the byte-for-byte copy of song->clip[cur[role]]. 1 = consistent. */
+int live_bridge_test_consistent(void)
+{
+    int r;
+    for (r = 0; r < (int)NROLES; r++) {
+        uint8_t c = g_eng.cur[r];
+        const uint8_t *a, *b;
+        uint32_t k;
+        if (c == CLIP_NONE)
+            continue;
+        if (c >= NCLIPS)
+            return 0;
+        a = (const uint8_t *)&g_eng.play[r];
+        b = (const uint8_t *)&g_song.clip[c];
+        for (k = 0; k < (uint32_t)sizeof(clip_t); k++)
+            if (a[k] != b[k])
+                return 0;
+    }
+    return 1;
+}
+#endif
 uint16_t live_bridge_take_bpm_x10(void) { return g_take.hdr.bpm_x10 ? g_take.hdr.bpm_x10 : g_eng.bpm_x10; }
 uint32_t live_bridge_take_length_samples(void) { return g_take.hdr.length_samples; }
 int live_bridge_take_bars(void)
@@ -903,6 +960,9 @@ void live_bridge_transport_start(void)
 void live_bridge_transport_restart(void)                 /* T11i: MIDI Start */
 {
     uint32_t f;
+    if (take_playing(&g_take))
+        live_bridge_take_stop_play();                    /* NIT: a Start during playback stops it
+                                                          * cleanly first (no transport desync) */
     if (take_recording(&g_take))
         live_bridge_take_finish();                       /* S2: a Start during a recording ends it cleanly */
     take_arm_if_pending();                               /* S2: honour a take armed while stopped */
@@ -913,6 +973,8 @@ void live_bridge_transport_restart(void)                 /* T11i: MIDI Start */
 void live_bridge_transport_continue(void)                /* T11i: MIDI Continue resumes */
 {
     uint32_t f;
+    if (take_playing(&g_take))
+        live_bridge_take_stop_play();                    /* NIT: as above */
     if (take_recording(&g_take))
         live_bridge_take_finish();                       /* S2: a Continue during a recording ends it cleanly */
     take_arm_if_pending();                               /* S2: honour a take armed while stopped */
@@ -932,11 +994,18 @@ int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 
 void live_bridge_launch(uint8_t clip)
 {
-    uint32_t f = engine_crit_enter();
+    uint32_t f;
+    uint8_t q;
+    if (clip >= NCLIPS)
+        return;
+    q = (uint8_t)(g_song.clip[clip].quant & 3u);       /* the clip's own quantize, recorded in the
+                                                        * event (r2/S3): the replay never reads it
+                                                        * back from a since-overwritten staged copy */
+    f = engine_crit_enter();
     g_stop_q[clip_role(clip) % NROLES] = 0;
     clip_engine_launch(&g_eng, clip);                  /* stages next[] under the mask */
     engine_crit_exit(f);
-    tp_post(TP_LAUNCH, clip, (uint8_t)clip_role(clip));   /* T9i: record it from the ISR */
+    tp_post(TP_LAUNCH_Q, clip, q);                        /* T9i: record it from the ISR */
 }
 
 /* T11i: Program Change launches a clip at the song's PC quantize (not the clip's own). Kept in its

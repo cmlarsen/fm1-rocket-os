@@ -12,9 +12,9 @@
  * own `rc_pat` (the .pool on the device), so a stress run cannot make the project dirty or autosave.
  *
  * The FM6 voice cap is the debug build's only lie: `tools/build.py` compiles a X0X_DEBUG=1 build
- * with -DENG_FM6_VOICES=6 (release stays 4; T9i cut it from 8 now the 8-voice measurement is done),
- * and a level's voice count is how many notes the CHORDS chord holds. Level 2 holds exactly 4, so
- * it measures what a release build would play; stress 4's default cap is 6. */
+ * with -DENG_FM6_VOICES=4 (the same as release; T9i r1 cut it from 6 once the 8-voice measurement
+ * was done), and a level's voice count is how many notes the CHORDS chord holds. Level 2 holds
+ * exactly 4, so it measures what a release build would play. */
 #include "rc_debug.h"
 #if defined(X0X_HOST) || (defined(X0X_DEBUG) && X0X_DEBUG)
 #include "plat.h"
@@ -339,6 +339,7 @@ int rc_stats(uint32_t *out, int max)
     RC_PUT(0);
 #endif
     RC_PUT(plat_irq_stack_used());
+    RC_PUT((uint32_t)live_bridge_take_drops());   /* T9i r2: the take player's drop counter */
 #undef RC_PUT
     return n;
 }

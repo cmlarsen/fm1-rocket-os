@@ -22,6 +22,11 @@
 /* T9i r1: the ISR-side traps the tests arm (defined in clip_engine.c / live_bridge.c under X0X_HOST). */
 extern volatile int clip_engine_isr;
 extern volatile int live_bridge_isr;
+/* T9i r2: the preemption injectors (live_bridge.c's take_play/take_stage, take.c's take_end) and
+ * the invariant probe (live_bridge.c). */
+extern void (*live_bridge_test_hook)(void);
+extern void (*take_test_hook)(void);
+extern int live_bridge_test_consistent(void);
 /* T9i r1: a mutable sample clock, so the race tests can arm at one sample and record at another. */
 static uint32_t g_now;
 
@@ -48,8 +53,13 @@ void engine_take_perform(int fx, int how) { (void)fx; (void)how; }
 void engine_take_perform_reset(void) {}
 int engine_nvoices(int t) { (void)t; return 1; }
 int engine_nparams(int t, int v) { (void)t; (void)v; return 0; }
-uint32_t engine_crit_enter(void) { return 0; }        /* T7b: the test has no ISR */
-void engine_crit_exit(uint32_t s) { (void)s; }
+/* T9i r2: model the main-loop critical section with the host's nest-safe plat_crit (host/
+ * plat_crit_host.c), so a test hook can ask whether a real IRQ could preempt a point. */
+extern uint32_t plat_crit_enter(void);
+extern void plat_crit_exit(uint32_t prev);
+extern int plat_crit_active(void);
+uint32_t engine_crit_enter(void) { return plat_crit_enter(); }
+void engine_crit_exit(uint32_t s) { plat_crit_exit(s); }
 
 static int fails;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); fails++; } } while (0)
@@ -74,6 +84,34 @@ static void cap_ev(void *ctx, const live_ev_t *e)
     (void)ctx;
     if (ncap < (int)(sizeof cap / sizeof cap[0]))
         cap[ncap++] = *e;
+}
+
+/* ---- T9i r2: the preemption model --------------------------------------- *
+ * A test arms the hook; a main-loop take function (take_play / take_stage / take_end) calls it at a
+ * race point. If the host critical section is held, a real IRQ could not have preempted there, so
+ * the hook does nothing — which is exactly what the fix relies on. Otherwise it runs one audio
+ * block's ISR half (the take pump + the clip render) at the injected base, or a single ISR feed. */
+static volatile int hook_armed;
+static int hook_mode;                             /* 0 = block, 1 = one take_feed */
+static uint32_t hook_base, hook_n;
+
+static void run_isr_block(uint32_t base, uint32_t n)
+{
+    live_sink_t sink = {cap_ev, 0};
+    live_bridge_take_block(base, n);
+    live_bridge_render(n, &sink);
+}
+static void test_hook(void)
+{
+    if (!hook_armed)
+        return;
+    hook_armed = 0;                               /* one shot */
+    if (plat_crit_active())
+        return;                                   /* masked: the IRQ could not run here */
+    if (hook_mode == 1)
+        live_bridge_take_feed(hook_base, TAKE_FX(0u, TAKE_FX_ON));
+    else
+        run_isr_block(hook_base, hook_n);
 }
 
 /* ---- T9i r1: the ISR-race tests ----------------------------------------- *
@@ -130,6 +168,130 @@ static void b2_leave_test(void)
     n0 = live_bridge_take_nevents();
     live_bridge_take_feed(engine_sample_now(), TAKE_LAUNCH(1u, TAKE_LAUNCH_QUEUE, LIVE_DRUMS));
     CHECK(live_bridge_take_nevents() == n0);            /* outside LIVE: nothing records */
+}
+
+/* ---- T9i r2: the race tests that fail on fdbfa34 ------------------------ */
+
+/* B1: the take_play window. The prelude's offset-0 NOW launches must be staged before PLAY is
+ * published. The hook fires the ISR at that point; on the fixed code it is masked (the staging ran
+ * inside the same critical section) and the launch applies from a valid copy. On fdbfa34 the ISR
+ * fired with next_set=0, apply_role set cur without swapping play[], and the invariant broke. */
+static void r2_b1_play_race_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;      ev[1] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[2] = 400000u; ev[3] = TAKE_MARK_END;
+    live_bridge_take_loaded(2, 800000u, 1200u);
+    hook_mode = 0; hook_base = 0; hook_n = 6000; hook_armed = 1;
+    live_bridge_take_play();                     /* the hook fires here on fdbfa34 */
+    hook_armed = 0;
+    run_isr_block(0, 6000);                      /* the first block; on fdbfa34 the second */
+    CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 0);
+    CHECK(live_bridge_test_consistent());
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+}
+
+/* B2: the recorded tempo must hold through the replay. The take runs at 120, changes to 140 at
+ * sample 200; editing the song's tempo mid-replay (to 160) must not move it. At the stop the song's
+ * tempo is restored. On fdbfa34 clip_engine_take_bpm only set bpm_src, which the render's song-tempo
+ * check reset to 120 on the next block. */
+static void r2_b2_tempo_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;      ev[1] = TAKE_MARK_TEMPO(1200u);
+    ev[2] = 0u;      ev[3] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[4] = 200u;    ev[5] = TAKE_MARK_TEMPO(1400u);
+    ev[6] = 200u;    ev[7] = TAKE_LAUNCH(2u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[8] = 800000u; ev[9] = TAKE_MARK_END;
+    live_bridge_take_loaded(5, 1600000u, 1200u);
+    live_bridge_take_play();
+    run_isr_block(0, 128);
+    CHECK(live_bridge_bpm_x10() == 1200u);       /* the prelude's tempo */
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1600u;   /* an edit while the take plays */
+    live_bridge_take_stage();
+    run_isr_block(128, 128);
+    CHECK(live_bridge_bpm_x10() == 1400u);       /* the recorded change, not the edit */
+    run_isr_block(256, 6000);
+    CHECK(live_bridge_bpm_x10() == 1400u);       /* it holds */
+    CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 2);
+    CHECK(live_bridge_test_consistent());
+    live_bridge_take_stop_play();
+    CHECK(live_bridge_bpm_x10() == 1600u);       /* the song's tempo comes back */
+    live_bridge_exit();
+}
+
+/* S3: A queued to the bar then NOW-B in the same role. The main loop stages B once its event is
+ * inside the lookahead window; B overrides A before A's boundary, so B must play from B's own copy.
+ * On fdbfa34 take_stage never staged B (it saw A queued and re-staged A), the ISR set cur=B without
+ * the matching copy, and play[] was wrong. */
+static void r2_s3_next_stage_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    g_now = 0;
+    /* Prime the engine so play[DRUMS] is a known clip (0), which take_play's reset does not clear:
+     * if B is applied without its own staged copy, play[] stays clip 0 and the invariant fails. */
+    live_bridge_transport_start();
+    live_bridge_launch_now(0);
+    live_bridge_render(12000u, 0);
+    CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 0);
+
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 200u;    ev[1] = TAKE_LAUNCH(0u, TAKE_LAUNCH_QUEUE, LIVE_DRUMS);   /* A: bar */
+    ev[2] = 2000u;   ev[3] = TAKE_LAUNCH(2u, TAKE_LAUNCH_NOW, LIVE_DRUMS);     /* B: now */
+    ev[4] = 400000u; ev[5] = TAKE_MARK_END;
+    live_bridge_take_loaded(3, 800000u, 1200u);
+    live_bridge_take_play();                     /* resets cur; play[DRUMS] stays clip 0 */
+    run_isr_block(0, 128);                       /* the transport starts; nothing due yet */
+    run_isr_block(128, 128);                     /* A fires at sample 200: queued at the bar */
+    CHECK(live_bridge_queued_clip(LIVE_DRUMS) == 0);
+    run_isr_block(256, 800);                     /* play_pos = 1056 */
+    live_bridge_take_stage();                    /* the UI frame: B (2000) is now in the window */
+    run_isr_block(1056, 2000);                   /* B fires at 2000 (NOW -> the next step) */
+    run_isr_block(3056, 6000);                   /* the next step applies it */
+    CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 2);
+    CHECK(live_bridge_test_consistent());        /* cur[DRUMS] and play[DRUMS] both clip 2 */
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+}
+
+/* S4: take_finish from the main loop must be masked. The hook runs an ISR take_feed at the exact
+ * take_end window (after `ended`, before the END mark). On the fixed code the section is masked and
+ * the feed does not run; on fdbfa34 it appended an event that take_end then overwrote, so n grew by
+ * two rather than one. */
+static void r2_s4_finish_race_test(void)
+{
+    int n0;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    g_now = 0;
+    live_bridge_transport_start();
+    live_bridge_take_arm();
+    g_now = 200000u;                             /* the arm's bar arrives: now REC */
+    live_bridge_take_feed(g_now, TAKE_FX(0u, TAKE_FX_ON));
+    CHECK(live_bridge_take_recording());
+    n0 = live_bridge_take_nevents();
+    hook_mode = 1; hook_base = g_now + 1000u; hook_armed = 1;
+    live_bridge_take_finish();                   /* the hook would feed here on fdbfa34 */
+    hook_armed = 0;
+    CHECK(!live_bridge_take_recording());
+    CHECK(live_bridge_take_nevents() == n0 + 1); /* exactly the END mark, once */
+    {
+        const uint32_t *ev = (const uint32_t *)live_bridge_take_events();
+        int n = live_bridge_take_nevents();
+        CHECK(ev[(n - 1) * 2 + 1] == TAKE_MARK_END);
+    }
+    live_bridge_exit();
 }
 
 int main(void)
@@ -284,6 +446,14 @@ int main(void)
     live_bridge_enter(pats, 1200u);
     b2_leave_test();
     b1_isr_sink_test();
+
+    /* T9i r2: the preemption-injection race tests and the tempo hold. */
+    live_bridge_test_hook = test_hook;
+    take_test_hook = test_hook;
+    r2_b1_play_race_test();
+    r2_b2_tempo_test();
+    r2_s3_next_stage_test();
+    r2_s4_finish_race_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

@@ -164,7 +164,7 @@ static int live_take_role_span(int role, uint32_t *lo, uint32_t *hi)
         uint32_t off = ev[i * 2u], cmd = ev[i * 2u + 1u];
         uint32_t type = (cmd >> 28) & 0xFu, a = (cmd >> 20) & 0xFFu;
         int r = -1;
-        if (type == 12u) r = (int)(cmd & 0xFFFu);            /* TAKE_LAUNCH: c = role */
+        if (type == 12u) r = (int)(cmd & 0xFFu);             /* TAKE_LAUNCH: c = role | quant<<8 */
         else if (type == 13u) r = (int)a;                    /* TAKE_MUTE: a = role */
         if (r != role)
             continue;

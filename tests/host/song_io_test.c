@@ -445,6 +445,31 @@ static void test_corrupt_record_falls_back(void)
     CHECK(g_rebuilds == 1);
 }
 
+/* T9i r2/S5: with a full undo ring, `undo.cur` saturates, so ordering a pending take by cur index
+ * wrongly cancelled it. A newer clip edit must be undone first; the take goes when nothing newer is
+ * above it. */
+static void test_take_undo_order_full_ring(void)
+{
+    clip_t old;
+    int i, rc;
+    reset_flash();
+    boot();
+    song_io_clip_create(0, 16, 0, 0);           /* a clip to clear (undoably) */
+    memset(&old, 0, sizeof old);
+    for (i = 0; i < 12; i++)
+        song_io_push_clear(0, &old);            /* overfill the 11-deep ring */
+    CHECK(song_io_undo_depth() == 11);
+    song_io_take_request_save();
+    CHECK(song_io_take_pending());
+    song_io_push_clear(0, &old);                /* a newer edit while the ring is full */
+    rc = song_io_undo();
+    CHECK(rc == 1 /* UNDO_DONE */);
+    CHECK(song_io_take_pending());              /* S5: the newer edit went first, not the take */
+    rc = song_io_undo();
+    CHECK(rc == 1);
+    CHECK(!song_io_take_pending());             /* now nothing newer: the take is cancelled */
+}
+
 int main(void)
 {
     test_boot_empty_builds();
@@ -458,6 +483,7 @@ int main(void)
     test_power_cut_keeps_previous();
     test_failed_save_no_retry();
     test_corrupt_record_falls_back();
+    test_take_undo_order_full_ring();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

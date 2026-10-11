@@ -46,6 +46,10 @@ typedef struct {
     uint8_t n;             /* entries stored (<= depth) */
     uint8_t cur;           /* entries applied (0..n) */
     uint8_t pad[2];
+    uint32_t base_ser;     /* T9i r2/S5: pushes dropped off the front. `base_ser + cur` is a
+                            * monotonic position stamp that keeps advancing when the ring is full
+                            * (where `cur` alone saturates), so a pending take can be ordered
+                            * against the entries without trusting `cur`. */
 } undo_stack_t;
 
 /* The RAM a take undo/redo loads the previous take into and re-commits from. The
@@ -68,6 +72,10 @@ void undo_stack_push_delete(undo_stack_t *u, const song_store_t *store, uint8_t 
 
 int undo_stack_undo(undo_stack_t *u, song_t *song, song_store_t *store, const undo_take_scratch_t *ts);
 int undo_stack_redo(undo_stack_t *u, song_t *song, song_store_t *store, const undo_take_scratch_t *ts);
+
+/* T9i r2/S5: the monotonic position stamp (base_ser + cur), for ordering a pending take against
+ * the undo entries. It strictly increases on every push, even when the full ring drops the oldest. */
+uint32_t undo_stack_serial(const undo_stack_t *u);
 
 uint8_t undo_stack_undo_type(const undo_stack_t *u);   /* type of the next undo, or UNDO_NONE */
 uint8_t undo_stack_redo_type(const undo_stack_t *u);

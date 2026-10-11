@@ -810,6 +810,8 @@ static int expect(const char *what, const char *val)
         got = live_bridge_take_bars();
     else if (!strcmp(what, "takelen"))
         got = (int)live_bridge_take_length_samples();
+    else if (!strcmp(what, "takedrops"))           /* T9i r2: launches dropped for a missing copy */
+        got = live_bridge_take_drops();
     else if (!strcmp(what, "takepend"))            /* T9i: a take store write is queued */
         got = song_io_take_pending();
     else if (!strcmp(what, "sample"))            /* frames rendered since boot */
@@ -1932,8 +1934,9 @@ int main(int argc, char **argv)
                 printf("line %d: cannot write %s\n", lineno, p2);
                 return 2;
             }
-            fprintf(tf, "len %u bars %d bpm %u n %d\n", live_bridge_take_length_samples(),
-                    live_bridge_take_bars(), (unsigned)live_bridge_take_bpm_x10(), n);
+            fprintf(tf, "len %u bars %d bpm %u n %d drops %d\n", live_bridge_take_length_samples(),
+                    live_bridge_take_bars(), (unsigned)live_bridge_take_bpm_x10(), n,
+                    live_bridge_take_drops());
             for (k = 0; k < n; k++)
                 fprintf(tf, "%u %08x\n", ev[k * 2u], ev[k * 2u + 1u]);
             fclose(tf);
