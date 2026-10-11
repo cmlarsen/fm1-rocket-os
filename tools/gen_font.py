@@ -13,7 +13,15 @@ alpha 0..15.
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, features as _pil_features
+
+# OpenType features (tabular figures) need libraqm; drop them when it is missing so the
+# tool (and every build that runs it) still works without it.
+HAS_RAQM = _pil_features.check("raqm")
+
+
+def _feats(feats):
+    return feats if HAS_RAQM else None
 
 FONTS = Path(__file__).resolve().parents[1] / "assets" / "fonts"
 # (name, file, px, scale, pixel, first, last): pixel fonts are rendered without
@@ -149,15 +157,15 @@ def render(ttf, px, scale, pixel, first, last):
                                     for n, a in zip(names, font.get_variation_axes())])
     feats = None if pixel else ["tnum"]
     asc, desc = font.getmetrics()
-    top = max(0, font.getbbox("A8|(", features=feats)[1] - 1)
+    top = max(0, font.getbbox("A8|(", features=_feats(feats))[1] - 1)
     h = asc + desc - top
     glyphs = []
     for c in range(first, last + 1):
         ch = chr(c)
-        adv = int(round(font.getlength(ch, features=feats)))
+        adv = int(round(font.getlength(ch, features=_feats(feats))))
         bw = adv + 2 * PAD
         img = Image.new("L", (bw, asc + desc), 0)
-        ImageDraw.Draw(img).text((PAD, 0), ch, font=font, fill=255, features=feats)
+        ImageDraw.Draw(img).text((PAD, 0), ch, font=font, fill=255, features=_feats(feats))
         img = img.crop((0, top, bw, top + h))
         px_ = [(15 if v >= 128 else 0) if pixel else min(15, (v + 8) // 17) for v in img.tobytes()]
         glyphs.append((adv * scale, bw * scale, upscale(px_, bw, h, scale)))

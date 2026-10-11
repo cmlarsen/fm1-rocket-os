@@ -184,17 +184,17 @@ static void fm1_fault(const fm1_crash_t *c)
     uint32_t t0;
     fm1_audio_stop();
     lcd_fill(0, 0, 240, 240, RGB(160, 0, 0));
-    draw_text_box(0, 8, 240, &FONT_S, "X0X CRASH", C_WHITE, 1);
+    draw_text_box(0, 8, 240, &AF_S, "X0X CRASH", C_WHITE, 1);
     hexs(b, c->vec);
-    draw_text_box(10, 40, 220, &FONT_S, b, C_WHITE, 0);
+    draw_text_box(10, 40, 220, &AF_S, b, C_WHITE, 0);
     hexs(b, c->pc);
-    draw_text_box(10, 60, 220, &FONT_S, b, C_WHITE, 0);
+    draw_text_box(10, 60, 220, &AF_S, b, C_WHITE, 0);
     hexs(b, c->emu);
-    draw_text_box(10, 84, 220, &FONT_S, b, C_WHITE, 0);
+    draw_text_box(10, 84, 220, &AF_S, b, C_WHITE, 0);
     hexs(b, c->dbg);
-    draw_text_box(10, 102, 220, &FONT_S, b, C_WHITE, 0);
+    draw_text_box(10, 102, 220, &AF_S, b, C_WHITE, 0);
     hexs(b, c->rets);
-    draw_text_box(10, 120, 220, &FONT_S, b, C_WHITE, 0);
+    draw_text_box(10, 120, 220, &AF_S, b, C_WHITE, 0);
     t0 = fm1_ticks();
     while ((uint32_t)(fm1_ticks() - t0) < 4000u * 1000u * FM1_TICKS_PER_US)
         ;
@@ -205,7 +205,7 @@ static void enter_uboot(const char *why)
 {
     fm1_audio_stop();
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 110, 240, &FONT_S, why, C_WHITE, 1);
+    draw_text_box(0, 110, 240, &AF_S, why, C_WHITE, 1);
     fm1_delay_ms(20);
     usb_detach();
     fm1_delay_ms(30);
@@ -221,19 +221,19 @@ static void safe_main(void)
     char b[24];
     uint32_t t0, play;
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_B, "X0X SAFE MODE", C_HI, 1);
-    draw_text_box(0, 52, 240, &FONT_S, "IT CRASHED TWICE", C_WHITE, 1);
-    draw_text_box(0, 72, 240, &FONT_S, "WHILE STARTING.", C_WHITE, 1);
-    draw_text_box(0, 102, 240, &FONT_S, "NO SOUND. USB IS ON:", C_WHITE, 1);
-    draw_text_box(0, 122, 240, &FONT_S, "REINSTALL FROM THE", C_WHITE, 1);
-    draw_text_box(0, 142, 240, &FONT_S, "WEB INSTALLER.", C_WHITE, 1);
-    draw_text_box(0, 172, 240, &FONT_S, "PLAY: TRY AGAIN", C_HI, 1);
+    draw_text_box(0, 18, 240, &AF_M, "X0X SAFE MODE", C_HI, 1);
+    draw_text_box(0, 52, 240, &AF_S, "IT CRASHED TWICE", C_WHITE, 1);
+    draw_text_box(0, 72, 240, &AF_S, "WHILE STARTING.", C_WHITE, 1);
+    draw_text_box(0, 102, 240, &AF_S, "NO SOUND. USB IS ON:", C_WHITE, 1);
+    draw_text_box(0, 122, 240, &AF_S, "REINSTALL FROM THE", C_WHITE, 1);
+    draw_text_box(0, 142, 240, &AF_S, "WEB INSTALLER.", C_WHITE, 1);
+    draw_text_box(0, 172, 240, &AF_S, "PLAY: TRY AGAIN", C_HI, 1);
     if (fm1_crash.magic == FM1_CRASH_MAGIC) {
         b[0] = 'P';
         b[1] = 'C';
         b[2] = ' ';
         hexs(b + 3, fm1_crash.pc);
-        draw_text_box(0, 208, 240, &FONT_S, b, C_GRAY, 1);
+        draw_text_box(0, 208, 240, &AF_S, b, C_GRAY, 1);
     }
     fm1_input_init();
     panel_init();
@@ -251,7 +251,7 @@ static void safe_main(void)
         if ((fm1_in.buttons & play) && fm1_ms - t0 > 500u) {
             bootguard.failed = 0;                   /* try X0X again, from scratch */
             bootguard.pending = 0;
-            draw_text_box(0, 172, 240, &FONT_S, "STARTING X0X...", C_HI, 1);
+            draw_text_box(0, 172, 240, &AF_S, "STARTING X0X...", C_HI, 1);
             usb_detach();
             fm1_delay_ms(30);
             fm1_reboot();
@@ -284,8 +284,8 @@ static void fm1_main(void)
     }
     lcd_init();
     palette_set(1);
-    draw_text_box(0, 96, 240, &FONT_M, "X0X", C_HI, 1);
-    draw_text_box(0, 134, 240, &FONT_S, "909 808 303 303", C_GRAY, 1);
+    draw_text_box(0, 96, 240, &AF_M, "X0X", C_HI, 1);
+    draw_text_box(0, 134, 240, &AF_S, "909 808 303 303", C_GRAY, 1);
     if (x0x_dbg.magic != DBG_MAGIC) {
         memset(&x0x_dbg, 0, sizeof x0x_dbg);
         x0x_dbg.magic = DBG_MAGIC;
@@ -299,9 +299,9 @@ static void fm1_main(void)
         b[1] = 'C';
         b[2] = ' ';
         hexs(b + 3, fm1_crash.pc);
-        draw_text_box(0, 176, 240, &FONT_S, fm1_crash.core == 1 ? "THE SECOND CORE CRASHED"
+        draw_text_box(0, 176, 240, &AF_S, fm1_crash.core == 1 ? "THE SECOND CORE CRASHED"
                       : "RESTARTED AFTER A CRASH", RGB(255, 80, 60), 1);
-        draw_text_box(0, 196, 240, &FONT_S, b, C_GRAY, 1);
+        draw_text_box(0, 196, 240, &AF_S, b, C_GRAY, 1);
         fm1_wdt_feed();
         fm1_delay_ms(2500);
         fm1_wdt_feed();

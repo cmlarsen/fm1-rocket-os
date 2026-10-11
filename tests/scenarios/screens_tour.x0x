@@ -1,0 +1,83 @@
+# T2b screen tour: visit every X0X view and overlay and take a shot of each.
+# `make screens-lint` runs this with a host build that records every text draw (-DX0X_LINT)
+# and checks the shots for clipped or overlapping text. `make screens` shows them at 1:1.
+wait 300
+# a little content, so the screens are not empty
+tapkey b0
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+press ENV
+tapkey w0
+release ENV
+tap PLAY
+wait 400
+# HOME (X0X boots into PART)
+tap HOME
+wait 150
+shot s01_home.png
+# PART (the part's sound; EDIT)
+tap EDIT
+wait 150
+shot s02_part.png
+# a 303 part for the generator
+turn ALGO 2
+# GEN (TB-3PO; ARP)
+tap ARP
+wait 150
+shot s03_gen.png
+# FX
+tap FX
+wait 150
+shot s04_fx.png
+# MIX
+tap LFO
+wait 150
+shot s05_mix.png
+# SEQ (the part's steps)
+tap SEQ
+wait 150
+shot s06_seq.png
+# SONG (HOME toggles HOME <-> SONG)
+tap HOME
+wait 150
+tap HOME
+wait 150
+shot s07_song.png
+# GLOBAL (GLO opens its list)
+tap GLO
+wait 150
+shot s08_global.png
+# O_ASK: the list's RESET asks first
+turn SELECT 14
+wait 80
+tap SEL
+wait 150
+shot s09_ask.png
+tap HOME
+wait 300
+tap HOME
+wait 300
+# O_LIST: SELECT opens the page list
+tap SEL
+wait 150
+shot s10_list.png
+tap HOME
+wait 300
+# PERF (GLOBAL > PERFORMANCE)
+tap GLO
+wait 150
+turn SELECT 15
+wait 80
+tap SEL
+wait 300
+shot s11_perf.png
+tap HOME
+wait 300
+# the help card: hold a button (~600 ms)
+press SAVE
+wait 700
+shot s12_help.png
+release SAVE
+wait 150

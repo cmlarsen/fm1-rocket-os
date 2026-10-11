@@ -32,7 +32,7 @@ REMOTE_DIR   := $(REMOTE_ROOT)/$(DIRNAME)-$(DIRHASH)
 SSH          := ssh $(FW_HOST)
 RSYNC_EXCL   := --exclude=/.git --exclude=/.venv --exclude=/build --exclude=/__pycache__
 
-.PHONY: all help fw release test test-local check push pull clean-remote unit scenarios screens parity host
+.PHONY: all help fw release test test-local check push pull clean-remote unit scenarios screens parity host screens-lint
 
 all: help
 
@@ -47,6 +47,7 @@ help:
 	@echo "  screens      the screens_*.x0x tour and build/screens/contact.png at 1:1 (T2b)"
 	@echo "  parity       WASM output vs native, sample for sample (needs emcc and node)"
 	@echo "  check        fw + the build's own checks (soft-double, size)"
+	@echo "  screens-lint render the screen tour and lint the layout (Mac; needs no deltron)"
 	@echo "  push         rsync this tree to $(FW_HOST):$(REMOTE_DIR)/"
 	@echo "  pull         rsync $(FW_HOST):$(REMOTE_DIR)/build/ back into ./build/"
 	@echo "  help         this list"
@@ -141,7 +142,23 @@ parity:
 	@sh tests/parity.sh
 
 check: fw
+	@echo "check: forbidden symbols (heap, 64-bit division, soft-double)"
+	@$(SSH) 'cd $(REMOTE_DIR) && sh tools/check_symbols.sh build'
+	@echo "check: the flash write path refuses the protected regions"
+	@sh tests/lint/flash_guard_test.sh
 	@echo "check: make fw passed the build's own checks (soft-double routines, image/RAM/pool size)"
+
+# T2b: render the screen tour with a host build that records every text draw (-DX0X_LINT), then
+# lint the layout (tests/lint/check_layout.py). Runs on the Mac; exits non-zero on any finding or
+# on a shot that failed to write.
+screens-lint:
+	@mkdir -p build/screens/tour
+	@X0X_HOST_DEFS="-DX0X_LINT" X0X_HOST_OUT=build/host/x0x_host_lint sh host/build_host.sh
+	@X0X_LINT_LOG=build/screens/lint.log build/host/x0x_host_lint tests/scenarios/screens_tour.x0x build/screens/tour > build/screens/screens_tour.log 2>&1 || { cat build/screens/screens_tour.log; exit 1; }
+	@if grep -q "cannot write" build/screens/screens_tour.log; then echo "screens-lint: a shot failed to write"; exit 1; fi
+	@n=$$(grep -c '^shot ' tests/scenarios/screens_tour.x0x); m=$$(ls build/screens/tour/*.png 2>/dev/null | wc -l | tr -d ' '); \
+	[ "$$n" = "$$m" ] || { echo "screens-lint: $$m of $$n shots written"; exit 1; }
+	@python3 tests/lint/check_layout.py build/screens/lint.log
 
 clean-remote:
 	@$(SSH) 'rm -rf $(REMOTE_DIR)/build'

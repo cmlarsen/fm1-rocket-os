@@ -49,8 +49,8 @@ static void panel_setup(void)
     uint32_t i, used = 0, t0 = fm1_ms;
     const panel_t old = panel;
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 10, 240, &FONT_S, "HARDWARE CALIBRATION", C_WHITE, 1);
-    draw_text_box(0, 30, 240, &FONT_S, "TEACH EACH BUTTON AND KNOB", C_GRAY, 1);
+    draw_text_box(0, 10, 240, &AF_S, "HARDWARE CALIBRATION", C_WHITE, 1);
+    draw_text_box(0, 30, 240, &AF_S, "TEACH EACH BUTTON AND KNOB", C_GRAY, 1);
     while (fm1_in.buttons) {
         fm1_wdt_feed();
         if (fm1_ms - t0 > SETUP_IDLE_MS)
@@ -59,8 +59,8 @@ static void panel_setup(void)
     fm1_input_edges(0);
     for (i = 0; i < NB; i++) {
         uint32_t p = 0, id;
-        draw_text_box(0, 80, 240, &FONT_S, "PRESS", C_GRAY, 1);
-        draw_text_box(0, 100, 240, &FONT_M, B_NAME[i], C_WHITE, 1);
+        draw_text_box(0, 80, 240, &AF_S, "PRESS", C_GRAY, 1);
+        draw_text_box(0, 100, 240, &AF_M, B_NAME[i], C_WHITE, 1);
         t0 = fm1_ms;
         while (!(p & ~used)) {
             fm1_wdt_feed();
@@ -78,8 +78,8 @@ static void panel_setup(void)
     for (i = 0; i < NE; i++) {
         uint32_t e;
         int32_t st = 0;
-        draw_text_box(0, 80, 240, &FONT_S, "TURN RIGHT", C_GRAY, 1);
-        draw_text_box(0, 100, 240, &FONT_M, E_NAME[i], C_WHITE, 1);
+        draw_text_box(0, 80, 240, &AF_S, "TURN RIGHT", C_GRAY, 1);
+        draw_text_box(0, 100, 240, &AF_M, E_NAME[i], C_WHITE, 1);
         for (e = 0; e < 7u; e++)
             fm1_enc_take(e);
         t0 = fm1_ms;
