@@ -222,6 +222,9 @@ static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t st
     const clip_t *c = &e->play[role];        /* T7b: the playing copy, not the editable song */
     int i;
 
+    if (e->muted[role])                 /* T10i: a muted role sounds nothing, but its position */
+        return;                         /* keeps advancing (the transport does not stop) */
+
     /* motion first: a drum or a note hears this step's parameters as it fires */
     for (i = 0; i < (int)CLIP_MOTION_LANES; i++) {
         const motion_lane_t *m = &c->motion[i];
@@ -383,6 +386,29 @@ void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
         e->next[role] = e->song->clip[clip];
 }
 
+/* T10i: mute / unmute a role, through the ring. */
+void clip_engine_mute(clip_engine_t *e, uint8_t role, int on)
+{
+    if (role >= NROLES)
+        return;
+    push_cmd(e, CLIP_CMD_MUTE, role, (uint8_t)(on ? 1 : 0), 0);
+}
+
+int clip_engine_muted(const clip_engine_t *e, uint8_t role)
+{
+    return role < NROLES ? (int)e->muted[role] : 0;
+}
+
+void clip_engine_mute_clear(clip_engine_t *e)
+{
+    uint8_t r;
+    for (r = 0; r < NROLES; r++)
+        e->muted[r] = 0;                       /* immediate: the engine may stop rendering (classic) */
+    /* ... and a ring command ordered AFTER any pending mute, so a queued CLIP_CMD_MUTE that drains
+     * later cannot re-apply (T10i review). */
+    push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0);
+}
+
 /* ---- the render loop ----------------------------------------------------- */
 
 /* apply a queued action (off = the boundary's window offset) */
@@ -460,6 +486,26 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             if (e->song)
                 e->song->bpm_x10 = c.bpm_x10;  /* one source of truth */
             set_bpm(e, c.bpm_x10);
+            continue;
+        }
+        if (c.cmd == CLIP_CMD_MUTE) {                          /* T10i */
+            role = c.clip;
+            if (role >= NROLES)
+                continue;
+            if (c.quant) {
+                if (!e->muted[role]) {
+                    e->muted[role] = 1;
+                    release_role(e, role, 0, sink);            /* the sounding notes go now */
+                }
+            } else {
+                e->muted[role] = 0;                            /* unmute: rejoins in time */
+            }
+            continue;                                          /* live mutes are not song state (T10i review) */
+        }
+        if (c.cmd == CLIP_CMD_MUTE_CLEAR) {                    /* T10i: ordered after any queued mute */
+            uint8_t r;
+            for (r = 0; r < NROLES; r++)
+                e->muted[r] = 0;
             continue;
         }
         if (c.cmd == CLIP_CMD_STOP) {

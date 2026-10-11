@@ -3,7 +3,7 @@
  * into a clip. Included by ui.c (like ui_studio.c / ui_live.c), after the drawing helpers, so it
  * can use them and reach ui/proj/live_bridge/song_io. It edits the clip under the song home's
  * cursor through song_io (plain void *), so it never needs model.h; the clip engine is told to
- * re-take its playing copy with live_bridge_clip_reload() after an edit.
+ * re-take its playing copy with live_bridge_clip_changed() after an edit.
  *
  * SEQ cycles NOTES (or the DRUM grid) -> MOTION -> SETTINGS -> the song home; HOME goes back to
  * the song home from any page. Every editing session is one song_io undo entry, and every record

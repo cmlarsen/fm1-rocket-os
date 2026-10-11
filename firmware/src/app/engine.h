@@ -102,6 +102,15 @@ void engine_note_off(int part, int note);
 /* T5i: queue an FM6 preset (SLOT) load: 0..7 a ROM factory voice, 8 the own patch, 9..40 a bank voice.
  * A bank voice that is not there (no bank, or an erased / corrupt sector) falls back to a ROM voice. */
 void engine_fm6_preset(int n);
+/* T10i: the punch FX (dsp/perform.h). The state lives in the pool. Engage/release/reset come from
+ * the main loop through perform's ring; engine_perform_tick() runs each UI frame to apply the echo
+ * controller's targets to X0X's fxbus delay. perform_process() is called in the render path. */
+void engine_perform_engage(int fx, int latch);
+void engine_perform_release(int fx);
+void engine_perform_reset(void);
+void engine_perform_echo_throw(int on);
+void engine_perform_tick(void);
+int  engine_perform_latched(int fx);
 /* motion (seq/motion.h): lanes play into the engine, never into the sound_t mirror */
 int engine_motion_part(int target, int voice);              /* the part a parameter's lane follows */
 int engine_motion_value(int lane);                          /* what the lane plays now, -1 none */

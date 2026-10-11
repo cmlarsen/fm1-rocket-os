@@ -261,6 +261,7 @@ void plat_stalls_enable(int on) { (void)on; }
 /* -------------------------------------------------------------- app --- */
 #include "../firmware/src/app/x0x.h"
 #include "../firmware/src/app/song_io.h"
+#include "../firmware/src/dsp/perform.h"       /* T10i: PERF_NFX for `expect fxlatch` */
 #include "../firmware/src/app/project.c"
 #include "../firmware/src/app/ui.c"
 
@@ -542,7 +543,7 @@ static void boot(void)
     project_apply_io();                             /* clock and notes out, the MIDI channels, the output */
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui_init();
-    song_io_boot(&proj.pat[0], proj.set.bpm_x10);   /* T6i: the current song, from flash or the project */
+    song_io_boot(&proj.pat[0], proj.set.bpm_x10, proj.set.rsv[0]);   /* T6i/T8i: the current song, from flash or the project */
 }
 
 static void run_ms(uint32_t ms)
@@ -669,7 +670,41 @@ static int expect(const char *what, const char *val)
         got = ui.view == V_LIVE ? 1 : 0;
     else if (!strcmp(what, "classic"))             /* T7a: the classic X0X pages own the audio */
         got = ui.classic;
-    else if (!strcmp(what, "studiorole"))
+    else if (!strcmp(what, "songson"))             /* T8i: the SONGS view is up */
+        got = ui_songs_up();
+    else if (!strcmp(what, "msg"))                 /* T8i: a header message is showing */
+        got = (ui.msg_until && (int32_t)(ui.msg_until - plat_ms()) > 0) ? 1 : 0;
+    else if (!strcmp(what, "songrow"))             /* T8i: the view's cursor row */
+        got = ui_songs_row();
+    else if (!strcmp(what, "liveclips")) {         /* T8i: used clips in the live song */
+        int j, n2 = 0;
+        for (j = 0; j < (int)LIVE_NCLIPS; j++)
+            if (song_io_clip_used(j))
+                n2++;
+        got = n2;
+    }
+    else if (!strcmp(what, "songused")) {          /* T8i: the live songs in the store */
+        song_row_t r;
+        int j, n2 = 0;
+        for (j = 0; j < (int)SONGS_SLOTS; j++) {
+            song_io_songs_list(0, j, &r);
+            if (r.used)
+                n2++;
+        }
+        got = n2;
+    } else if (!strcmp(what, "songcurrent"))       /* T8i: the slot being edited, -1 none */
+        got = song_io_songs_current_slot(0);
+    else if (!strcmp(what, "songfree"))            /* T8i: the first free slot, -2 full */
+        got = song_io_songs_first_free(0);
+    else if (!strcmp(what, "songcanundo"))         /* T8i: the last delete can still be undone */
+        got = song_io_songs_can_undelete(0);
+    else if (!strncmp(what, "songslot", 8)) {      /* songslotK: slot K holds a live song */
+        song_row_t r;
+        song_io_songs_list(0, atoi(what + 8) % (int)SONGS_SLOTS, &r);
+        got = r.used;
+    } else if (!strncmp(what, "songclips", 9)) {   /* songclipsK: slot K's clip count */
+        got = song_io_songs_clip_count(0, atoi(what + 9) % (int)SONGS_SLOTS);
+    } else if (!strcmp(what, "studiorole"))
         got = studio_cursor_role();
     else if (!strcmp(what, "studiocol"))
         got = studio_cursor() & 0xFF;
@@ -677,6 +712,14 @@ static int expect(const char *what, const char *val)
         got = studio_cursor_clip();
     else if (!strcmp(what, "layer"))
         got = live_layer();
+    else if (!strcmp(what, "fxlayer"))              /* T10i: the punch FX layer is showing */
+        got = live_fx_layer();
+    else if (!strncmp(what, "fxlatch", 7))          /* fxlatchI: effect I is latched */
+        got = engine_perform_latched(atoi(what + 7) % PERF_NFX);
+    else if (!strncmp(what, "fxmute", 6))           /* fxmuteR: role R is muted (the clip engine) */
+        got = live_bridge_muted((uint8_t)(atoi(what + 6) % LIVE_NROLES));
+    else if (!strncmp(what, "songrolemute", 12))    /* T10i: the song's stored role mute (always 0) */
+        got = live_bridge_song_role_muted((uint8_t)(atoi(what + 12) % LIVE_NROLES));
     else if (!strcmp(what, "focus"))
         got = live_focus();
     else if (!strcmp(what, "liveactive"))
@@ -992,6 +1035,24 @@ static void dump_json(const char *path)
     fprintf(f, "\n  ],\n  \"view\": %d,\n", ui.view);
     fprintf(f, "  \"studio\": {\"role\": %d, \"col\": %d, \"clip\": %d, \"classic\": %d},\n",
             studio_cursor_role(), studio_cursor() & 0xFF, studio_cursor_clip(), ui.classic);
+    {   /* T8i: the songs list */
+        song_row_t r;
+        int j, n2 = 0;
+        for (j = 0; j < (int)SONGS_SLOTS; j++) {
+            song_io_songs_list(0, j, &r);
+            if (r.used)
+                n2++;
+        }
+        fprintf(f, "  \"songs\": {\"up\": %d, \"used\": %d, \"current\": %d, \"free\": %d, \"canundo\": %d, \"rows\": [",
+                ui_songs_up(), n2, song_io_songs_current_slot(0), song_io_songs_first_free(0),
+                song_io_songs_can_undelete(0));
+        for (j = 0; j < (int)SONGS_SLOTS; j++) {
+            song_io_songs_list(0, j, &r);
+            fprintf(f, "%s\n    {\"slot\": %d, \"used\": %d, \"take\": %d, \"current\": %d, \"name\": \"%s\"}",
+                    j ? "," : "", j, r.used, r.has_take, r.current, r.name);
+        }
+        fprintf(f, "\n  ]},\n");
+    }
     if (lv) {                                          /* T3: the LIVE state */
         fprintf(f, "  \"live\": {\"active\": %d, \"layer\": %d, \"focus\": %d, \"transport\": %d, \"roles\": [",
                 lv, live_layer(), live_focus(), live_bridge_transport_playing());

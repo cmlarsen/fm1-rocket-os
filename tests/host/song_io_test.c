@@ -135,6 +135,7 @@ void live_bridge_clip_changed(uint8_t clip) { (void)clip; }         /* T7b: no e
 uint8_t live_bridge_playing_clip(uint8_t role) { (void)role; return 0xFFu; }
 void live_bridge_stop(uint8_t role) { (void)role; }
 int live_bridge_stop_queued(int role) { (void)role; return 0; }
+int live_bridge_transport_playing(void) { return 0; }   /* T8i: the test is never playing */
 
 static void reset_flash(void)
 {
@@ -147,7 +148,7 @@ static void reset_flash(void)
 }
 static void boot(void)
 {
-    song_io_boot(0, 1250u);                     /* pats is unused by the stub */
+    song_io_boot(0, 1250u, 0);                  /* pats is unused by the stub; T8i: no preferred slot */
 }
 
 /* ---- tests ---- */

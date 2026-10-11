@@ -41,12 +41,14 @@ typedef struct {
     void *ctx;
 } clip_sink_t;
 
-/* UI-side command: a clip index in model.h's key-zone order, a role stop, or a tempo. */
-enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM };
+/* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, or a
+ * tempo. */
+enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE,
+       CLIP_CMD_MUTE_CLEAR };
 typedef struct {
     uint8_t  cmd;
-    uint8_t  clip;     /* launch: the clip; stop: the role */
-    uint8_t  quant;    /* Q_BAR / Q_BEAT / Q_END */
+    uint8_t  clip;     /* launch: the clip; stop / mute (T10i): the role */
+    uint8_t  quant;    /* Q_BAR / Q_BEAT / Q_END; mute: 1 on, 0 off */
     uint16_t bpm_x10;  /* CLIP_CMD_SET_BPM */
 } clip_cmd_t;
 
@@ -72,6 +74,7 @@ typedef struct {
     uint8_t  que[NROLES];    /* target clip of the pending action, or CLIP_NONE */
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
+    uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
 
     /* Single-producer / single-consumer command ring (UI writer, ISR reader). */
     clip_cmd_t cmd[CLIP_CMD_RING];
@@ -129,6 +132,19 @@ uint8_t  clip_engine_step_phase(const clip_engine_t *e);
 
 /* T7b: the step inside a role's playing clip (the playhead), 0 when the role is stopped. */
 uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role);
+
+/* T10i: mute / unmute a role, through the same ring. Muting releases the role's sounding
+ * notes immediately (note-offs at the window start) and suppresses new note-ons; the transport
+ * and the role's position keep running, so unmuting rejoins the clip in time. `song->role[role].muted`
+ * is updated, but the caller does not mark the song dirty for a live mute. */
+void clip_engine_mute(clip_engine_t *e, uint8_t role, int on);
+int  clip_engine_muted(const clip_engine_t *e, uint8_t role);
+
+/* Clear every role mute. It zeroes the bits immediately (an engine that stops rendering, e.g. when
+ * LIVE hands the audio to the classic pages, has no later drain) AND queues CLIP_CMD_MUTE_CLEAR,
+ * which drains after any mute command already in the ring, so a pending CLIP_CMD_MUTE cannot
+ * re-apply. The mute is performance state, never song state; live_enter also clears. */
+void clip_engine_mute_clear(clip_engine_t *e);
 
 /* Add nframes of transport and call the sink for every event in that window, with its
  * exact sample offset into the window. */

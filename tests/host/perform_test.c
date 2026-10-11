@@ -572,6 +572,26 @@ static void case_echo(void)
     CHECK(r && e.on == 0u && e.send == 10u && e.fdbk == 30u && e.time == 4u,
           "release: the song's own settings are restored (%u,%u,%u)", e.send, e.fdbk, e.time);
 
+    /* a toggle that lands in the same window as a report is not lost: change the base and the
+     * throw together, then drain, and the LATEST state is delivered */
+    start(1200);
+    perform_echo_targets(&P, &e);                 /* consume the init change */
+    perform_echo_base(&P, 10, 30, 4);
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.on == 0u && e.send == 10u, "toggle: base first (%u,%u,%u)", e.send, e.fdbk, e.time);
+    perform_echo_throw(&P, 1);                    /* toggle on ... */
+    perform_echo_base(&P, 20, 44, 2);             /* ... and a base change before the report */
+    perform_process(&P, INL, INR, 0u, 0u, 0u);    /* drain the throw */
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.on == 1u && e.send == PERFORM_ECHO_SEND,
+          "a toggle between reports is not lost (the latest throw state wins)");
+    CHECK(perform_echo_targets(&P, &e) == 0, "toggle: one-shot again");
+    perform_echo_throw(&P, 0);
+    perform_process(&P, INL, INR, 0u, 0u, 0u);
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.on == 0u && e.send == 20u && e.fdbk == 44u && e.time == 2u,
+          "and the release restores the new base (%u,%u,%u)", e.send, e.fdbk, e.time);
+
     /* the echo is external: engaged, the audio is untouched */
     start(1200);
     gen_tone(INL, INR, 40000, 440.0f, 0.5f);

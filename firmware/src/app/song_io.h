@@ -16,10 +16,13 @@
 #pragma once
 #include <stdint.h>
 #include "firmware/src/seq/pattern.h"   /* pattern_t (root-relative: -I. is on every build) */
+#include "songs_seam.h"                 /* T8i: song_row_t / songs_ops_t (model-free) */
 
 /* Scan the store and adopt slot 0, or build from the project and mark dirty. Call once from
- * ui_init(), after engine_init()/project_load() (the LIVE song is live_bridge's g_song). */
-void song_io_boot(const pattern_t *pats, uint16_t bpm_x10);
+ * ui_init(), after engine_init()/project_load() (the LIVE song is live_bridge's g_song).
+ * T8i: `preferred` is the last current slot (the project's reserved byte); it is adopted
+ * first, then slot 0, then the project. */
+void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred);
 
 int  song_io_loaded(void);          /* 1: the current song came from slot 0 (not mapped from the project) */
 int  song_io_dirty(void);           /* the current song changed since the last save */
@@ -111,3 +114,45 @@ int  song_io_redo_clip(void);           /* the clip the next redo touches, -1 no
  * them yet. */
 int song_io_take_save(int slot, const void *hdr, const void *ev);
 int song_io_take_load(int slot, void *hdr, void *ev, uint32_t max_events);
+
+/* ---- T8i: the songs list and its CRUD (a block separate from T7a/T7b's clip API) ------- */
+/* The SONGS view reaches the store only through these, via the songs_ops_t table in
+ * songs_seam.h. The `ctx` args are unused (the store is static); they exist so the
+ * functions are directly assignable to the ops pointers. `cur_slot` is the slot the
+ * current song lives in, or -1 when the current song is still the project mapping. */
+
+/* Fill one row (see song_row_t); `current` marks the slot being edited. */
+void song_io_songs_list(void *ctx, int slot, song_row_t *out);
+int  song_io_songs_current_slot(void *ctx);          /* cur_slot, or -1 */
+
+/* Load `slot` as the current song and reload the clip engine. 0 = ok. The caller stops
+ * the transport and silences the voices first. */
+int  song_io_songs_open(void *ctx, int slot);
+
+/* Build a template (0 Empty, 1 Starter) and save it into the first free slot. Returns
+ * the new slot, or -2 when all are taken, or -1 on a save failure. */
+int  song_io_songs_create(void *ctx, int kind, uint16_t bpm_x10, int key);
+
+/* Copy `src` into the first free slot. Returns the new slot or -2. */
+int  song_io_songs_copy(void *ctx, int src);
+
+/* Rename `slot` durably (and, if it is current, in RAM). 0 = ok. */
+int  song_io_songs_rename(void *ctx, int slot, const char *name);
+
+/* Durable delete + an undo entry. 0 = ok. */
+int  song_io_songs_delete(void *ctx, int slot);
+
+/* Undo the most recent delete (UNDO_DONE / UNDO_EMPTY / UNDO_CANNOT). */
+int  song_io_songs_undelete(void *ctx);
+
+/* The first free slot: never-used first, then a deleted one, or -2. */
+int  song_io_songs_first_free(void *ctx);
+
+/* 1 while the most recent delete can still be undone. */
+int  song_io_songs_can_undelete(void *ctx);
+
+/* Used clips in `slot`'s stored song; -1 when unknown. */
+int  song_io_songs_clip_count(void *ctx, int slot);
+
+/* The ops table above, for ui_songs_begin. */
+const songs_ops_t *song_io_songs_ops(void);

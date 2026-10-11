@@ -178,4 +178,52 @@ note's width is its length) and "bar N of M". `studio_clipnotes` shows all of it
 
 `make unit-core scenarios screens-lint parity check fw` and `tools/check_loader.sh` all pass.
 
+## Item 5: the integration merge (T10i, TRAM, T8i, T11-era fixes)
+
+Merged `integration` (T10i punch FX + role mutes, TRAM's shared song scratch, T8i's SONGS, the
+T11-era fixes) into the branch. Conflicts and how they were resolved:
+
+- **`clip_engine.c/.h`** — kept T10i's `CLIP_CMD_MUTE` / `CLIP_CMD_MUTE_CLEAR` (their own enum
+  values, ordered through the ring after any pending mute) *and* the T7b staged model
+  (`play[]`/`next[]` + `clip_engine_clip_changed`). The old `CLIP_CMD_RELOAD` is gone (checked: no
+  reference remains). The ISR mute path only sets `muted[]` and releases the role's notes; it never
+  touches `song->clip[]` — `step_events` reads `play[role]` and returns early when muted.
+- **`engine.c`** — kept the T7b `engine_crit_enter/exit` (wrapping `plat_crit_*`) alongside T10i's
+  punch-FX `engine_perform_*` block.
+- **`live_bridge.c/.h`** — kept T7b's `live_bridge_clip_changed` / position queries and T10i's
+  `live_bridge_grid` (it reads the same transport: `elapsed`/`step_*`/`global_step`) and the role
+  mutes. `live_bridge_song_reload` re-inits under the crit mask and clears the song's stored mutes.
+- **`ui.c`** — the view enum keeps both T8i's `V_SONGS` and T7b's `V_CLIPEDIT`/`V_CLIPMOTION`
+  (`V_SOUND`, `V_CLIPEDIT`=13, `V_CLIPMOTION`=14, `V_SONGS`=15); the SONGS block and the
+  `ui_clip.h` include both stay. `input()`/`ui_frame()`/`leds()` return to the SONGS view before the
+  editor paths, so they do not overlap.
+- **`song_io.*`** — T8i's songs ops and TRAM's `song_store_scratch_acquire/release` are kept; the
+  T7b undoable clip create copies a `clip_t` and never takes the scratch, so it cannot collide with a
+  songs operation holding it.
+- **`song_io_test.c`** — kept the T7b stubs plus T8i's `live_bridge_transport_playing`.
+
+### Re-seeded goldens and why (combination only)
+
+- `songs_list`, `songs_edit`, `songs_delete`, `songs_redo`: the SONGS view's number in the JSON dump
+  is 15 now (T7b's editor views sit before it), nothing else.
+- `studio_clipdrums`, `studio_clipliveedit`, `studio_cliplong`, `studio_clipmotion`,
+  `studio_clipnotes`, `studio_clipoverdub`, `studio_cliprec`, `studio_clipundorec`,
+  `studio_clipdrumrec`: T8i's `dump_json` adds the `songs` block to every dump; these goldens predate
+  the merge. PNGs are unchanged.
+
+### Device build (merged, on deltron.local)
+
+| | `make fw` | `make fw-debug` (X0X_DEBUG=1) |
+|---|---|---|
+| app image `x0x.bin` | **548,672 B** | **551,840 B** |
+| RAM `.data+.bss` | **96,404 B** of 98,304 | **96,504 B** of 98,304 |
+| POOL | **330,488 B** of 344,064 | **332,280 B** of 344,064 |
+| POOL spare | **13,576 B** (≥ 8,192) | **11,784 B** (≥ 8,192) |
+| package `x0x.fwsc` | 609,680 B, identity FM-1_900 | 609,680 B (debug) |
+
+`make unit unit-core scenarios screens-lint parity check fw fw-debug` and `tools/check_loader.sh` on
+both packages all pass; `make fuzz-ui` does not exist yet (T2c).
+
+
+
 

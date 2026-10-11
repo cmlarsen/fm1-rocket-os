@@ -6,10 +6,46 @@
  * only gfx.c's canvas (cv_begin / cv_rect / cv_line / cv_text / cv_blit) and the AF_
  * faces, so it is compiled after gfx.c like ui_live.c and ui_name.c. */
 #include "ui_songs.h"
-#ifdef NKEYS
-#undef NKEYS                           /* song_templates.h pulls model.h, which defines it too */
-#endif
-#include "song_templates.h"
+
+/* The New-song key picker's own constants (model-free): 12 majors then 12 minors, the
+ * same 0..23 the templates take. A MIN is the default the design highlights. */
+#define SONGS_NKEYS 24u
+#define SONGS_KEY_DEFAULT 21u
+#define SONGS_BPM_DEFAULT 1250u
+#define SONGS_BPM_MIN 200u
+#define SONGS_BPM_MAX 3000u
+static const char *const SR_KEYN[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *sr_key_name(int key)
+{
+    static char b[8];
+    int k = key % (int)SONGS_NKEYS;
+    const char *n;
+    int i = 0, j;
+    if (k < 0)
+        k += (int)SONGS_NKEYS;
+    n = SR_KEYN[k % 12];
+    for (j = 0; n[j] && i < 3; j++)
+        b[i++] = n[j];
+    b[i++] = ' ';
+    b[i++] = 'M';
+    if (k / 12) {
+        b[i++] = 'I';
+        b[i++] = 'N';
+    } else {
+        b[i++] = 'A';
+        b[i++] = 'J';
+    }
+    b[i] = 0;
+    return b;
+}
+static uint16_t sr_bpm(int v)
+{
+    if (v < (int)SONGS_BPM_MIN)
+        return SONGS_BPM_MIN;
+    if (v > (int)SONGS_BPM_MAX)
+        return SONGS_BPM_MAX;
+    return (uint16_t)v;
+}
 
 /* ---- tiny string helpers (no libc on the device path) ----------------------- */
 static char *sr_itoa(char *b, int v)
@@ -93,10 +129,11 @@ void ui_songs_begin(songs_ui_t *u, const songs_ops_t *ops)
     u->slot = 0;
     u->row = 0;
     u->tmpl = 1;                       /* Starter, as the design highlights */
-    u->key = (uint8_t)SONG_TMPL_DEFAULT_KEY;
-    u->bpm_x10 = SONG_TMPL_BPM_DEFAULT;
+    u->key = (uint8_t)SONGS_KEY_DEFAULT;
+    u->bpm_x10 = SONGS_BPM_DEFAULT;
     u->del_held = u->del_done = 0;
     u->del_t0 = 0;
+    u->home_used = 0;
     u->prev_btn = u->prev_keys = 0;
     u->msg[0] = 0;
     u->msg_until = 0;
@@ -122,6 +159,9 @@ static void sr_open_new(songs_ui_t *u)
     u->row = (uint8_t)u->tmpl;
 }
 
+/* the menu song's clip count (one flash read when the menu opens, not per frame) */
+static int sr_clip_count(const songs_ui_t *u, int slot);
+
 static void sr_create(songs_ui_t *u, int *action, uint32_t ms)
 {
     int ns;
@@ -135,12 +175,8 @@ static void sr_create(songs_ui_t *u, int *action, uint32_t ms)
             return;
         ns = u->ops->copy ? u->ops->copy(u->ops->ctx, cur) : -1;
     } else {
-        song_t s;
-        if (u->row == 0)
-            song_template_empty(&s, u->bpm_x10, (int)u->key);
-        else
-            song_template_starter(&s, u->bpm_x10, (int)u->key);
-        ns = u->ops->create_from ? u->ops->create_from(u->ops->ctx, &s) : -1;
+        int kind = (u->row == 1) ? 1 : 0;      /* 0 Empty, 1 Starter */
+        ns = u->ops->create_new ? u->ops->create_new(u->ops->ctx, kind, u->bpm_x10, (int)u->key) : -1;
     }
     if (ns == -2) {
         sr_say(u, "5 SONGS MAX: DELETE ONE", ms);
@@ -160,6 +196,7 @@ static void sr_create(songs_ui_t *u, int *action, uint32_t ms)
 int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
 {
     uint32_t down = ev->btn & ~u->prev_btn;
+    uint32_t up = u->prev_btn & ~ev->btn;
     int sel = (int)ev->enc[EN_SELECT];
     int action = SONG_ACTION_NONE;
 
@@ -190,11 +227,21 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
         return action;
     }
 
-    /* HOME + REC: undo a delete (the store's durable undo) */
+    /* HOME + REC: undo a delete (SONGS owns the one-level delete undo; clip undo is cleared
+     * when the song changes, so outside SONGS it never reaches a delete). */
     if ((down & (1u << B_REC)) && (ev->btn & (1u << B_HOME))) {
-        int rc = u->ops->undelete ? u->ops->undelete(u->ops->ctx) : 0;
+        int can = u->ops->can_undelete ? u->ops->can_undelete(u->ops->ctx) : 0;
+        int rc = can ? (u->ops->undelete ? u->ops->undelete(u->ops->ctx) : 0) : 0;
+        u->home_used = 1;              /* the release must not go back */
         ui_songs_refresh(u);
         sr_say(u, rc == 1 ? "RESTORED" : "CANNOT UNDO", ev->ms);
+        u->prev_btn = ev->btn;
+        u->prev_keys = ev->keys;
+        return action;
+    }
+    /* HOME + PLAY: nothing here (no redo of a delete), and the HOME release must not go back */
+    if ((down & (1u << B_PLAY)) && (ev->btn & (1u << B_HOME))) {
+        u->home_used = 1;
         u->prev_btn = ev->btn;
         u->prev_keys = ev->keys;
         return action;
@@ -224,11 +271,12 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
                 u->slot = (uint8_t)(u->row - 1);
                 u->screen = SO_MENU;
                 u->row = 0;
+                u->menu_clips = sr_clip_count(u, u->slot);   /* cache: no flash read per draw */
             } else if (u->row == 0) {
                 sr_open_new(u);
             }
         }
-        if (down & (1u << B_HOME))
+        if ((up & (1u << B_HOME)) && !u->home_used)
             action = SONG_ACTION_CLOSE;
         break;
 
@@ -236,15 +284,15 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
         if (sel)
             u->row = (uint8_t)sr_clamp(u->row + (sel > 0 ? 1 : -1), 0, 2);
         if (ev->enc[EN_K1])
-            u->bpm_x10 = song_tmpl_bpm((uint16_t)sr_clamp((int)u->bpm_x10 + (int)ev->enc[EN_K1] * 10,
-                                                           (int)SONG_TMPL_BPM_MIN, (int)SONG_TMPL_BPM_MAX));
+            u->bpm_x10 = sr_bpm((uint16_t)sr_clamp((int)u->bpm_x10 + (int)ev->enc[EN_K1] * 10,
+                                                           (int)SONGS_BPM_MIN, (int)SONGS_BPM_MAX));
         if (ev->enc[EN_K2])
-            u->key = (uint8_t)(((int)u->key + (ev->enc[EN_K2] > 0 ? 1 : -1) + (int)SONG_TMPL_NKEYS) %
-                               (int)SONG_TMPL_NKEYS);
+            u->key = (uint8_t)(((int)u->key + (ev->enc[EN_K2] > 0 ? 1 : -1) + (int)SONGS_NKEYS) %
+                               (int)SONGS_NKEYS);
         u->tmpl = u->row;
         if (down & (1u << B_SEL))
             sr_create(u, &action, ev->ms);
-        if (down & (1u << B_HOME))
+        if ((up & (1u << B_HOME)) && !u->home_used)
             u->screen = SO_LIST;
         break;
 
@@ -304,6 +352,8 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
                 }
                 case 2:
                     name_edit_begin(&u->name, u->rows[u->slot].name);
+                    u->name.prev_btn = ev->btn;      /* the SEL that opened it is not a confirm */
+                    u->name.prev_keys = ev->keys;
                     u->screen = SO_RENAME;
                     break;
                 default:
@@ -311,7 +361,7 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
                 }
             }
         }
-        if (down & (1u << B_HOME)) {
+        if ((up & (1u << B_HOME)) && !u->home_used) {
             u->del_held = 0;
             u->screen = SO_LIST;
         }
@@ -321,6 +371,8 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
         break;
     }
 
+    if (up & (1u << B_HOME))
+        u->home_used = 0;
     u->prev_btn = ev->btn;
     u->prev_keys = ev->keys;
     return action;
@@ -537,7 +589,7 @@ static void sr_new_screen(const songs_ui_t *u)
     q = sr_itoa(bpm, (int)u->bpm_x10 / 10);
     (void)q;
     sr_kv(4, 150, "K1 tempo", bpm);
-    sr_kv(122, 150, "K2 key", song_tmpl_key_name(u->key));
+    sr_kv(122, 150, "K2 key", sr_key_name(u->key));
     sr_hint(5, 216, "SEL", "create");
     {
         int x = 120;
@@ -555,10 +607,10 @@ static void sr_menu_meta(char *out, uint32_t cap, const songs_ui_t *u)
 {
     const song_row_t *r = &u->rows[u->slot];
     char *q = out;
-    int n = sr_clip_count(u, u->slot);
+    int n = u->menu_clips;                 /* cached when the menu opened: no flash read per draw */
     q = sr_itoa(q, n < 0 ? 0 : n);
     q = sr_cat(q, " clips ");
-    q = sr_cat(q, r->has_take ? "1 take" : "0 take");
+    q = sr_cat(q, r->has_take ? "1 take" : "0 takes");
     (void)cap;
 }
 static void sr_menu(const songs_ui_t *u)
@@ -608,7 +660,7 @@ static void sr_delete(const songs_ui_t *u, uint32_t ms)
     const song_row_t *r = &u->rows[u->slot];
     char meta[24];
     int pct = 0;
-    cv_rect(0, SY(30), 240, 150, TOK_BG);   /* blank the rows behind the dialog's edges */
+    cv_rect(0, SY(30), 240, 184, TOK_BG);   /* blank the rows and the menu behind the dialog */
     sr_rrect(14, 34, 212, 140, 6, TOK_SURF);
     sr_frame(14, 34, 212, 140, TOK_LINE);
     if (u->del_done)
@@ -621,8 +673,8 @@ static void sr_delete(const songs_ui_t *u, uint32_t ms)
     sr_text(96, sr_vc(&AF_M, 64, 18), &AF_M, r->name[0] ? r->name : "SONG", TOK_THEME);
     sr_menu_meta(meta, sizeof meta, u);
     sr_text(96, sr_vc(&AF_S, 86, 14), &AF_S, meta, TOK_MID);
-    sr_text_c(120, sr_vc(&AF_S, 184, 14), &AF_S, "UNDO BRINGS IT BACK", TOK_MID);
-    sr_text_c(120, sr_vc(&AF_S, 198, 14), &AF_S, "UNTIL THE NEXT DELETE", TOK_MID);
+    sr_text_c(120, sr_vc(&AF_S, 146, 14), &AF_S, "UNDO BRINGS IT BACK", TOK_MID);
+    sr_text_c(120, sr_vc(&AF_S, 160, 14), &AF_S, "UNTIL THE NEXT DELETE", TOK_MID);
 }
 static void sr_footer_list(void)
 {

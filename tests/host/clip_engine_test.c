@@ -223,6 +223,11 @@ static void run_script(const char *script)
             }
             else if (!strcmp(t[0], "launchnow")) clip_engine_launch_now(&eng, (uint8_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "stoprole"))  clip_engine_stop(&eng, (uint8_t)atoi_tok(t, 1));
+            else if (!strcmp(t[0], "mute"))      clip_engine_mute(&eng, (uint8_t)atoi_tok(t, 1),
+                                                                 atoi_tok(t, 2));
+            else if (!strcmp(t[0], "muted"))
+                putf("muted %s=%d\n", ROLE[atoi_tok(t, 1) < NROLES ? atoi_tok(t, 1) : 0],
+                     clip_engine_muted(&eng, (uint8_t)atoi_tok(t, 1)));
             else if (!strcmp(t[0], "unused"))    song.clip[atoi_tok(t, 1)].used = 0;
             else if (!strcmp(t[0], "changed"))   clip_engine_clip_changed(&eng, (uint8_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "clip")) {
@@ -501,6 +506,28 @@ int main(void)
         "run 12000\n"
         "stoprole 2\n"                 /* Q_BEAT: stop at the next beat */
         "runto 30000\n");
+
+    run_case("mute_midnote",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 4\n"          /* a note held across steps */
+        "play\n"
+        "launch 12 0\n"
+        "run 6000\n"
+        "mute 2 1\n"                    /* release the sounding note now */
+        "run 20000\n"
+        "mute 2 0\n"                    /* rejoin in time at the next loop */
+        "run 30000\n");
+
+    run_case("mute_while_queued",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "run 6000\n"
+        "launch 12 0\n"                 /* queued to the next bar (step 16 = 96000) */
+        "mute 2 1\n"                    /* muted while it is still queued: it starts silent */
+        "runto 100000\n"
+        "mute 2 0\n"
+        "runto 130000\n");              /* the next loop (step 20 = 120000) sounds */
 
     run_case("stop_then_cancel",
         "clip 12 melodic 4\n"

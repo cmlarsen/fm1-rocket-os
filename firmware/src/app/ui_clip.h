@@ -6,7 +6,7 @@
  *
  * The editors own STUDIO 3 (notes), STUDIO 4 (drums) and STUDIO 15 (motion) plus recording into a
  * clip, all through song_io. They edit the clip the song home's cursor points at; the clip engine
- * is told to re-take its playing copy with live_bridge_clip_reload() after an edit. */
+ * is told to re-take its playing copy with live_bridge_clip_changed() after an edit. */
 #pragma once
 #include <stdint.h>
 

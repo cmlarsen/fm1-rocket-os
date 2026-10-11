@@ -1,0 +1,62 @@
+# T8i STUDIO 13: delete the current song with the hold ring, undo it, and reboot.
+wait 300
+# two songs: Starter (slot 0), then Empty (slot 1), the Empty current
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap SEL
+wait 40
+tap SEL
+wait 40
+expect songused 1
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+turn SELECT -1
+tap SEL
+wait 40
+expect songused 2
+expect songcurrent 1
+# the menu on the current song (slot 1), cursor on Delete
+press SAVE
+wait 700
+release SAVE
+wait 40
+expect songrow 2
+tap EDIT
+wait 40
+turn SELECT 3
+# hold SEL: the ring fills for 1.5 s, then it deletes
+press SEL
+wait 750
+shot songs_delete_ring.png
+wait 800
+release SEL
+wait 40
+expect songused 1
+expect songcurrent 0
+expect songcanundo 1
+shot songs_deleted.png
+dump songs_deleted.json
+# HOME + REC undoes it (one level)
+press HOME
+tap REC
+release HOME
+wait 40
+expect songused 2
+expect songcanundo 0
+shot songs_restored.png
+dump songs_restored.json
+# the reboot keeps the undo result
+reboot
+wait 300
+expect songused 2
+expect songcurrent 0
+expect songcanundo 0
+shot songs_after_reboot.png
+dump songs_after_reboot.json

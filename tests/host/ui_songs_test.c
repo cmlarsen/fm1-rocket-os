@@ -31,6 +31,7 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #include "../../firmware/src/app/ui_songs.h"
 #undef NKEYS
 #include "../../core/model/model.h"
+#include "../../firmware/src/app/song_templates.h"
 #include "../../firmware/src/app/ui_name.c"
 #include "../../firmware/src/app/ui_songs.c"
 
@@ -186,17 +187,22 @@ static int fake_open(void *ctx, int slot)
     f->current = slot;
     return 0;
 }
-static int fake_create(void *ctx, const void *song)
+static int fake_create_new(void *ctx, int kind, uint16_t bpm_x10, int key)
 {
     fake_t *f = (fake_t *)ctx;
     int slot = fake_pick(f);
+    song_t s;
     if (slot < 0)
         return -2;
-    f->s[slot] = *(const song_t *)song;
+    if (kind == 1)
+        song_template_starter(&s, bpm_x10, key);
+    else
+        song_template_empty(&s, bpm_x10, key);
+    f->s[slot] = s;
     f->used[slot] = 1;
     f->deleted[slot] = 0;
     f->ever[slot] = 1;
-    f->clips[slot] = fake_clip_count(&f->s[slot]);
+    f->clips[slot] = fake_clip_count(&s);
     return slot;
 }
 static int fake_copy(void *ctx, int src)
@@ -259,7 +265,7 @@ static int fake_undelete(void *ctx)
 }
 static int fake_clips(void *ctx, int slot) { return ((fake_t *)ctx)->clips[slot]; }
 
-static songs_ops_t FAKE_OPS = { 0, fake_list, fake_current, fake_open, fake_create,
+static songs_ops_t FAKE_OPS = { 0, fake_list, fake_current, fake_open, fake_create_new,
                                 fake_copy, fake_rename, fake_del, fake_undelete,
                                 fake_first_free, fake_can_undelete, fake_clips };
 
@@ -290,6 +296,18 @@ static int tap_btn(songs_ui_t *u, int b, uint32_t *t)
     *t += 10;
     e = sev(0, 0, *t);
     ui_songs_input(u, &e);
+    *t += 10;
+    return a;
+}
+/* HOME acts on release (the panel grammar), so its action comes from the up frame */
+static int home_tap(songs_ui_t *u, uint32_t *t)
+{
+    int a;
+    song_event_t e = sev(1u << B_HOME, 0, *t);
+    ui_songs_input(u, &e);
+    *t += 10;
+    e = sev(0, 0, *t);
+    a = ui_songs_input(u, &e);
     *t += 10;
     return a;
 }
@@ -374,7 +392,7 @@ static void test_list(void)
     CHECK(tap_btn(&u, B_SEL, &t) == SONG_ACTION_NONE);
     CHECK(strcmp(ui_songs_toast(&u), "EMPTY SLOT") == 0);
     u.row = 0;
-    CHECK(tap_btn(&u, B_HOME, &t) == SONG_ACTION_CLOSE);
+    CHECK(home_tap(&u, &t) == SONG_ACTION_CLOSE);
 }
 
 static void test_list_empty(void)
@@ -603,14 +621,10 @@ static void test_slot_policy(void)
     CHECK(FAKE_OPS.first_free(&f) == 3);
     CHECK(FAKE_OPS.can_undelete(&f) == 1);
     /* two creates take 3 and 4; the next reuses the deleted slot 0 */
-    {
-        song_t s;
-        song_template_empty(&s, 1250, 0);
-        CHECK(FAKE_OPS.create_from(&f, &s) == 3);
-        CHECK(FAKE_OPS.create_from(&f, &s) == 4);
-        CHECK(FAKE_OPS.first_free(&f) == 0);
-        CHECK(FAKE_OPS.create_from(&f, &s) == 0);   /* reuses the deleted slot */
-    }
+    CHECK(FAKE_OPS.create_new(&f, 0, 1250, 0) == 3);
+    CHECK(FAKE_OPS.create_new(&f, 0, 1250, 0) == 4);
+    CHECK(FAKE_OPS.first_free(&f) == 0);
+    CHECK(FAKE_OPS.create_new(&f, 0, 1250, 0) == 0);   /* reuses the deleted slot */
     CHECK(FAKE_OPS.can_undelete(&f) == 0);          /* the undo is gone */
     /* and the view reports "CANNOT UNDO" when HOME+REC is pressed */
     ui_songs_begin(&u, &FAKE_OPS);

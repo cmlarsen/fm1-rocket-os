@@ -42,6 +42,7 @@ G0 owner ─► G1 design sign-off ─► T1 import X0X + deltron build ─► R
   2. runs `/code-review`;
   3. merges `--no-ff`;
   4. releases the worker.
+- **After every merge, the coordinator runs `make fw fw-debug` on the merged `integration` tree,** not only on the worker branch. Two branches that each fit the RAM pool can overflow it together (T8i + T10i on 2026-10-11). A failed merged build blocks the next install until a fix lands.
 - **Failures** go back to the same worker as a follow-up Dispatch, with the artifacts attached. After two failures on one Task, the coordinator escalates to the owner.
 - **`integration` → `main`** happens only at RC gates, as a PR that the owner approves.
 
@@ -162,6 +163,9 @@ Overnight the owner asked for more parallelism. Each task with a self-contained 
   - `all_off_now` sends no MIDI note-offs or clock stop to external gear.
   - K1–K4 changes made in LIVE are saved into the project.
   - The screen tour (`screens_tour.x0x`) doesn't visit LIVE yet, so `screens-lint` doesn't cover it.
+- **Songs (from the T8i review, minor):**
+  - `song_io_flush` returns 0 after an earlier failed save, so opening another song then drops the unsaved edits (`song_io.c:127`).
+  - `songs_load_now` refuses silently on a timeout after the current song is deleted, so the next autosave brings the deleted song back (`ui.c:2592`). It should show a message and pick another slot.
 - **Device install log:** the RC1 release build `build/rc/rocket-rc1-1662c01.fwsc` (songs on flash, FM6 on core 1) was installed unattended on 2026-10-11 and stayed up for 40 s through its first song autosave. Before that, the T3 build (`build/rc/rocket-t3-*.fwsc`) was installed unattended on 2026-10-11, and the FM-1 stayed up for 30 s, answering `FM-1_900 [running]`.
 
 ## Riskiest tasks

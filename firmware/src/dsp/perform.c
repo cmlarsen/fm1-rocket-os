@@ -457,13 +457,16 @@ void perform_echo_base(perform_t *p, uint8_t send, uint8_t fdbk, uint8_t time)
 
 int perform_echo_targets(perform_t *p, perform_echo_t *out)
 {
+    PERF_BARRIER();
     if (!p->echo_changed)
         return 0;
+    p->echo_changed = 0;                  /* clear BEFORE the reads: a toggle in the ISR between
+                                           * the read and the clear would otherwise be lost */
+    PERF_BARRIER();
     out->send = p->echo_send;
     out->fdbk = p->echo_fdbk;
     out->time = p->echo_time;
     out->on = p->echo_on;
-    p->echo_changed = 0;
     return 1;
 }
 
