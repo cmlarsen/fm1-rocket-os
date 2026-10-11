@@ -19,6 +19,17 @@ wait 700
 shot s00d_studio_clear.png
 key w0 up
 release HOME
+# T7a: the sound cards outside Classic (EDIT from the song home)
+cursor 3 0
+tap EDIT
+wait 300
+shot s00e_sound_fm6.png
+tap HOME
+cursor 1 0
+tap EDIT
+wait 300
+shot s00f_sound_303.png
+tap HOME
 # T7a: into the classic X0X pages (GLOBAL -> Classic patterns)
 tap GLO
 tap SEL

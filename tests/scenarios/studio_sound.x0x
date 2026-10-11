@@ -1,0 +1,64 @@
+# T7a follow-up D2: outside Classic, EDIT on the song home opens the cursor role's sound page (never
+# an X0X pattern editor), and HOME or SEQ returns to the song home.
+wait 300
+# DRUMS -> the 909 sound page
+cursor 0 0
+tap EDIT
+expect view 1
+expect part 0
+tap HOME
+expect view 10
+# BASS -> 303 A
+cursor 1 0
+tap EDIT
+expect view 1
+expect part 2
+tap SEQ
+expect view 10
+# LEAD -> 303 B
+cursor 2 0
+tap EDIT
+expect view 1
+expect part 3
+tap HOME
+expect view 10
+# CHORDS -> the FM6 sound card
+cursor 3 0
+tap EDIT
+expect view 12
+wait 1400
+shot studio_sound_fm6.png
+tap HOME
+expect view 10
+# FX -> the NOISE sound card; SEQ also returns home
+cursor 4 0
+tap EDIT
+expect view 12
+wait 1400
+shot studio_sound_noise.png
+tap SEQ
+expect view 10
+# no path from the song home to an X0X pattern editor: ARP is inert, on the home and on a sound page
+tap ARP
+expect view 10
+cursor 0 0
+tap EDIT
+expect view 1
+tap ARP
+expect view 1
+tap HOME
+expect view 10
+# FX, MIX and GLOBAL are sound/utility pages; HOME returns to the song home
+tap FX
+expect view 3
+tap HOME
+expect view 10
+tap LFO
+expect view 4
+tap HOME
+expect view 10
+tap GLO
+expect view 5
+tap HOME
+expect view 10
+dump studio_sound.json

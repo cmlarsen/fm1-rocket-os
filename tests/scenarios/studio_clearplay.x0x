@@ -1,0 +1,22 @@
+# T7a follow-up D7: clearing a clip that is playing stops that role (which releases its notes).
+wait 300
+tap SEQ
+tap HOME
+tap SEL
+expect liveque0 0
+tap PLAY
+wait-bar 1
+expect liveclip0 0
+wait 1400
+shot studio_clearplay_before.png
+press HOME
+key w0 down
+wait 1600
+key w0 up
+release HOME
+expect clipused0 0
+wait-bar 2
+expect liveclip0 -1
+shot studio_clearplay_after.png
+dump studio_clearplay.json
+tap PLAY

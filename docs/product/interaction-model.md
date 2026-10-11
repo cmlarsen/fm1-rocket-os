@@ -69,10 +69,14 @@ LIVE), so tweaking a sound never stops the clips.
 ### Classic patterns
 X0X's pattern editors are not on the normal button paths any more. They live behind
 **GLOBAL → Classic patterns**: entering Classic hands the audio to X0X's sequencer (the clip engine
-stops with all-off and the header shows CLASSIC); leaving (GLOBAL → Song home, or HOME back) stops
-that sequencer with all-off and gives the audio back to the clip engine, whose clips keep playing.
-This is T7a's decision, recorded here for the owner to confirm; the 909/303 editors stay available
-as classic pages until T7b replaces clip editing.
+stops with all-off and the header shows CLASSIC). Inside Classic, X0X behaves exactly as before
+except for two exits that both return to the song home and hand the audio back to the clip engine
+(its clips keep playing): **HOME on X0X's SONG page**, and **GLOBAL → Back to song** (the classic
+row). Classic pages show a `GLO: BACK TO SONG` footer hint. Outside Classic, HOME and SEQ on a
+sound/FX/MIX/GLOBAL page return to the song home, and EDIT opens the cursor role's sound page
+(the 909/303 pages, or an FM6/NOISE macro card) rather than a pattern editor. This is T7a's
+decision, recorded here for the owner to confirm; the 909/303 editors stay available as classic
+pages until T7b replaces clip editing.
 
 ## LIVE mode
 

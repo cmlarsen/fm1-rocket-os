@@ -1,0 +1,29 @@
+# T7a follow-up D7: two ways out of Classic. HOME on X0X's SONG page leaves Classic, and the GLOBAL
+# list's "BACK TO SONG" row does too (same all-off handoff), and the Classic footer hints at it.
+wait 300
+# path 1: GLOBAL -> Classic patterns, then GLOBAL -> BACK TO SONG (the last row)
+tap GLO
+tap SEL
+expect classic 1
+expect view 1
+wait 1400
+shot studio_classic_footer.png
+tap GLO
+turn SELECT 18
+wait 100
+tap SEL
+expect classic 0
+expect view 10
+# path 2: HOME on X0X's SONG page
+tap GLO
+tap SEL
+expect classic 1
+tap HOME
+tap HOME
+expect view 6
+tap HOME
+expect classic 0
+expect view 10
+wait 1400
+shot studio_classic_exit.png
+dump studio_classic_exit.json

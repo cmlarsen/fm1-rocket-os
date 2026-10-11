@@ -1,0 +1,23 @@
+{
+  "transport": {"playing": 1, "bpm": 125.0, "bar": 4, "beat": 0, "step": 0, "sample": 364800},
+  "parts": [
+    {"part": 0, "ppat": 0, "pcue": -1, "mute": 0},
+    {"part": 1, "ppat": 0, "pcue": -1, "mute": 0},
+    {"part": 2, "ppat": 0, "pcue": -1, "mute": 0},
+    {"part": 3, "ppat": 0, "pcue": -1, "mute": 0}
+  ],
+  "view": 10,
+  "studio": {"role": 0, "col": 0, "clip": 0, "classic": 0},
+  "live": {"active": 1, "layer": 0, "focus": 1, "transport": 1, "roles": [
+    {"role": 0, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
+    {"role": 1, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
+    {"role": 2, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
+    {"role": 3, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
+    {"role": 4, "clip": -1, "queued": -1, "stop": 0, "progress": 0}
+  ],
+  "key_clip": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]},
+  "leds": {
+    "keys": [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+    "buttons": {}
+  }
+}

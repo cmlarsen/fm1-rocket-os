@@ -1,12 +1,17 @@
 # T3 review #4: a key held across a layer or focus change releases the note that key started.
 # The note is tracked per key, so SCL and ALGORITHM do not retarget it.
 wait 300
+# T7a: into the classic X0X pages (GLOBAL -> Classic patterns)
+tap GLO
+tap SEL
 # a 303 A and a 303 B line, so BASS and LEAD have clips
 turn ALGO 2
 tapkey w0
 turn ALGO 1
 tapkey w0
 turn ALGO -3
+# T7a: the song is the edited object; seed its clips from the lines just built
+songseed
 # enter LIVE and switch to the PLAY layer
 press PLAY
 wait 700

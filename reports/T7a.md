@@ -95,8 +95,39 @@ The song-home buttons keep the one grammar: EDIT opens the sound page for the cu
   the cursor and the K1–K4 cards all fit the 240×240 at 1:1. Recorded for the owner.
 - **T7b** provides the clip editor (NOTES/DRUM, MOTION) and REC; SEQ opens the settings page until
   then, and REC shows a hint.
-- **Classic entry/exit** uses the GLOBAL list; the coordinator's "HOME back" was adapted because
-  HOME is load-bearing in X0X's own navigation (the tour and the prob/trackmute scenarios rely on
-  it). The classic pages are otherwise byte-for-byte the X0X ones.
+- **Classic exit** is HOME on X0X's SONG page and GLOBAL → Back to song (T7a D7); X0X's own HOME
+  navigation (V_PART → V_HOME → V_SONG) is untouched inside Classic, so the classic scenarios still
+  navigate as before. The classic pages are otherwise byte-for-byte the X0X ones.
 - The one-time project → song seed still maps CHORDS from the BASS clips and generates the FX clips
   (T5i's interim content); T8's Starter song will replace it.
+
+## Follow-up: review fixes (reports/T7a-review.md)
+
+Merged `integration` first (T8's UI module, `song_t.key`/`song_t.scale` in place of `rsv[2]`); T8i
+still owns the SAVE-held → SONGS wiring.
+
+| # | fix |
+|---|---|
+| **D1** | `live_leave` now sends a note-off for every held key (`live_release_held` → `live_bridge_play_key(..., 0)`) before clearing, plus an all-off only when the transport is stopped (so playing clips still carry on). Scenario `studio_hang` (the `boffs` counter and the events golden). |
+| **D2** | Outside Classic, EDIT on the song home opens the cursor role's sound page: DRUMS→909, BASS→303A, LEAD→303B (V_PART, sound-only: the step grid is a card, the keys audition), CHORDS→FM6 and FX→NOISE via a new `V_SOUND` with the `T_RSV` macro knobs. ARP is inert, and HOME/SEQ on any X0X page outside Classic return to `V_STUDIO`. Scenario `studio_sound`. |
+| **D3** | The toast is drawn in the band it is blitted into (band-relative y), so undo, redo, clear, copy and "can't undo" show. Scenario `studio_seltap` (`studio_cantundo.png`). |
+| **D4** | A SEL tap only launches; the clear ring starts after a 250 ms hold (the ring still runs 1.5 s from the press). Scenario `studio_seltap`. |
+| **D5** | `live_entry_stop` and `live_hold` re-enter Classic (and `live_hold` seeds the song); `live_entry_stop` again proves entering LIVE stops X0X's 303. |
+| **D6** | The card reads the real mode, shows sub-bar lengths in steps ("12 steps", never "0 bars") in the card and the ring, names the song's key and scale ("<key> <scale> - 5 roles"), and the header name keeps 2 px from the transport. Scenario `studio_card`. |
+| **D7** | Copy targets blink with a `+` in the grid (matching the keys); clearing a playing clip stops that role; HOME on X0X's SONG page leaves Classic to the song home, and the GLOBAL classic row reads "BACK TO SONG"; a "GLO: BACK TO SONG" footer hint shows on Classic pages. Scenarios `studio_classic_exit`, `studio_clearplay`, `studio_copy`. |
+
+`make unit-core scenarios screens-lint parity check fw` and `tools/check_loader.sh` pass. Device:
+image 514,576 B; RAM `.data+.bss` 95,824 / 98,304; POOL 292,132 / 344,064.
+
+### Re-seeded goldens and why
+
+- **New:** `studio_hang` (D1), `studio_sound` (D2, FM6 and 303 cards), `studio_classic_exit` (D7,
+  two exits + the footer hint), `studio_seltap` (D4 ring and D3 "can't undo" toast), `studio_card`
+  (D6 steps/mode), `studio_clearplay` (D7 clear-a-playing-clip).
+- **Classic footer hint** changed every classic screenshot: `groove/*` (9), `harness/harness_playing.png`,
+  `patterns/11_chain.png`, `song/s01..s05`, and `live_pads/live_enter.png` (the STUDIO hold-ring shot).
+- **Event streams** with the classic/songseed migration: `live_hold/live_hold_events.txt`,
+  `live_play/live_play_events.txt`.
+- **Song home fixes** (card text, toast band, SEL hold, header clearance, copy targets):
+  `studio_home/*`, `studio_empty/*`, `studio_settings/*`, `studio_clear/*`, `studio_copy/*`,
+  `studio_live/*`, `studio_persist/*`.

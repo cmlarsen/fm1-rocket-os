@@ -76,7 +76,7 @@ turn ALGO -1
 tap HOME
 expect songon 0
 # motion: 303 A's cutoff, swept while recording, one turn a step (16 steps of 125 ms)
-tap HOME
+# T7a: HOME on X0X's SONG page now leaves Classic, so EDIT straight from SONG opens 303 A's page.
 tap EDIT
 expect part 2
 expect sound2.0.0 48
