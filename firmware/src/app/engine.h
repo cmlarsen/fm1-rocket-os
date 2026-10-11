@@ -57,6 +57,14 @@ void engine_load(uint32_t pct, uint32_t frames);           /* ISR, after engine_
 void engine_guard_enable(int on);                           /* off: full quality always (the PERF test) */
 int engine_guard_active(void);
 extern volatile uint32_t eng_guard_count;                   /* times it engaged (PERF screen) */
+/* T5perf/RC1p (debug): keep the core-1 job on core 0 for a stress run, to report the single-core
+ * numbers. It does not stop core 1, so there is no ISR race; a release build never sets it. */
+void engine_core2_force_off(int on);
+int engine_core2_forced_off(void);
+/* T5perf: core 1's mean busy share of the block since the last reset (%), self-timed with the shared
+ * 24 MHz timer; 0 when core 1 never ran the job. Core 0's load hides core-1 time it does not wait for. */
+uint32_t engine_core1_pct(void);
+void engine_core1_stats_reset(void);
 extern volatile uint8_t eng_step[NTRACKS];   /* playheads for the UI */
 extern volatile uint16_t eng_peak[NPARTS];   /* part meters, Q15, decaying (UI) */
 extern volatile uint8_t eng_hit[NKIT][NDRUM]; /* each drum track's last hit, 255 = full velocity (the UI lets it fall) */

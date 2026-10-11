@@ -35,3 +35,6 @@ These questions are still unresolved. When one is answered, record the answer in
 
 ## RC1 CPU headroom (2026-10-11)
 - Full LIVE stress with 4 FM6 voices runs at about 77% CPU and trips the overload guard, which then holds FM6 to 2 voices. Is a lower FM6 voice count acceptable if optimisation can't win headroom back? See [RC1 results](reviews/2026-10-11-rc1-device-results.md).
+
+## Core-1 data integrity with FM6 offloaded (2026-10-11, T5perf review)
+X0X's core-1 check word covers the job hand-off, not the data core 1 reads while it renders FM6. On a unit with a bad core 1, FM6 could click or hold a stuck-loud voice before the hand-off check trips the single-core fallback. Memory isn't corrupted: no pointers are loaded from that data. The 808 has the same exposure. Only a healthy unit has been measured. If owners report FM6 glitches, offer a GLOBAL option to keep FM6 on core 0.
