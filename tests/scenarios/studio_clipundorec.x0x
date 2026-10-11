@@ -17,12 +17,13 @@ expect clipnotes7 3
 expect cliplen7 16
 expect clipused7 1
 expect undodepth 1
-# HOME + REC undoes the pass (and the clip the slot created)
+# HOME + REC undoes the pass (and the clip the slot created); the clip stops at its quantize
 press HOME
 tap REC
 release HOME
 expect clipnotes7 0
 expect clipused7 0
+wait-bar 1
 expect liveclip1 -1
 expect undopos 0
 wait 1400

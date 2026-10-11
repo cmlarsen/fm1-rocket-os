@@ -99,6 +99,7 @@ int  live_bridge_transport_playing(void);
 /* Clip launching, straight through to the clip engine's ring (main-loop safe). */
 void live_bridge_launch(uint8_t clip);      /* at the clip's own quantize */
 void live_bridge_launch_now(uint8_t clip);  /* HOME + key: the next step */
+void live_bridge_launch_at(uint8_t clip, uint32_t at_step);   /* T7b: exactly on a global step */
 void live_bridge_stop(uint8_t role);        /* stop the role at its quantize */
 
 /* PLAY layer: a key down/up on the focused role, through X0X's engine commands. `note` is the

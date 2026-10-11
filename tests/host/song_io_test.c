@@ -108,7 +108,7 @@ static int slot0_extent(void)
 /* ---- the live_bridge hooks song_io uses ---- */
 static song_t g_song;
 static uint32_t g_proj_hash = 0x1111u;          /* the test's "project": change it to simulate an edit */
-static uint32_t g_song_hash, g_rebuilds, g_baselines, g_reloads;
+static uint32_t g_song_hash, g_rebuilds, g_baselines, g_reloads, g_changed;
 void *live_bridge_song(void) { return &g_song; }
 void live_bridge_song_reload(void) { g_reloads++; }
 uint32_t live_bridge_pats_hash(const pattern_t *pats) { (void)pats; return g_proj_hash; }
@@ -131,7 +131,7 @@ uint32_t live_bridge_rebuild(const pattern_t *pats)
     return g_song_hash;
 }
 void live_bridge_song_baseline(uint32_t h) { g_baselines++; g_song_hash = h; }
-void live_bridge_clip_changed(uint8_t clip) { (void)clip; }         /* T7b: no engine in this test */
+void live_bridge_clip_changed(uint8_t clip) { (void)clip; g_changed++; }   /* T7b: no engine in this test */
 uint8_t live_bridge_playing_clip(uint8_t role) { (void)role; return 0xFFu; }
 void live_bridge_stop(uint8_t role) { (void)role; }
 int live_bridge_stop_queued(int role) { (void)role; return 0; }
@@ -314,6 +314,26 @@ static void test_clip_create_undo(void)
     CHECK(song_io_clip_used(7) == 1 && song_io_note_count(7) == 1);
 }
 
+/* T7b re-review 4: undo stages the restored clip through the main-loop path; it does NOT re-init
+ * the clip engine (which would stop the music while it plays). Only song open / load re-inits. */
+static void test_undo_stages_not_reloads(void)
+{
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    song_io_clip_create(7, 16, 0, 0);
+    song_io_edit_begin(7);
+    song_io_note_add(7, 0, 60, 100, 1);
+    song_io_edit_end();
+    CHECK(g_changed > 0);                               /* the edit staged the clip */
+    g_changed = 0;
+    g_reloads = 0;
+    CHECK(song_io_undo() == 1);
+    CHECK(g_changed > 0);                               /* undo staged the restored clip */
+    CHECK(g_reloads == 0);                              /* ...and did not re-init the engine */
+    CHECK(song_io_note_count(7) == 0);
+}
+
 static void test_backend_refuses_out_of_region(void)
 {
     uint8_t b[8];
@@ -412,6 +432,7 @@ int main(void)
     test_clip_edits();
     test_clip_editor_ops();
     test_clip_create_undo();
+    test_undo_stages_not_reloads();
     test_backend_refuses_out_of_region();
     test_power_cut_keeps_previous();
     test_failed_save_no_retry();

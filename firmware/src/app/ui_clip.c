@@ -353,14 +353,51 @@ void clip_rec_arm(int keep_session)
     say("REC", 0);
 }
 
+/* the second REC: finalize the take (length + held-note ends) and arm the launch so the loop
+ * starts exactly on the close boundary, with no gap. Recording continues until the boundary; the
+ * session ends there. */
+static void cl_rec_close(void)
+{
+    int bars, len, i;
+    rec.close = cl_next_bar(live_bridge_global_step());
+    if (rec.overdub) {
+        len = cl_len();
+    } else {
+        bars = (int)((rec.close - rec.start + LIVE_STEPS_PER_BAR - 1u) / LIVE_STEPS_PER_BAR);
+        if (bars < 1)
+            bars = 1;
+        if (bars > 2 && bars <= 4)
+            bars = 4;
+        else if (bars > 1)
+            bars = 2;
+        if (bars > 4)
+            bars = 4;
+        len = bars * (int)LIVE_STEPS_PER_BAR;
+        if (!song_io_clip_is_drum(rec.clip))
+            song_io_clip_set_len(rec.clip, len);       /* a melodic take sets its bar count */
+    }
+    for (i = 0; i < NKEYS; i++) {                      /* a note still held ends at the loop end */
+        int step;
+        if (!rec.note_on[i])
+            continue;
+        if (song_io_note_get(rec.clip, rec.note_idx[i], &step, 0, 0, 0)) {
+            int l = len - step;
+            if (l < 1)
+                l = 1;
+            song_io_note_set(rec.clip, rec.note_idx[i], -1, -1, -1, l);
+        }
+        rec.note_on[i] = 0;
+    }
+    live_bridge_launch_at((uint8_t)rec.clip, rec.close);   /* starts exactly on rec.close */
+    rec.closing = 1;
+    say("REC: CLOSING", 0);
+}
+
 void clip_rec_button(void)                             /* REC in the editor: arm, or close */
 {
     if (rec.active) {
-        if (!rec.closing) {
-            rec.closing = 1;
-            rec.close = cl_next_bar(live_bridge_global_step());
-            say("REC: CLOSING", 0);
-        }
+        if (!rec.closing)
+            cl_rec_close();
         return;
     }
     clip_rec_arm(0);
@@ -420,42 +457,14 @@ static void cl_rec_drum(int k, int lane, int acc)
     cl_sync();
 }
 
-static void cl_rec_commit(void)
+static void cl_rec_finish(void)                        /* the close boundary arrived */
 {
-    int bars, len, i;
-    uint32_t recorded;
     if (!rec.active)
         return;
-    recorded = live_bridge_global_step() > rec.start ? live_bridge_global_step() - rec.start : 0;
-    bars = (int)((recorded + LIVE_STEPS_PER_BAR - 1u) / LIVE_STEPS_PER_BAR);
-    if (bars < 1)
-        bars = 1;
-    if (bars > 2 && bars <= 4)
-        bars = 4;
-    else if (bars > 1)
-        bars = 2;
-    if (bars > 4)
-        bars = 4;
-    len = bars * (int)LIVE_STEPS_PER_BAR;
-    if (!rec.overdub && !song_io_clip_is_drum(rec.clip))
-        song_io_clip_set_len(rec.clip, len);           /* a melodic take sets its bar count */
-    for (i = 0; i < NKEYS; i++) {                      /* a held note ends at the loop end */
-        int step;
-        if (!rec.note_on[i])
-            continue;
-        if (song_io_note_get(rec.clip, rec.note_idx[i], &step, 0, 0, 0)) {
-            int l = cl_len() - step;
-            if (l < 1)
-                l = 1;
-            song_io_note_set(rec.clip, rec.note_idx[i], -1, -1, -1, l);
-        }
-        rec.note_on[i] = 0;
-    }
     song_io_edit_end();
     cl_sync();
     if (rec.n > 0)
         cl_toast("REC", "recorded");
-    live_bridge_launch_now((uint8_t)rec.clip);         /* no gap: the loop starts at the boundary */
     rec.active = 0;
     rec.closing = 0;
     ui.rec = 0;
@@ -477,7 +486,7 @@ void clip_tick(void)
             rec.active = rec.closing = 0;
             ui.rec = 0;
         } else if (rec.closing && live_bridge_global_step() >= rec.close) {
-            cl_rec_commit();
+            cl_rec_finish();
         }
     }
     if (cl.toast_until && (int32_t)(cl.toast_until - now) <= 0)
@@ -797,7 +806,7 @@ static void cl_draw_drums(int band)
         int h = CL_DRUM_ROW - 3;
         if (lane == cl.lane)
             box(0, y - off, 240, CL_DRUM_ROW, TOK_SURF);
-        cv_text(2, vc(&AF_S, y - off, CL_DRUM_ROW), &AF_S,
+        cv_text(10, vc(&AF_S, y - off, CL_DRUM_ROW), &AF_S,
                 engine_voice_name(T_909, lane), lane == cl.lane ? CL_COL[0] : TOK_MID);
         for (s = 0; s < 16; s++) {
             int step = cl.page * 16 + s, x = CL_GRID_X + s * CL_DRUM_STEP;
@@ -816,6 +825,18 @@ static void cl_draw_drums(int band)
             if (step == ph)
                 box(x, y0, 10, h, TOK_ACCENT);
         }
+    }
+    {   /* T7b re-review: a scroll indicator (11 lanes, 9 shown): a bar + up/down chevrons */
+        int total = (int)LIVE_DRUM_LANES;
+        int bar_h = visible * CL_DRUM_ROW;
+        int ty = CL_GRID_Y + (top * bar_h) / total;
+        int bh = (visible * bar_h) / total;
+        cv_rect(0, CL_GRID_Y - off, 2, bar_h, TOK_LINE);
+        cv_rect(0, ty - off, 2, bh < 4 ? 4 : bh, TOK_MID);
+        if (top > 0)
+            cv_text(3, vc(&AF_S, CL_GRID_Y - off, 9), &AF_S, "^", TOK_MID);
+        if (top + visible < total)
+            cv_text(3, vc(&AF_S, CL_GRID_Y + bar_h - 9 - off, 9), &AF_S, "v", TOK_MID);
     }
 }
 

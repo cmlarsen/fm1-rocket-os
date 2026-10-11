@@ -307,7 +307,7 @@ void clip_engine_transport_stop(clip_engine_t *e) { e->playing = 0; }
 
 /* ---- UI entry points ----------------------------------------------------- */
 
-static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm)
+static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm, uint32_t at)
 {
     uint8_t head = e->cmd_head, next = (uint8_t)((head + 1u) % CLIP_CMD_RING);
     if (next == e->cmd_tail)
@@ -316,62 +316,65 @@ static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, 
     e->cmd[head].clip = clip;
     e->cmd[head].quant = quant;
     e->cmd[head].bpm_x10 = bpm;
+    e->cmd[head].at = at;
     CLIP_BARRIER();                       /* publish the slot before the head */
     e->cmd_head = next;
     return 0;
 }
 
 /* T7b: stage a launch target's copy in the main loop, so the ISR only ever swaps play[]/next[].
- * A clip that does not validate stages nothing (the ISR then ignores the launch). */
-static void stage_clip(clip_engine_t *e, uint8_t clip)
+ * The command is pushed FIRST: if the ring is full the launch is refused (return -1) and nothing is
+ * staged, so a valid launch already queued keeps its copy. Staging then happens in the same
+ * main-loop iteration, well before the ISR applies the launch at the boundary. A clip that does not
+ * validate is refused and touches no staging. */
+static int launch_cmd(clip_engine_t *e, uint8_t clip, uint8_t cmd, uint8_t quant, uint32_t at)
 {
     uint8_t role;
     if (clip >= NCLIPS || !e->song)
-        return;
+        return -1;
+    if (!clip_valid(e, clip))
+        return -1;                        /* invalid: do not clear a queued valid launch's staging */
+    if (push_cmd(e, cmd, clip, quant, 0, at) != 0)
+        return -1;                        /* ring full: refused, nothing staged */
     role = clip_role(clip);
-    if (!clip_valid(e, clip)) {
-        e->next_set[role] = 0;
-        return;
-    }
     e->next[role] = e->song->clip[clip];
     e->next_clip[role] = clip;
     e->next_set[role] = 1;
+    return 0;
 }
 
 void clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant)
 {
-    if (clip >= NCLIPS)
-        return;
-    stage_clip(e, clip);
-    push_cmd(e, CLIP_CMD_LAUNCH, clip, (uint8_t)(quant & 3u), 0);
+    launch_cmd(e, clip, CLIP_CMD_LAUNCH, (uint8_t)(quant & 3u), 0);
 }
 
 void clip_engine_launch(clip_engine_t *e, uint8_t clip)
 {
     if (clip >= NCLIPS || !e->song)
         return;
-    stage_clip(e, clip);
-    push_cmd(e, CLIP_CMD_LAUNCH, clip, (uint8_t)(e->song->clip[clip].quant & 3u), 0);
+    launch_cmd(e, clip, CLIP_CMD_LAUNCH, (uint8_t)(e->song->clip[clip].quant & 3u), 0);
 }
 
 void clip_engine_launch_now(clip_engine_t *e, uint8_t clip)
 {
-    if (clip >= NCLIPS)
-        return;
-    stage_clip(e, clip);
-    push_cmd(e, CLIP_CMD_LAUNCH_NOW, clip, 0, 0);
+    launch_cmd(e, clip, CLIP_CMD_LAUNCH_NOW, 0, 0);
+}
+
+void clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step)
+{
+    launch_cmd(e, clip, CLIP_CMD_LAUNCH_AT, 0, at_step);
 }
 
 void clip_engine_stop(clip_engine_t *e, uint8_t role)
 {
     if (role >= NROLES)
         return;
-    push_cmd(e, CLIP_CMD_STOP, role, Q_END, 0);
+    push_cmd(e, CLIP_CMD_STOP, role, Q_END, 0, 0);
 }
 
 void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10)
 {
-    push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10);
+    push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10, 0);
 }
 
 void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
@@ -391,7 +394,7 @@ void clip_engine_mute(clip_engine_t *e, uint8_t role, int on)
 {
     if (role >= NROLES)
         return;
-    push_cmd(e, CLIP_CMD_MUTE, role, (uint8_t)(on ? 1 : 0), 0);
+    push_cmd(e, CLIP_CMD_MUTE, role, (uint8_t)(on ? 1 : 0), 0, 0);
 }
 
 int clip_engine_muted(const clip_engine_t *e, uint8_t role)
@@ -406,7 +409,7 @@ void clip_engine_mute_clear(clip_engine_t *e)
         e->muted[r] = 0;                       /* immediate: the engine may stop rendering (classic) */
     /* ... and a ring command ordered AFTER any pending mute, so a queued CLIP_CMD_MUTE that drains
      * later cannot re-apply (T10i review). */
-    push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0);
+    push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0, 0);
 }
 
 /* ---- the render loop ----------------------------------------------------- */
@@ -418,7 +421,7 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
     e->que_set[role] = 0;
     release_role(e, role, off, sink);
     if (target == CLIP_NONE) {
-        e->next_set[role] = 0;                    /* T7b: drop any staged target */
+        /* T7b: do not clear next_set here: a valid launch may still be queued behind this stop. */
         if (e->cur[role] != CLIP_NONE) {
             ev(sink, off, CLIPEV_CLIP_STOPPED, role, 0, 0, e->cur[role]);
             e->cur[role] = CLIP_NONE;
@@ -527,25 +530,27 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             ev(sink, 0, CLIPEV_CLIP_QUEUED, role, 0, 0, CLIP_NONE);
             continue;
         }
-        /* CLIP_CMD_LAUNCH / CLIP_CMD_LAUNCH_NOW: the main loop staged the target's copy in next[]
-         * before posting, so the ISR validates against that and never reads song->clip[] here. */
+        /* CLIP_CMD_LAUNCH / CLIP_CMD_LAUNCH_NOW / CLIP_CMD_LAUNCH_AT: the main loop staged the
+         * target's copy in next[] after a successful push, so the ISR queues the launch and never
+         * reads song->clip[] here. The staged copy is swapped in at apply_role (the boundary), by
+         * which time the main loop's staging is long done. */
         target = c.clip;
         if (target >= NCLIPS)
             continue;
         role = clip_role(target);
-        if (!e->next_set[role] || e->next_clip[role] != target)
-            continue;                         /* not staged (invalid or empty): ignore */
         if (c.cmd == CLIP_CMD_LAUNCH && e->que_set[role] && e->que[role] == target) {
             e->que_set[role] = 0;             /* relaunching the queued clip cancels */
             e->que[role] = CLIP_NONE;
-            e->next_set[role] = 0;            /* drop the staged target too */
             ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, target);
             continue;
         }
         e->que[role] = target;
         e->que_set[role] = 1;
-        e->que_at[role] = e->global_step +
-            (c.cmd == CLIP_CMD_LAUNCH_NOW ? 1u : action_lead(e, role, c.quant));
+        if (c.cmd == CLIP_CMD_LAUNCH_AT)
+            e->que_at[role] = c.at;           /* exactly the requested global step (T7b) */
+        else
+            e->que_at[role] = e->global_step +
+                (c.cmd == CLIP_CMD_LAUNCH_NOW ? 1u : action_lead(e, role, c.quant));
         ev(sink, 0, CLIPEV_CLIP_QUEUED, role, 0, 0, target);
     }
 }

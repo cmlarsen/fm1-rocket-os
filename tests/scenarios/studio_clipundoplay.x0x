@@ -1,0 +1,22 @@
+# T7b re-review 4: undo while a clip plays stages the restored clip through the main-loop path; the
+# clip engine is NOT re-inited, so the transport keeps playing and the clip stays up.
+wait 300
+cursor 1 0
+tap SEQ
+tapkey w7
+tap HOME
+tap SEL
+tap PLAY
+wait-bar 1
+expect liveclip1 7
+expect playing 1
+# HOME + REC undoes the note edit while it plays
+press HOME
+tap REC
+release HOME
+expect clipnotes7 0
+expect playing 1
+expect liveclip1 7
+wait 1400
+shot studio_clipundoplay.png
+dump studio_clipundoplay.json

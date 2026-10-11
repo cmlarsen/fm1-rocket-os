@@ -437,6 +437,13 @@ void live_bridge_launch_now(uint8_t clip)
     clip_engine_launch_now(&g_eng, clip);
     engine_crit_exit(f);
 }
+void live_bridge_launch_at(uint8_t clip, uint32_t at_step)
+{
+    uint32_t f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch_at(&g_eng, clip, at_step);
+    engine_crit_exit(f);
+}
 void live_bridge_stop(uint8_t role)
 {
     if (role >= NROLES)

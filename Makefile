@@ -278,7 +278,16 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name unit-songs
+unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name unit-songs
+
+# T7b re-review: the host plat_crit nesting (host/plat_crit_host.c).
+.PHONY: unit-crit
+unit-crit:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/crit_test tests/host/crit_test.c host/plat_crit_host.c
+	build/host/crit_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/crit_test_san tests/host/crit_test.c host/plat_crit_host.c
+	build/host/crit_test_san
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens

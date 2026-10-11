@@ -57,10 +57,23 @@ burst 40 12 14 30000
 111000 clip_queued lead 0 0 13
 114000 clip_queued lead 0 0 12
 117000 clip_queued lead 0 0 13
+120000 clip_queued lead 0 0 12
 120000 clip_queued lead 0 0 14
-120000 clip_cancelled lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
 120000 note_on lead 60 100 12
 126000 note_off lead 60 0 0
 144000 note_on lead 60 100 12
 
-# events=50
+# events=63

@@ -519,11 +519,21 @@ void song_io_push_copy(int dst, int src, const void *old_dst)
 
 static int undo_run(int redo)
 {
+    int type = redo ? (int)undo_stack_redo_type(&undo) : (int)undo_stack_undo_type(&undo);
+    int clip = redo ? (undo.cur < undo.n ? (int)undo.e[undo.cur].index : -1)
+                    : (undo.cur ? (int)undo.e[undo.cur - 1u].index : -1);
     int rc = redo ? undo_stack_redo(&undo, song(), &store, 0) : undo_stack_undo(&undo, song(), &store, 0);
     if (rc == UNDO_DONE) {
         dirty = 1;                                      /* the song changed: write it back on the next save */
         failed = 0;
-        live_bridge_song_reload();
+        if (type == UNDO_CLEAR_CLIP || type == UNDO_COPY_CLIP || type == UNDO_RECORD_CLIP) {
+            /* T7b re-review: stage the restored clip through the main-loop path; do NOT re-init the
+             * clip engine (that would stop the music while it plays). Only song open / load (stopped)
+             * re-inits. */
+            live_bridge_clip_changed((uint8_t)clip);
+            if (!song_io_clip_used(clip))
+                live_bridge_stop((uint8_t)clip_role((uint8_t)clip));   /* the clip vanished: stop it */
+        }
     }
     return rc;
 }

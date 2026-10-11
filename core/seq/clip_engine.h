@@ -41,15 +41,16 @@ typedef struct {
     void *ctx;
 } clip_sink_t;
 
-/* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, or a
- * tempo. */
+/* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, a tempo, or
+ * (T7b) a launch that takes effect on an exact global step (the recorded clip's close). */
 enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE,
-       CLIP_CMD_MUTE_CLEAR };
+       CLIP_CMD_MUTE_CLEAR, CLIP_CMD_LAUNCH_AT };
 typedef struct {
     uint8_t  cmd;
     uint8_t  clip;     /* launch: the clip; stop / mute (T10i): the role */
     uint8_t  quant;    /* Q_BAR / Q_BEAT / Q_END; mute: 1 on, 0 off */
     uint16_t bpm_x10;  /* CLIP_CMD_SET_BPM */
+    uint32_t at;       /* CLIP_CMD_LAUNCH_AT: the global step it takes effect on */
 } clip_cmd_t;
 
 #define CLIP_CMD_RING 16u
@@ -115,6 +116,10 @@ void clip_engine_stop(clip_engine_t *e, uint8_t role);
 /* HOME + pad: switch at the next step, whatever the clip's quantize says. It does not cancel
  * a queued clip; it launches the new one now. */
 void clip_engine_launch_now(clip_engine_t *e, uint8_t clip);
+
+/* T7b: launch so the clip starts on exactly global step `at_step` (the recorded clip's close
+ * boundary). Armed before the boundary is reached, so there is no gap. */
+void clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step);
 
 /* Tempo change from the main loop, through the ring. It is applied at the next render and is
  * the one source of truth (it also writes song->bpm_x10). */

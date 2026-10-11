@@ -247,8 +247,6 @@ int plat_cycles_cpu(void) { return 0; }
 uint32_t plat_ticks24(void) { return (uint32_t)(host_ns() * 24u / 1000u); }
 uint32_t plat_irq_stack_used(void) { return 0; }
 uint32_t plat_irq_stack_size(void) { return 0; }
-uint32_t plat_crit_enter(void) { return 0; }     /* T7b: the host is single-threaded */
-void plat_crit_exit(uint32_t state) { (void)state; }
 uint32_t plat_cpu_peak_pct(void)
 {
     uint32_t p = cpu_peak;
@@ -727,6 +725,8 @@ static int expect(const char *what, const char *val)
     else if (!strncmp(what, "liveclip", 8)) {      /* liveclipR: the playing clip on role R, -1 none */
         uint8_t c = live_bridge_playing_clip((uint8_t)(atoi(what + 8) % LIVE_NROLES));
         got = c == LIVE_CLIP_NONE ? -1 : (int)c;
+    } else if (!strncmp(what, "liveprog", 8)) {     /* liveprogR: the playing clip's progress, 0..255 */
+        got = (int)live_bridge_progress((uint8_t)(atoi(what + 8) % LIVE_NROLES));
     } else if (!strncmp(what, "liveque", 7)) {      /* livequeR: the queued clip (or stop) on role R */
         uint8_t c = live_bridge_queued_clip((uint8_t)(atoi(what + 7) % LIVE_NROLES));
         got = c == LIVE_CLIP_NONE ? -1 : (int)c;

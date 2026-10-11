@@ -224,6 +224,62 @@ T11-era fixes) into the branch. Conflicts and how they were resolved:
 `make unit unit-core scenarios screens-lint parity check fw fw-debug` and `tools/check_loader.sh` on
 both packages all pass; `make fuzz-ui` does not exist yet (T2c).
 
+## Re-review fixes (merged branch)
+
+Opus's re-review of the merged branch asked for five fixes; each has a test.
+
+1. **A recorded clip starts exactly on the close boundary.** Added `CLIP_CMD_LAUNCH_AT` (the command
+   carries the target global step) and `clip_engine_launch_at` / `live_bridge_launch_at`. The second
+   REC now finalizes the take (length + held-note ends) and **arms the launch at `rec.close`**, so
+   the ISR's `do_step` applies it on exactly that step instead of `launch_now`'s next step. Test:
+   `studio_cliprec_at` — the transport starts at REC, REC closes at the next bar (`rec.close = 32`, a
+   2-bar take), the clip starts at step 32 (`liveclip1 == 7`, `liveprog1 == 0`) and at step 48 its
+   progress is 128 (`16/32`).
+2. **Staging and the ring agree.** `launch_cmd` now **pushes first**: if the ring is full the launch
+   is refused (`-1`) and nothing is staged, so a valid launch already queued keeps its copy; an
+   invalid clip touches no staging. `consume_cmds` no longer gates a launch on `next_set` (it queues
+   every launch and swaps at the boundary), and `apply_role` no longer clears `next_set` on a stop
+   or a cancel, so a valid launch queued behind keeps its copy. Test: `ring_many_launches` is
+   **identical to the pre-T7b golden again** (63 events, ending with the last valid launch — clip 12
+   — playing): the earlier collapse was an artifact of the `next_set` gate.
+3. **A nest-safe IRQ mask.** `irq_save` / `irq_restore` in `fm1_flash.h` now count nested sections
+   (the pi32v2 status does not expose the interrupt-enable bit): the first save disables, the last
+   restore re-enables, and an inner restore never re-enables while an outer section holds. The host's
+   `plat_crit_enter/exit` (moved to `host/plat_crit_host.c`) model the same. Test: `make unit-crit`
+   (`tests/host/crit_test.c`) — nested enter/exit restores the previous state.
+4. **Undo stages, it does not re-init.** `song_io`'s `undo_run` now calls `live_bridge_clip_changed`
+   for a clip entry (and stops the role when the restored clip is unused); only boot and a song open
+   / load (stopped) call `live_bridge_song_reload`. Tests: `song_io_test`'s
+   `test_undo_stages_not_reloads` (the change fires, the reload does not) and `studio_clipundoplay`
+   (undo while a clip plays: `playing == 1`, `liveclip1 == 7`, the note gone).
+5. **The drum grid scroll indicator.** The grid draws a thin scrollbar (a thumb for the visible
+   window) and up/down chevrons when more lanes exist; the lane labels shift right to make room.
+   `studio_clipdrums` shows it.
+
+### Re-seeded goldens and why
+
+- `studio_clipdrums`, `studio_clipdrumrec`, `studio_clipliveedit`, `studio_cliplong`: the drum grid's
+  scroll indicator (item 5).
+- `studio_cliprec`, `studio_clipoverdub`, `studio_clipmotion`, `studio_clipundorec`: the record now
+  launches exactly on the close boundary (item 1); `studio_clipundorec` also waits a bar for the
+  role's stop (undo no longer re-inits).
+- `studio_cliprec_at`, `studio_clipundoplay` (new): the item-1 and item-4 proofs.
+- `tests/golden/clip_engine/ring_many_launches.txt`: restored to the pre-T7b 63-event stream (item 2).
+
+### Device build (re-review, on deltron.local)
+
+| | `make fw` | `make fw-debug` (X0X_DEBUG=1) |
+|---|---|---|
+| app image `x0x.bin` | **549,008 B** | **552,176 B** |
+| RAM `.data+.bss` | **96,404 B** of 98,304 | **96,504 B** of 98,304 |
+| POOL | **330,588 B** of 344,064 | **332,380 B** of 344,064 |
+| POOL spare | **13,476 B** (≥ 8,192) | **11,684 B** (≥ 8,192) |
+
+`make unit unit-core scenarios screens-lint parity check fw fw-debug` and `tools/check_loader.sh` on
+both packages all pass.
+
+
+
 
 
 

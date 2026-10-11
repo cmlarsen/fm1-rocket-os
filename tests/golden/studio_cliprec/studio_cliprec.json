@@ -17,7 +17,7 @@
   ]},
   "live": {"active": 1, "layer": 0, "focus": 1, "transport": 1, "roles": [
     {"role": 0, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
-    {"role": 1, "clip": 7, "queued": -1, "stop": 0, "progress": 160},
+    {"role": 1, "clip": 7, "queued": -1, "stop": 0, "progress": 176},
     {"role": 2, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
     {"role": 3, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
     {"role": 4, "clip": -1, "queued": -1, "stop": 0, "progress": 0}

@@ -37,3 +37,12 @@ Merge `integration` into your branch and resolve the conflicts in `clip_engine.c
   Re-seed only goldens that change because of the combination, listing each with its reason. Report the RAM numbers for both builds; the pool needs at least 8 KB spare.
 
 Commit, update reports/T7b.md, and send worker_done.
+
+## Re-review (merged branch): approve after these fixes. Safe to install.
+1. **A recorded clip starts a 16th late after the close** (`ui_clip.c:458`). `launch_now` queues at `global_step+1` after the main loop sees the boundary. **Queue the commit so it lands at exactly `rec.close`:** use the clip engine's launch-at-sample or launch-at-step API (add one if needed, through the ring), armed before the boundary is reached. Test: close at step 32, and the clip starts at step 32, with its progress at step 48 equal to 16/32.
+2. **Staging and the ring disagree** (`clip_engine.c:350-362`). **Stage only after `push_cmd` succeeds.** If it fails (ring full), roll back and return an error. An invalid launch must not clear `next_set` while a valid one is queued (`apply_role`, about `:427`). Restore `ring_many_launches.txt` so it ends with the last valid launch, and say why.
+3. **A nest-safe IRQ mask** (`fm1_flash.h:233-234`, `engine.h:124`): `irq_save` returns the previous enable state and `irq_restore` restores it, rather than always running `sti`. Check the host/plat equivalents match. Add a host test for nesting.
+4. **Undo re-inits the engine while it plays.** `song_reload` on undo must stage the restored clip through the same main-loop staging path as edits, not re-init the clip engine. Only song open or load (stopped) re-inits.
+5. The drum grid shows 9 of 11 lanes. Add a small scroll indicator (lane N/11, or arrows) so you can see it scrolls.
+
+Then run the full ladder on the branch (`make unit unit-core scenarios screens-lint parity check fw fw-debug`, `tools/check_loader.sh` on both), commit, update reports/T7b.md, and send worker_done.
