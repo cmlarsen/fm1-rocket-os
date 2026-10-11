@@ -782,6 +782,10 @@ static int expect(const char *what, const char *val)
         got = ui.part;
     else if (!strcmp(what, "help"))                 /* the help card's button + 1, 0 none */
         got = ui.help;
+    else if (!strcmp(what, "sheet"))                /* T11h: the HOME cheat sheet is up */
+        got = help_shift_active();
+    else if (!strcmp(what, "card"))                 /* T11h: a GLO card's button + 1, 0 none */
+        got = help_card_active() ? help_card_button() + 1 : 0;
     else if (!strcmp(what, "helpfits"))
         got = help_fits();
     else if (!strcmp(what, "rec"))

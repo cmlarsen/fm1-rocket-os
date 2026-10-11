@@ -2,6 +2,30 @@
 # `make screens-lint` runs this with a host build that records every text draw (-DX0X_LINT)
 # and checks the shots for clipped or overlapping text. `make screens` shows them at 1:1.
 wait 300
+# T11h: the two help systems, so screens-lint sees them too (the same STUDIO shots as
+# tests/scenarios/help_cards.x0x). SYSTEM 1 is the HOME-hold cheat sheet; SYSTEM 2 is GLO + a
+# button. (LIVE's two overlays are covered by help_cards.x0x; the tour stays in STUDIO/Classic.)
+press HOME
+wait 450
+shot z00_sheet_studio.png
+release HOME
+wait 100
+press GLO
+wait 60
+press REC
+wait 60
+shot z01_card_rec_studio.png
+release REC
+release GLO
+wait 60
+press GLO
+wait 60
+press SEQ
+wait 60
+shot z02_card_seq_studio.png
+release SEQ
+release GLO
+wait 100
 # T7a STUDIO: the song home, the empty slot, the clip settings and the clear ring (the default view)
 turn SELECT 4
 wait 1400
