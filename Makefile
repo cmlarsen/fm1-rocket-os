@@ -261,10 +261,10 @@ unit-store:
 unit-songio:
 	@mkdir -p build/host
 	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/song_io_test \
-	    tests/host/song_io_test.c firmware/src/app/song_io.c core/model/song_store.c core/model/undo_stack.c
+	    tests/host/song_io_test.c firmware/src/app/song_io.c firmware/src/app/song_templates.c core/model/song_store.c core/model/undo_stack.c
 	build/host/song_io_test
 	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/song_io_test_san \
-	    tests/host/song_io_test.c firmware/src/app/song_io.c core/model/song_store.c core/model/undo_stack.c
+	    tests/host/song_io_test.c firmware/src/app/song_io.c firmware/src/app/song_templates.c core/model/song_store.c core/model/undo_stack.c
 	build/host/song_io_test_san
 
 .PHONY: unit-take

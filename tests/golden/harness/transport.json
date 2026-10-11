@@ -8,6 +8,13 @@
   ],
   "view": 1,
   "studio": {"role": 0, "col": 0, "clip": 0, "classic": 1},
+  "songs": {"up": 0, "used": 0, "current": -1, "free": 0, "canundo": 0, "rows": [
+    {"slot": 0, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 1, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 2, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 3, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 4, "used": 0, "take": 0, "current": 0, "name": ""}
+  ]},
   "leds": {
     "keys": [2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
     "buttons": {"EDIT": 1}

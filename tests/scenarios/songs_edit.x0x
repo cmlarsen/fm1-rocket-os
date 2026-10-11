@@ -1,0 +1,49 @@
+# T8i STUDIO 11/12: the song menu, rename (T8c's editor) and copy.
+wait 300
+# one Starter song, current slot 0
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap SEL
+wait 40
+tap SEL
+wait 40
+expect songused 1
+expect songcurrent 0
+# open the menu on it
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap EDIT
+wait 40
+expect songson 1
+shot songs_menu.png
+dump songs_menu.json
+# Rename: step the last letter R -> S, then SEL saves
+expect songrow 0
+turn SELECT 2
+expect songrow 2
+tap SEL
+wait 40
+expect songson 1
+shot songs_rename.png
+turn SELECT -1
+turn ALGO 1
+tap SEL
+wait 40
+expect songused 1
+shot songs_renamed.png
+dump songs_renamed.json
+# Copy into the next free slot; the cursor lands on the copy
+turn SELECT -1
+tap SEL
+wait 40
+expect songused 2
+expect songcurrent 0
+shot songs_copied.png
+dump songs_copied.json
+tap HOME
+wait 40
+expect songson 0

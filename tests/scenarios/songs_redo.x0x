@@ -1,0 +1,58 @@
+# T8i review 3: the delete undo is SONGS-only and one level; HOME+PLAY in SONGS does not
+# redo a delete, and the clip redo stack never holds a song delete.
+wait 300
+# two songs: Starter (slot 0), then Empty (slot 1), the Empty current
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap SEL
+wait 40
+tap SEL
+wait 40
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+turn SELECT -1
+tap SEL
+wait 40
+expect songused 2
+expect songcurrent 1
+# menu on the current song (slot 1), cursor on Delete; hold SEL for 1.5 s
+press SAVE
+wait 700
+release SAVE
+wait 40
+expect songrow 2
+tap EDIT
+wait 40
+turn SELECT 3
+press SEL
+wait 750
+wait 800
+release SEL
+wait 40
+expect songused 1
+expect songcurrent 0
+expect songcanundo 1
+# HOME + REC undoes the delete
+press HOME
+tap REC
+release HOME
+wait 40
+expect songused 2
+expect songcanundo 0
+# HOME + PLAY does nothing: no redo of the delete, and nothing plays
+press HOME
+tap PLAY
+release HOME
+wait 40
+expect songused 2
+expect songson 1
+expect playing 0
+shot songs_redo_after.png
+dump songs_redo.json

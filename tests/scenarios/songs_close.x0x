@@ -1,0 +1,15 @@
+# T8i review 4: closing SONGS restores the whole song home (every band redraws; no strip
+# of the songs screen is left behind).
+wait 300
+expect view 10
+shot close_before.png
+press SAVE
+wait 700
+release SAVE
+wait 100
+expect songson 1
+tap HOME
+wait 1500
+expect songson 0
+expect view 10
+shot close_after.png

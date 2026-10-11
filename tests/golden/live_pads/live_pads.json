@@ -8,6 +8,13 @@
   ],
   "view": 9,
   "studio": {"role": 0, "col": 0, "clip": 0, "classic": 0},
+  "songs": {"up": 0, "used": 0, "current": -1, "free": 0, "canundo": 0, "rows": [
+    {"slot": 0, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 1, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 2, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 3, "used": 0, "take": 0, "current": 0, "name": ""},
+    {"slot": 4, "used": 0, "take": 0, "current": 0, "name": ""}
+  ]},
   "live": {"active": 1, "layer": 0, "focus": 1, "transport": 1, "roles": [
     {"role": 0, "clip": 0, "queued": -1, "stop": 0, "progress": 240},
     {"role": 1, "clip": -1, "queued": -1, "stop": 0, "progress": 0},

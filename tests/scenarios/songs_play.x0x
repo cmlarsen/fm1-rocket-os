@@ -1,0 +1,51 @@
+# T8i review 2: in SONGS, PLAY, HOME+PLAY and REC do nothing, and the transport is stopped
+# on entry (SONGS is a stopped, quiet view). A menu copy still works, with the transport
+# stopped, so no flash write races the audio.
+wait 300
+# one Starter song (slot 0, current)
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap SEL
+wait 40
+tap SEL
+wait 40
+expect songcurrent 0
+# enter SONGS: the transport stops; PLAY does nothing
+press SAVE
+wait 700
+release SAVE
+wait 40
+expect songson 1
+expect playing 0
+tap PLAY
+wait 200
+expect playing 0
+expect songson 1
+# HOME+PLAY does nothing (it is not a redo here)
+press HOME
+tap PLAY
+release HOME
+wait 40
+expect playing 0
+expect songson 1
+# REC does nothing
+tap REC
+wait 40
+expect playing 0
+expect songson 1
+# the menu copy works, and still nothing plays
+tap EDIT
+wait 40
+turn SELECT 1
+tap SEL
+wait 40
+expect songused 2
+expect playing 0
+expect songson 1
+tap HOME
+wait 40
+expect songson 0
+shot songs_play_locked.png
+dump songs_play.json
