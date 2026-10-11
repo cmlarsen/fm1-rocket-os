@@ -22,9 +22,11 @@
 FW_HOST      ?= deltron.local
 REMOTE_ROOT  ?= fm1-build
 DIRNAME      := $(notdir $(CURDIR))
-REMOTE_DIR   := $(REMOTE_ROOT)/$(DIRNAME)
+# a short hash of the checkout path: two worktrees must not share a remote build dir
+DIRHASH      := $(shell printf '%s' '$(CURDIR)' | cksum | cut -d' ' -f1)
+REMOTE_DIR   := $(REMOTE_ROOT)/$(DIRNAME)-$(DIRHASH)
 SSH          := ssh $(FW_HOST)
-RSYNC_EXCL   := --exclude=.git --exclude=.venv --exclude=build --exclude=__pycache__
+RSYNC_EXCL   := --exclude=/.git --exclude=/.venv --exclude=/build --exclude=/__pycache__
 
 .PHONY: all help fw release test test-local check push pull clean-remote
 
