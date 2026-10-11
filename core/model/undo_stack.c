@@ -2,7 +2,7 @@
 /* Undo/redo core (T6c). See core/model/undo_stack.h. */
 #include "undo_stack.h"
 
-_Static_assert(sizeof(undo_stack_t) <= 12288u, "undo ring fits in about 12 KiB");
+_Static_assert(sizeof(undo_stack_t) <= 6144u, "undo ring fits in about 6 KiB (T9i)");
 
 void undo_stack_init(undo_stack_t *u)
 {

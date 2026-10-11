@@ -37,6 +37,7 @@ FM6 and NOISE (T5i) use the existing parameter-target and note-on/off types with
 - **FM6 presets.** `engine_fm6_preset(n)` (SLOT numbering: 0..7 a ROM factory voice, 8 the own patch, 9..40 a bank voice). The bank is the 32-voice flash sector at `0x9F000` (`plat_fm6_vbank`), validated on read; an erased or corrupt sector falls back to the ROM voices. T5i never writes it.
 
 ## Undo limits (v1)
+- **Depth:** the undo ring holds `UNDO_STACK_DEPTH` (11) entries, about 6 KiB (T9i cut it from 23 to free pool for the take); a new edit drops the oldest when full.
 - **Take replace:** one level per song. Undo brings back the previous take; a second undo says "can't undo".
 - **Delete song:** undo works until another save reuses that storage. After that it says "can't undo" rather than restoring something wrong.
 - **Deletes and take undos are durable:** they are written as new records, so a reboot keeps the result.

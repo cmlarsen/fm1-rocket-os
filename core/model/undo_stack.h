@@ -8,7 +8,9 @@
  * recoverable bytes live in the store, and the store re-commits them as new
  * records so the undo survives a reboot. A new edit clears the redo tail.
  *
- * Depth is set by 12 KiB / (4 + max(clip_t, u32)) = 12 KiB / (4 + 528) ~= 23. */
+ * Depth is set by 6 KiB / (4 + max(clip_t, u32)) = 6 KiB / (4 + 528) ~= 11 (T9i cut it from
+ * 23 to free pool for the take; the per-song clip undo and the separate song-delete undo are
+ * unchanged). */
 #pragma once
 #include <stdint.h>
 #include "model.h"
@@ -26,7 +28,7 @@ enum {
 /* return values of undo_stack_undo / _redo */
 enum { UNDO_CANNOT = -1, UNDO_EMPTY = 0, UNDO_DONE = 1 };
 
-#define UNDO_STACK_DEPTH 23u
+#define UNDO_STACK_DEPTH 11u
 
 typedef struct {
     uint8_t type;

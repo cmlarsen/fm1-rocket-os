@@ -17,9 +17,10 @@ make fw-debug        # X0X_DEBUG=1 on deltron -> build/debug/x0x.fwsc (+ x0x.bin
 make fw-debug-check  # fw-debug, then the forbidden-symbol and loader checks on it
 ```
 
-`tools/build.py` compiles a `X0X_DEBUG=1` build with `-DENG_FM6_VOICES=8` (a release build keeps
-`eng_fm6.h`'s **4**). That is the only difference that matters to a measurement: the FM6 adapter's
-voice array can hold eight voices, so the stress command can raise the cap without touching
+`tools/build.py` compiles a `X0X_DEBUG=1` build with `-DENG_FM6_VOICES=6` (a release build keeps
+`eng_fm6.h`'s **4**; T9i cut the debug array from 8 now the 8-voice measurement is done). That is
+the only difference that matters to a measurement: the FM6 adapter's
+voice array can hold six voices, so the stress command can raise the cap without touching
 `eng_fm6.c`. It also means a debug build's `.pool` is ~17 KiB larger (the stress song); a release
 build is unchanged.
 
@@ -70,12 +71,12 @@ project dirty, so it cannot autosave.
 | 1 | the X0X baseline: 909 + 808 + 303 A + 303 B, the sequencer's own path | – | on |
 | 2 | LIVE: a busy clip on DRUMS/BASS/LEAD/FX, **CHORDS a held 4-note FM6 chord**, FX on NOISE | **4** | on |
 | 3 | level 2 plus every wired punch FX (T10i has not wired any yet, so it equals 2 for now) | 4 | on |
-| 4 | level 2 with the FM6 cap raised to `cap` (default 6; `cap` 6 or 8) | `cap` | **off** (the guard would shed FM6 to two voices, which is not what "the cap" means) |
+| 4 | level 2 with the FM6 cap raised to `cap` (default 6; `cap` up to 6) | `cap` | **off** (the guard would shed FM6 to two voices, which is not what "the cap" means) |
 | 5 | level 2 with **core 1 forced off** (T5perf: the single-core numbers) | 4 | on |
 | 6 | level 1 with **core 1 forced off** (T5perf) | – | on |
 
 Level 2 holds exactly **four** notes on purpose: a release build's `ENG_FM6_VOICES` is 4, so level 2
-measures what a release build would actually play, even though the debug array is 8. Level 4 is the
+measures what a release build would actually play, even though the debug array is 6. Level 4 is the
 headroom experiment. Levels 5 and 6 (T5perf) are levels 2 and 1 with the core-1 job kept on core 0, so
 RC1 can report the single-core numbers a unit that cannot run core 1 would see; they do not stop
 core 1 (no ISR race), they just do not hand it work, and `ED_STATS`' `cpu2` field reads 0 for them.
@@ -148,13 +149,13 @@ come down.
 `stats` script commands call the **same functions** the device's `ED_STRESS` / `ED_STATS` do.
 `tests/scenarios/rc1_probe.x0x` starts every level, checks the stats reply is well formed
 (`statswords 22`) and that LIVE actually plays (`liveclip0`, `fm6voices 4`, non-silent audio). The
-host build's FM6 array is the release's 4, so the scenario exercises `--stress 4 --cap 4`; the 6 and
-8 caps are a device-only measurement.
+host build's FM6 array is the release's 4, so the scenario exercises `--stress 4 --cap 4`; the
+higher cap is a device-only measurement.
 
 ## Files
 
 New: `firmware/src/app/rc_debug.{c,h}`, `tools/rc_probe.py`, `tests/scenarios/rc1_probe.x0x`,
 this page, `reports/RC1p.md`. Changed: `firmware/src/app/editor.c` (the three commands, inside
 `#if X0X_DEBUG`), `host/x0x_host.c` (`stress` / `stats` / `statsreset`, the `stress*` and
-`statswords` expects), `tools/build.py` (`-DENG_FM6_VOICES=8` for `X0X_DEBUG=1`), the `Makefile`
+`statswords` expects), `tools/build.py` (`-DENG_FM6_VOICES=6` for `X0X_DEBUG=1`), the `Makefile`
 (`fw-debug`, `fw-debug-check`).
