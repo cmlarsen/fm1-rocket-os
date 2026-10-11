@@ -60,6 +60,8 @@ run motion sh -c "$CC $W -o $OUT/motion_test tests/host/motion_test.c firmware/s
 run drum-pan sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/drum_pan_test tests/host/drum_pan_test.c firmware/src/dsp/drum909.c firmware/src/dsp/drum808.c -lm && $OUT/drum_pan_test"
 run stereo sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/stereo_test tests/host/stereo_test.c firmware/src/dsp/master.c firmware/src/dsp/fxbus.c -lm && $OUT/stereo_test"
 run master sh -c "$CC $W -Wno-double-promotion -o $OUT/master_test tests/host/master_test.c firmware/src/dsp/master.c -lm && $OUT/master_test"
+# TCLS: the delay line is 0.75 s; every synced division is clamped inside it (the edge at 60/80 bpm)
+run delay_clamp sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/delay_clamp_test tests/host/delay_clamp_test.c firmware/src/dsp/fxbus.c -lm && $OUT/delay_clamp_test"
 # the engine reference comparisons: run only when their checkout is next to the tree
 NINEW9_DIR="${NINEW9_DIR:-../schwung-9W9}"
 EIGHTW8_DIR="${EIGHTW8_DIR:-../schwung-8W8}"

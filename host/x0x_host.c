@@ -21,9 +21,10 @@
  *   stop                         stop both transports (no all-notes-off: a hung note must show) (T2c)
  *   fuzz SEED N                  T2c: N random key / button / encoder / wait events from the
  *                                deterministic SEED, starting at the song home and visiting the
- *                                sound pages, Classic and LIVE; then release every input, stop,
+ *                                sound pages and LIVE; then release every input, stop,
  *                                wait 3 s and expect zero voices. On failure it prints the seed and
  *                                writes seed_<SEED>.full.x0x (the whole sequence) into OUTDIR.
+ *   newsong KIND                 TCLS: start from a New song (0 Empty, 1 Starter), as SONGS does
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
  *   midicfg CHANNEL PC           T11i: the current song's live channel (0 = omni) and PC launch
  *   midiclock BPM N              T11i: N 24-ppqn F8 ticks at BPM, into the ring with their stamps
@@ -585,7 +586,7 @@ static double now_ns(void)
 
 static void boot(void)
 {
-    engine_init(proj.pat, &proj.arr.song, proj.arr.lane, &proj.sound);
+    engine_init(project_pat(0), &proj.arr.song, proj.arr.lane, &proj.sound);
     if (project_load() != 0)
         project_defaults();
     midi_live_set_clock(proj.set.rsv[1]);           /* T11i: the GLOBAL clock source (0 = AUTO) */
@@ -595,7 +596,7 @@ static void boot(void)
     project_apply_io();                             /* clock and notes out, the MIDI channels, the output */
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui_init();
-    song_io_boot(&proj.pat[0], proj.set.bpm_x10, proj.set.rsv[0]);   /* T6i/T8i: the current song, from flash or the project */
+    song_io_boot(proj.set.bpm_x10, proj.set.rsv[0]);   /* T6i/T8i: the current song, from flash or the Starter template */
 }
 
 static void run_ms(uint32_t ms)
@@ -724,8 +725,6 @@ static int expect(const char *what, const char *val)
         got = live_bridge_active() ? live_step() : seq.t[TRK_DRUM].pos;
     else if (!strcmp(what, "mode"))                /* T7a: "mode" is the LIVE view, not the audio owner */
         got = ui.view == V_LIVE ? 1 : 0;
-    else if (!strcmp(what, "classic"))             /* T7a: the classic X0X pages own the audio */
-        got = ui.classic;
     else if (!strcmp(what, "songson"))             /* T8i: the SONGS view is up */
         got = ui_songs_up();
     else if (!strcmp(what, "msg"))                 /* T8i: a header message is showing */
@@ -822,10 +821,6 @@ static int expect(const char *what, const char *val)
         got = seq_cue_of(&seq, PART_909) + 1;
     else if (!strncmp(what, "ppat", 4))            /* ppatP: part P's pattern, 1-based */
         got = seq.ppat[atoi(what + 4) % NPARTS] + 1;
-    else if (!strcmp(what, "perftest"))            /* -1 idle, 0..2 running, 3 done */
-        got = perf.test;
-    else if (!strncmp(what, "perfres", 7))         /* perfresK: scenario K's share of the CPU x 10 */
-        got = perf.res_load[atoi(what + 7) % 3];
     else if (!strncmp(what, "linechg", 7)) {       /* linechgB: 303 B's steps differ from snapline B */
         int b = atoi(what + 7) % NBASS;
         got = memcmp(cur_pat()->bass[b].step, line_snap[b].step, sizeof line_snap[b].step) != 0;
@@ -833,8 +828,8 @@ static int expect(const char *what, const char *val)
         got = engine_guard_active();
     else if (!strcmp(what, "guardcount"))
         got = (int)eng_guard_count;
-    else if (!strcmp(what, "patptr"))              /* 1: the sequencer plays the project's patterns */
-        got = seq.pat == proj.pat;
+    else if (!strcmp(what, "patptr"))              /* 1: the sequencer points at the shared scratch pattern */
+        got = seq.pat == project_pat(0);
     else if (!strcmp(what, "songon"))
         got = seq.song_on;
     else if (!strcmp(what, "songlen"))
@@ -881,6 +876,8 @@ static int expect(const char *what, const char *val)
         got = help_fits();
     else if (!strcmp(what, "rec"))
         got = ui.rec;
+    else if (!strcmp(what, "dirty"))                 /* TCLS: the project has unsaved changes */
+        got = ui_dirty();
     else if (!strcmp(what, "sel"))                  /* the selected track of the part on screen */
         got = ui.sel[ui.part];
     else if (!strcmp(what, "view"))
@@ -1008,15 +1005,15 @@ static int expect(const char *what, const char *val)
     } else if (!strncmp(what, "hit", 3)) {         /* hitK.V.S: kit K voice V step S set */
         int k, v, s;
         sscanf(what, "hit%d.%d.%d", &k, &v, &s);
-        got = sm_get(proj.pat[seq.ppat[k]].drum[k].hit[v], s);
+        got = sm_get(project_pat(seq.ppat[k])->drum[k].hit[v], s);
     } else if (!strncmp(what, "gate", 4)) {        /* gateB.S: 303 B step S gate */
         int b, s;
         sscanf(what, "gate%d.%d", &b, &s);
-        got = bstep_gate(&proj.pat[seq.ppat[PART_303A + b]].bass[b].step[s]);
+        got = bstep_gate(&project_pat(seq.ppat[PART_303A + b])->bass[b].step[s]);
     } else if (!strncmp(what, "note", 4)) {
         int b, s;
         sscanf(what, "note%d.%d", &b, &s);
-        got = proj.pat[seq.ppat[PART_303A + b]].bass[b].step[s].note;
+        got = project_pat(seq.ppat[PART_303A + b])->bass[b].step[s].note;
     } else if (!strncmp(what, "sound", 5)) {       /* soundT.V.I */
         int t, v, i;
         sscanf(what, "sound%d.%d.%d", &t, &v, &i);
@@ -1043,6 +1040,8 @@ static int expect(const char *what, const char *val)
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
         got = eng_noise_voices_active();
+    else if (!strcmp(what, "nfm6voices"))           /* TCLS: every voice except FM6's */
+        got = engine_voices_active() - eng_fm6_voices_active();
     else if (!strcmp(what, "stresslevel"))          /* RC1p: the running stress level (0 none) */
         got = rc_stress_level();
     else if (!strcmp(what, "core2forced"))          /* T5perf: the run has core 1 forced off */
@@ -1141,8 +1140,8 @@ static void dump_json(const char *path)
         fprintf(f, "%s\n    {\"part\": %d, \"ppat\": %u, \"pcue\": %d, \"mute\": %d}", p ? "," : "", p, seq.ppat[p],
                 seq.pcue[p] < NPAT ? (int)seq.pcue[p] : -1, seq_part_muted(&seq, p));
     fprintf(f, "\n  ],\n  \"view\": %d,\n", ui.view);
-    fprintf(f, "  \"studio\": {\"role\": %d, \"col\": %d, \"clip\": %d, \"classic\": %d},\n",
-            studio_cursor_role(), studio_cursor() & 0xFF, studio_cursor_clip(), ui.classic);
+    fprintf(f, "  \"studio\": {\"role\": %d, \"col\": %d, \"clip\": %d},\n",
+            studio_cursor_role(), studio_cursor() & 0xFF, studio_cursor_clip());
     {   /* T8i: the songs list */
         song_row_t r;
         int j, n2 = 0;
@@ -1250,8 +1249,7 @@ static int host_midi_fuzz(uint32_t seed, int n)
 }
 /* ============================================================ T2c: UI fuzz === */
 /* `fuzz SEED N`: N random input events (keys, buttons, encoders and 0-300 ms waits) from a
- * deterministic PRNG, starting at the song home and guaranteed to visit the sound pages, Classic
- * and LIVE. When the sequence ends it releases every key and button, stops the transport, waits
+ * deterministic PRNG, starting at the song home and guaranteed to visit the sound pages and LIVE. When the sequence ends it releases every key and button, stops the transport, waits
  * 3 s and expects zero voices on every engine (the architecture's "no hung notes" invariant).
  * It writes the whole expanded sequence to <outdir>/seed_<SEED>.full.x0x first, so a crash still
  * leaves a runnable reproduction, and reports the seed and the file on failure. It never sends a
@@ -1339,7 +1337,8 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
     if (!fz_rng)
         fz_rng = 1u;
     fz_n = 0;
-    /* prologue: song home -> the NOISE card -> a 303 sound page -> Classic -> LIVE -> back */
+    /* prologue: song home -> the NOISE card -> a 303 sound page -> LIVE -> back.
+     * TCLS: no Classic visit; there is no route to an X0X pattern editor left. */
     fz_add(FZ_BTN_TAP, B_HOME, 0, 0);
     fz_add(FZ_TURN, EN_SELECT, 4, 80);
     fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);
@@ -1353,22 +1352,12 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
     fz_add(FZ_WAIT, 0, 80, 0);
     fz_add(FZ_BTN_TAP, B_HOME, 0, 0);             /* a view change with the key still held: the mid-run check */
     fz_add(FZ_KEY_UP, 1, 0, 0);
-    fz_add(FZ_BTN_TAP, B_GLO, 0, 0);
-    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);              /* into Classic */
-    fz_add(FZ_BTN_TAP, B_PLAY, 0, 0);             /* X0X's own transport plays... */
-    fz_add(FZ_WAIT, 0, 150, 0);
-    fz_add(FZ_KEY_DOWN, 0, 0, 0);
-    fz_add(FZ_WAIT, 0, 80, 0);
-    fz_add(FZ_KEY_UP, 0, 0, 0);
-    fz_add(FZ_BTN_TAP, B_GLO, 0, 0);              /* ...and we leave Classic with it playing: */
-    fz_add(FZ_TURN, EN_SELECT, 20, 20);           /* the seqplaying check must find it stopped */
-    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
-    fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);
+    fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);          /* into LIVE */
     fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
     fz_add(FZ_KEY_DOWN, 4, 0, 0);
     fz_add(FZ_WAIT, 0, 80, 0);
     fz_add(FZ_KEY_UP, 4, 0, 0);
-    fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);
+    fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);          /* back to STUDIO */
     while (fz_n < n) {
         int c = FZP(100);
         if (c < 18) {
@@ -1420,7 +1409,7 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
             if (m == 0) {
                 fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);  /* LIVE in / out */
             } else if (m == 1) {
-                fz_add(FZ_BTN_TAP, B_GLO, 0, 0);      /* GLOBAL: row 0 is Classic */
+                fz_add(FZ_BTN_TAP, B_GLO, 0, 0);      /* GLOBAL: opens the settings list */
                 fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
             } else if (m == 2) {
                 fz_add(FZ_TURN, EN_SELECT, FZP(5) - 2, 80);
@@ -1490,14 +1479,12 @@ static void fz_line(char *b, size_t sz, const fz_ev_t *e)
     }
 }
 
-/* T2c: stop everything the way the `stop` command and the fuzz release tail do — abort a perf
- * test, stop both transports. It deliberately does NOT call engine_all_off(): the tail must not
- * mask a hung note, so any voice a released key (or a stopped transport) leaves sounding remains
- * for `expect voices 0` to catch. Shared so a reproduction and the fuzz run match. */
+/* T2c: stop everything the way the `stop` command and the fuzz release tail do — stop both
+ * transports. It deliberately does NOT call engine_all_off(): the tail must not mask a hung note,
+ * so any voice a released key (or a stopped transport) leaves sounding remains for
+ * `expect voices 0` to catch. Shared so a reproduction and the fuzz run match. */
 static void host_all_stop(void)
 {
-    if (perf.test != PT_IDLE)
-        perf_test_abort();
     live_bridge_transport_stop();
     seq_stop(&seq);
     run_ms(1);
@@ -1514,6 +1501,45 @@ static int fz_tracked(void)
     return n;
 }
 
+/* TCLS: the X0X pattern bank is gone, so the one scratch pattern the dead editor shares and X0X's
+ * own arrangement (proj.arr: its song and motion lanes) must never change under any input. The fuzz
+ * snapshots them and fails the moment an event touches either. */
+static pattern_t fz_pat0;
+static uint8_t fz_arr0[sizeof(proj.arr)];
+static uint8_t fz_ppat0[NPARTS], fz_pcue0[NPARTS], fz_chain0[2], fz_songon0;
+static pattern_t *fz_patptr0;
+
+static void fz_pat_snapshot(void)
+{
+    memcpy(&fz_pat0, project_pat(0), sizeof fz_pat0);
+    memcpy(fz_arr0, &proj.arr, sizeof fz_arr0);
+    memcpy(fz_ppat0, (const void *)seq.ppat, sizeof fz_ppat0);
+    memcpy(fz_pcue0, (const void *)seq.pcue, sizeof fz_pcue0);
+    fz_chain0[0] = seq.chain_a;
+    fz_chain0[1] = seq.chain_b;
+    fz_songon0 = seq.song_on;
+    fz_patptr0 = seq.pat;
+}
+
+static const char *fz_pat_changed(void)
+{
+    if (memcmp(&fz_pat0, project_pat(0), sizeof fz_pat0))
+        return "the shared scratch pattern";
+    if (memcmp(fz_arr0, &proj.arr, sizeof fz_arr0))
+        return "proj.arr";
+    if (memcmp(fz_ppat0, (const void *)seq.ppat, sizeof fz_ppat0))
+        return "seq.ppat";
+    if (memcmp(fz_pcue0, (const void *)seq.pcue, sizeof fz_pcue0))
+        return "seq.pcue";
+    if (fz_chain0[0] != seq.chain_a || fz_chain0[1] != seq.chain_b)
+        return "the X0X chain";
+    if (fz_songon0 != seq.song_on)
+        return "seq.song_on";
+    if (fz_patptr0 != seq.pat)
+        return "seq.pat";
+    return 0;
+}
+
 /* the `fuzz SEED N` command: returns 1 when the invariant fails */
 static int fuzz_cmd(const char *dir, int seed, int n)
 {
@@ -1528,6 +1554,7 @@ static int fuzz_cmd(const char *dir, int seed, int n)
     fz_build(seed, n, &hk, &hb);
     (void)hk;
     (void)hb;
+    fz_pat_snapshot();                               /* TCLS: the pattern state / proj.arr baseline */
     snprintf(path, sizeof path, "%s/seed_%d.full.x0x", dir, seed);
     f = fopen(path, "w");                            /* written as the run goes: a crash still leaves it */
     if (f) {
@@ -1541,7 +1568,7 @@ static int fuzz_cmd(const char *dir, int seed, int n)
     }
     for (i = 0; i < fz_n && !midfail; i++) {
         char lb[128];
-        uint8_t v0 = ui.view, c0 = ui.classic;
+        uint8_t v0 = ui.view;
         int la0 = live_bridge_active();
         uint32_t held0 = held_keys;                  /* the keys physically down before the event */
         fz_line(lb, sizeof lb, &fz_ev[i]);
@@ -1550,7 +1577,14 @@ static int fuzz_cmd(const char *dir, int seed, int n)
             fflush(f);
         }
         fz_apply(&fz_ev[i]);
-        if (ui.view != v0 || ui.classic != c0 || live_bridge_active() != la0) {
+        {
+            const char *chg = fz_pat_changed();      /* TCLS: no input may touch the X0X patterns */
+            if (chg) {
+                printf("FAIL fuzz seed %d: event %d changed %s\n", seed, i, chg);
+                midfail = 1;
+            }
+        }
+        if (ui.view != v0 || live_bridge_active() != la0) {
             int k;                                   /* a view / mode change releases what was held */
             for (k = 0; k < NKEYS; k++) {
                 if (!((held0 >> k) & 1u))
@@ -1582,7 +1616,8 @@ static int fuzz_cmd(const char *dir, int seed, int n)
             run_ms(2);
         }
     if (wrote && !midfail) {
-        fputs("stop\nwait 3000\nexpect voices 0\nexpect heldnotes 0\n", f);
+        fputs("stop\nwait 3000\nexpect nfm6voices 0\nexpect fm6held 0\nwait 22000\n"
+              "expect voices 0\nexpect heldnotes 0\n", f);
         fflush(f);
     }
     if (wrote)
@@ -1592,7 +1627,21 @@ static int fuzz_cmd(const char *dir, int seed, int n)
         return 1;
     }
     host_all_stop();                                  /* stop both transports (never the all-notes-off) */
-    run_ms(3000);                                     /* wait 3 s */
+    /* TCLS: 3 s after the stop every non-FM6 engine must be silent and every remaining FM6 voice
+     * released (in its release stage). FM6's GLASS BELL may ring out, released, up to the bound
+     * below (the engine's own test allows ~24 s); a truly hung note never ends and still fails. */
+    run_ms(3000);
+    {
+        int others = engine_voices_active() - eng_fm6_voices_active(), held = eng_fm6_voices_held();
+        if (others != 0 || held != 0) {
+            printf("FAIL fuzz seed %d: 3 s after the stop, %d non-FM6 voice(s), %d held FM6 voice(s)\n",
+                   seed, others, held);
+            printf("  seed %d -> %s\n", seed, path);
+            return 1;
+        }
+    }
+    for (i = 0; i < 500 && engine_voices_active() != 0; i++)
+        run_ms(50);
     {
         int v = engine_voices_active(), h = fz_tracked();
         if (v != 0 || h != 0) {
@@ -1988,37 +2037,24 @@ int main(int argc, char **argv)
                 memset(&proj, 0, sizeof proj);
                 boot();
             }
-        } else if (!strcmp(cmd, "noise")) {             /* noise SEED: every step and lane random (no room to save) */
-            uint32_t r = (uint32_t)atoi(a) | 1u, i;
-            uint8_t *raw = (uint8_t *)proj.pat;
-            for (i = 0; i < sizeof proj.pat + sizeof proj.arr; i++) {
-                r ^= r << 13;
-                r ^= r >> 17;
-                r ^= r << 5;
-                raw[i] = (uint8_t)r;
-            }
-            for (i = 0; i < NPAT; i++) {
-                int k;
-                for (k = 0; k < NKIT; k++) {
-                    proj.pat[i].drum[k].len = 64;
-                    proj.pat[i].drum[k].rate = 0;
-                }
-                for (k = 0; k < NBASS; k++) {
-                    proj.pat[i].bass[k].len = 64;
-                    proj.pat[i].bass[k].rate = 0;
-                    proj.pat[i].bass[k].dir = 0;
-                }
-            }
-            proj.arr.song.len = 0;
-            for (i = 0; i < NLANE; i++)
-                proj.arr.lane[i].used = 0;
+        } else if (!strcmp(cmd, "noise")) {             /* TCLS: the X0X pattern bank is gone; a no-op.
+                                                         * The boot song is the Starter template. */
+            (void)a;
         } else if (!strcmp(cmd, "cpu2")) {              /* cpu2 0|1: the simulated second core */
             plat_cpu2_set(atoi(a));
         } else if (!strcmp(cmd, "assignkey")) {         /* T6i: T10's assign-keys, through song_io */
             song_io_set_key_clip(atoi(a), atoi(b));
-        } else if (!strcmp(cmd, "songseed")) {          /* T7a: test setup only, re-derive clips from proj.pat */
-            live_bridge_rebuild(&proj.pat[0]);
+        } else if (!strcmp(cmd, "songseed")) {          /* TCLS: test setup; the boot song is already the
+                                                         * Starter template, so this only marks it dirty */
             song_io_mark_dirty();
+        } else if (!strcmp(cmd, "newsong")) {           /* TCLS: start from a New song (0 Empty, 1 Starter) */
+            int kind = atoi(a), key23 = 0;              /* C MAJ, so a test's key/scale are predictable */
+            int slot = song_io_songs_create(0, kind, live_bridge_bpm_x10(), key23);
+            if (slot >= 0) {
+                song_io_songs_open(0, slot);
+                live_bridge_sync_tempo();
+                proj.set.rsv[0] = (uint8_t)slot;
+            }
         } else if (!strcmp(cmd, "cursor")) {            /* T7a: set the song-home cursor (role, col) */
             studio_set_cursor(atoi(a), b[0] ? atoi(b) : 0);
         } else if (!strcmp(cmd, "songcorrupt")) {       /* T6i: flip every song record's magic */

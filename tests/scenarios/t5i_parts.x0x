@@ -1,9 +1,6 @@
 # T5i follow-up: the note clamp, the overload guard's FM6 cap and NOISE shed, and the all-notes-off
 # (engine_all_off): the panic path and the transport-stop path.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
 param 5 4 0 100
 param 5 5 0 100
 param 3 0 7 0
@@ -50,22 +47,6 @@ expect nzvoices 0
 wait 1500
 expect fm6voices 0
 
-# 4. transport stop releases FM6 and NOISE, and the output decays to silence
-note 4 60 110
-note 4 64 110
-note 5 45 120
-wait 100
-expect fm6held 2
-tap PLAY
-wait 200
-expect playing 1
-tap PLAY
-wait 100
-expect playing 0
-expect fm6held 0
-wait 1500
-peakreset
-wait 500
-expect peak_db_max -60
-expect fm6voices 0
-expect nzvoices 0
+# TCLS: the old item 4 (transport stop releases FM6/NOISE) was X0X's transport all-off; the clip
+# engine's stop releases only the notes its clips started, so a directly-held engine note stays
+# (it is released by the key/MIDI note-off or by engine_all_off, item 3).

@@ -37,10 +37,11 @@ static master_t mst;
 /* T10i: the punch FX state (~32.3 KiB) lives in the shared pool. perform_process() runs on the
  * master stereo signal after the mix and before the output stage. */
 static perform_t perf POOL;
-/* T3: the delay line is 1.0 s (was 2.0 s, 88,200) — the RAM plan in architecture.md frees
- * 88,200 B for the LIVE song and clip engine. fxbus's delay time halves itself to fit dlen,
- * so the longest synced delay is now 1.0 s (check the POOL numbers in reports/T3.md). */
-#define DLY_LEN 44100
+/* TCLS: the delay line is 0.75 s (was 1.0 s, 44,100) — owner decision ADR-0004 shrinks it to
+ * give the RAM pool ~22 KB back. fxbus's delay time halves itself to fit dlen, so no synced
+ * delay can read or write past the shorter line (see tests/host/delay_clamp_test.c and the
+ * POOL numbers in reports/TCLS.md). */
+#define DLY_LEN 33075
 static int16_t dly_buf[DLY_LEN] POOL;
 static motion_t mot;
 /* T5i: the FM6 patch sector, read once at boot into the RAM bank the SLOT loader reads; and the
@@ -534,44 +535,6 @@ int engine_motion_part(int t, int v)
 int engine_motion_value(int k) { return motion_value(&mot, k); }
 void engine_motion_rec(int k) { motion_req_rec(&mot, k); }
 void engine_motion_hold(int k) { motion_req_hold(&mot, k); }
-static const seq_sink_t SINK = {s_drum_seq, s_bon, s_boff, s_midi, s_step, 0};
-
-/* ---------------------------------------------------------------- MIDI in --- */
-static uint8_t bass_held[NBASS];       /* note held from MIDI, for legato = slide */
-
-static void midi_in(uint32_t pkt)
-{
-    uint8_t st = (uint8_t)(pkt >> 8), d1 = (uint8_t)(pkt >> 16) & 0x7F, d2 = (uint8_t)(pkt >> 24) & 0x7F;
-    uint8_t ch = st & 0x0F, ty = st & 0xF0;
-    int k, v;
-    switch (st) {
-    case 0xF8: seq_ext_clock(&seq); return;
-    case 0xFA: seq_start(&seq); return;
-    case 0xFB: seq_continue(&seq); return;
-    case 0xFC: seq_stop(&seq); return;
-    default: break;
-    }
-    if (ty == 0x90 && d2 == 0)
-        ty = 0x80;
-    for (k = 0; k < NKIT; k++)                          /* each part on its own channel (GLO): the drum */
-        if (seq.ch[k] == ch && ty == 0x90) {             /* machines on GM drum notes */
-            static const uint8_t GM[NDRUM] = {36, 38, 41, 45, 50, 37, 39, 42, 46, 49, 51};
-            static const uint8_t GM8[NDRUM] = {36, 38, 41, 45, 50, 37, 39, 56, 49, 46, 42};
-            for (v = 0; v < NDRUM; v++)
-                if ((k ? GM8 : GM)[v] == d1)
-                    s_drum(0, k, v, (float)d2 / 127.0f);
-        }
-    for (k = 0; k < NBASS; k++)                         /* the 303s: overlapping notes slide */
-        if (seq.ch[TRK_BASS0 + k] == ch) {
-            if (ty == 0x90) {
-                bass303_note_on(&b303[k], d1, d2 >= 100, bass_held[k] != 0);
-                bass_held[k] = d1;
-            } else if (ty == 0x80 && bass_held[k] == d1) {
-                bass303_note_off(&b303[k]);
-                bass_held[k] = 0;
-            }
-        }
-}
 
 /* ---------------------------------------------------------------- render --- */
 /* Apply one command word directly to the engines. Shared by the command-queue drain and
@@ -602,8 +565,7 @@ void engine_take_cmd(uint32_t c) { apply_raw(c); }
 
 static void drain(uint32_t base)
 {
-    uint32_t r = cq_r, pkt, ts;
-    int guard = 64;
+    uint32_t r = cq_r;
     while (r != cq_w) {
         uint32_t c = cq[r % CQ];
         r++;
@@ -613,11 +575,8 @@ static void drain(uint32_t base)
         apply_raw(c);
     }
     cq_r = r;
-    if (!live_bridge_active())                          /* T11i: in STUDIO/LIVE the main loop's
-                                                         * midi_live_poll() owns the ring; Classic
-                                                         * keeps X0X's own per-part MIDI-in here */
-        while (guard-- && plat_midi_in(&pkt, &ts))
-            midi_in(pkt);
+    /* TCLS: the main loop's midi_live_poll() owns the TRS/USB ring in every view; the ISR no
+     * longer drains it (X0X's per-part MIDI-in was the Classic path). */
 }
 
 /* T9i: the audio sample clock and the parameter mirror the take recorder uses. */
@@ -1006,7 +965,7 @@ int engine_voices_active(void)
 void engine_render(int32_t *out_lr, uint32_t n)
 {
     static float out_l[256], out_r[256];
-    uint32_t done = 0, i;
+    uint32_t i;
     uint32_t perf_g8 = PERFORM_NO_GRID, perf_g16 = PERFORM_NO_GRID;   /* T10i */
     float vol = (float)plat_master() / 4096.0f;
     int p;
@@ -1027,16 +986,10 @@ void engine_render(int32_t *out_lr, uint32_t n)
     {
         PROF_T(pt);
         drain(eng_prof_frames - n);
-        if (live_bridge_active()) {
-            /* T3: LIVE owns the transport. The clip engine's events are applied directly, at
-             * their sample offsets (live_sink below); X0X's sequencer does not advance. */
-            fxbus_set_bpm(&fx, (float)live_bridge_bpm_x10() / 10.0f);
-        } else {
-            if (mot_on)
-                motion_tick(&mot, n);
-            fxbus_set_bpm(&fx, seq_tempo(&seq));
-            seq_advance(&seq, 0, &SINK);
-        }
+        /* TCLS: the clip engine is the only audio source and owns the transport. Its events are
+         * applied directly, at their sample offsets (live_sink below); X0X's sequencer never
+         * advances, so there is no second transport to hand off to. */
+        fxbus_set_bpm(&fx, (float)live_bridge_bpm_x10() / 10.0f);
         PROF_ADD(PR_SEQ, pt);
     }
     /* T9i: the take pump (post ring, arm/stop, playback) at the block's first frame, before the
@@ -1045,7 +998,7 @@ void engine_render(int32_t *out_lr, uint32_t n)
         live_bridge_take_block(eng_prof_frames - n, n);
     if (live_bridge_active() && live_bridge_transport_playing())
         live_bridge_grid(&perf_g8, &perf_g16);        /* T10i: the grid at the block's first frame */
-    if (live_bridge_active()) {
+    {
         live_ctx_t c;
         live_sink_t sink;
         c.base = eng_prof_frames - n;                  /* absolute sample of the window's first frame */
@@ -1058,16 +1011,6 @@ void engine_render(int32_t *out_lr, uint32_t n)
         live_bridge_render(n, &sink);
         if (c.done < n)                                /* the tail after the last event */
             render_sub(out_l + c.done, out_r + c.done, n - c.done);
-        done = n;
-    } else while (done < n) {
-        uint32_t k = seq_until_event(&seq, n - done);
-        render_sub(out_l + done, out_r + done, k);
-        {
-            PROF_T(pt);
-            seq_advance(&seq, k, &SINK);
-            PROF_ADD(PR_SEQ, pt);
-        }
-        done += k;
     }
     if (mot_playing && !seq.playing) {                  /* stopped: every knob back, every note off */
         motion_release(&mot);

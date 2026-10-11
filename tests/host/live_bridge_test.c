@@ -124,7 +124,7 @@ static void b1_isr_sink_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);                     /* LIVE is active */
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */                     /* LIVE is active */
     g_now = 0;
     ev = (uint32_t *)live_bridge_take_events_mut();     /* a stored take: a launch now, then end */
     ev[0] = 0u;
@@ -153,7 +153,7 @@ static void b2_leave_test(void)
 {
     int n0;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     g_now = 0;
     live_bridge_transport_start();                      /* playing = 1 */
     live_bridge_take_arm();                             /* arm at the next bar */
@@ -180,7 +180,7 @@ static void r2_b1_play_race_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     g_now = 0;
     /* Prime play[DRUMS] with a DIFFERENT clip (2), so a corrupt apply of clip 0 is detectable by
      * the invariant probe (take_play's reset clears cur[] but not play[]). */
@@ -211,7 +211,7 @@ static void r2_b2_tempo_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     g_now = 0;
     ev = (uint32_t *)live_bridge_take_events_mut();
     ev[0] = 0u;      ev[1] = TAKE_MARK_TEMPO(1200u);
@@ -244,7 +244,7 @@ static void r2_s3_next_stage_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     g_now = 0;
     /* Prime the engine so play[DRUMS] is a known clip (0), which take_play's reset does not clear:
      * if B is applied without its own staged copy, play[] stays clip 0 and the invariant fails. */
@@ -280,7 +280,7 @@ static void r2_s4_finish_race_test(void)
 {
     int n0;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     g_now = 0;
     live_bridge_transport_start();
     live_bridge_take_arm();
@@ -311,7 +311,7 @@ static int r3_late_run(uint32_t D, uint32_t frame, uint32_t phase, int *drops, i
     uint32_t *ev, s, next_ui;
     int d0, sawA = 0;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
     g_now = 0;
     ev = (uint32_t *)live_bridge_take_events_mut();
@@ -371,7 +371,7 @@ static void r3_stage_hook_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
     g_now = 0;
     ev = (uint32_t *)live_bridge_take_events_mut();
@@ -397,7 +397,7 @@ static void r3_ext_clock_test(void)
 {
     uint32_t *ev;
     live_bridge_take_init();
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     g_now = 0;
     ev = (uint32_t *)live_bridge_take_events_mut();
     ev[0] = 0u;   ev[1] = TAKE_MARK_TEMPO(1200u);
@@ -544,7 +544,8 @@ int main(void)
 
     /* the bridge's event stream: launch a drum clip and a 303 clip "now" and render; the sink
      * (not a stub) sees the DRUM with its lane and the NOTE_ON/NOTE_OFF of the bass. */
-    live_bridge_enter(pats, 1200u);
+    live_bridge_rebuild(pats);                        /* TCLS: enter no longer seeds from patterns */
+    live_bridge_enter();
     live_bridge_transport_start();
     live_bridge_launch_now(0);                        /* drum clip A: a kick on step 0 */
     live_bridge_launch_now(7);                        /* bass clip A: a note on step 0 */
@@ -569,7 +570,7 @@ int main(void)
 
     /* T9i r1: the ISR-race tests (they re-enter LIVE themselves). b2 first, then b1 (which traps on
      * the reviewed code, so it must run last to let b2's assertion be seen). */
-    live_bridge_enter(pats, 1200u);
+    live_bridge_enter();                                /* TCLS: rebuild seeds the clips in main */
     b2_leave_test();
     b1_isr_sink_test();
 

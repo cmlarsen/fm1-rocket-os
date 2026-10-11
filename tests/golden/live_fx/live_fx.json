@@ -1,5 +1,5 @@
 {
-  "transport": {"playing": 1, "bpm": 125.0, "bar": 2, "beat": 2, "step": 9, "sample": 306176},
+  "transport": {"playing": 1, "bpm": 125.0, "bar": 2, "beat": 2, "step": 9, "sample": 273408},
   "parts": [
     {"part": 0, "ppat": 0, "pcue": -1, "mute": 0},
     {"part": 1, "ppat": 0, "pcue": -1, "mute": 0},
@@ -7,7 +7,7 @@
     {"part": 3, "ppat": 0, "pcue": -1, "mute": 0}
   ],
   "view": 9,
-  "studio": {"role": 0, "col": 0, "clip": 0, "classic": 0},
+  "studio": {"role": 0, "col": 0, "clip": 0},
   "songs": {"up": 0, "used": 0, "current": -1, "free": 0, "canundo": 0, "rows": [
     {"slot": 0, "used": 0, "take": 0, "current": 0, "name": ""},
     {"slot": 1, "used": 0, "take": 0, "current": 0, "name": ""},
@@ -24,7 +24,7 @@
   ],
   "key_clip": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]},
   "leds": {
-    "keys": [2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1],
+    "keys": [2, 1, 1, 1, 0, 0, 0, 2, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0],
     "buttons": {"PLAY": 1}
   }
 }

@@ -18,11 +18,12 @@
 #include "firmware/src/seq/pattern.h"   /* pattern_t (root-relative: -I. is on every build) */
 #include "songs_seam.h"                 /* T8i: song_row_t / songs_ops_t (model-free) */
 
-/* Scan the store and adopt slot 0, or build from the project and mark dirty. Call once from
- * ui_init(), after engine_init()/project_load() (the LIVE song is live_bridge's g_song).
+/* Scan the store and adopt slot 0, or build the Starter song from song_templates.c and mark dirty
+ * (TCLS: the X0X project is no longer mapped). Call once from ui_init(), after
+ * engine_init()/project_load() (the LIVE song is live_bridge's g_song).
  * T8i: `preferred` is the last current slot (the project's reserved byte); it is adopted
- * first, then slot 0, then the project. */
-void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred);
+ * first, then slot 0, then the template. */
+void song_io_boot(uint16_t bpm_x10, int preferred);
 
 int  song_io_loaded(void);          /* 1: the current song came from slot 0 (not mapped from the project) */
 int  song_io_dirty(void);           /* the current song changed since the last save */

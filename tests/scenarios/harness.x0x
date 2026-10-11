@@ -1,25 +1,21 @@
-# T2a harness: the new runner commands (dump, wait-bar, events/eventsstop) and the new
-# expect keys (bar, beat, key, button). The sample counter is the only clock, so every
-# value here is deterministic.
+# T2a harness: the runner commands (dump, wait-bar, events/eventsstop) and the expect keys
+# (bar, beat, key, button). The sample counter is the only clock, so every value here is
+# deterministic.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
-expect view 1
-# the button LEDs of the 909 screen: EDIT bright (this is the part), SAVE dark
-expect button EDIT 1
-expect button SAVE 0
-# a white key writes a step; while stopped it lights bright, an unused white key stays dark
-tapkey w0
-expect hit0.0.0 1
+# TCLS: STUDIO opens on the song home (the boot song is the Starter template).
+expect view 10
+expect mode 0
+expect clipused0 1
+# the cursor clip's key is bright; an empty DRUMS slot's key is dark
 expect key 0 2
-expect key 2 0
+expect key 4 0
+expect button SAVE 0
 # events: every engine command from here, with its sample time
 events harness_events.txt
 param 0 0 0 64
-tapkey b0
+wait 100
 eventsstop
-# transport: PLAY; the 909's length is the bar
+# transport: PLAY starts the clip engine; its bar boundary is wait-bar
 tap PLAY
 expect playing 1
 wait-bar 1

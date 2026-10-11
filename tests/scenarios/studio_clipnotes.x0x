@@ -2,6 +2,7 @@
 # keys play; ALGORITHM moves the step cursor; keys add notes at the cursor (a hold adds a chord);
 # HOME + a key removes a note.
 wait 300
+newsong 0
 cursor 1 0
 tap SEQ
 expect view 13

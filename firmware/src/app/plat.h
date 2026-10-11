@@ -38,8 +38,7 @@ void plat_play_red(int red);           /* PLAY lights green; red (its other LED)
 /* USB MIDI, 4-byte USB-MIDI event packets (cable 0) */
 int plat_midi_in(uint32_t *pkt, uint32_t *sample);   /* 1 = got one; *sample = the audio sample counter
                                                       * the producer recorded when it took the packet
-                                                      * (engine.c's classic MIDI-in, audio ISR; or
-                                                      * T11i's midi_live_poll, main loop) */
+                                                      * (T11i's midi_live_poll drains it, main loop) */
 int plat_midi_overflow(void);          /* T11i: the ring dropped a packet; clears and returns 1 */
 void plat_midi_out(uint32_t pkt);      /* queue one (audio ISR or main loop) */
 

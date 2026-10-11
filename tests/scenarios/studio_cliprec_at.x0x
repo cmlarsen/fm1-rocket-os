@@ -2,6 +2,7 @@
 # transport starts at REC (step 0); REC closes at the next bar so rec.close = 32 (a 2-bar take); the
 # clip starts at step 32 and its progress at step 48 is 16/32 = 128/256.
 wait 300
+newsong 0
 cursor 1 0
 tap REC
 expect recrec 1

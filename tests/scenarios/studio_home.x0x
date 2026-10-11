@@ -3,7 +3,6 @@
 wait 300
 expect view 10
 expect mode 0
-expect classic 0
 expect studioclip 0
 expect clipused24 1
 # the cursor moves: SELECT between the roles, ALGORITHM along the row

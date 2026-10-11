@@ -1,6 +1,7 @@
 # T7b re-review 4: undo while a clip plays stages the restored clip through the main-loop path; the
 # clip engine is NOT re-inited, so the transport keeps playing and the clip stays up.
 wait 300
+newsong 0
 cursor 1 0
 tap SEQ
 tapkey w7

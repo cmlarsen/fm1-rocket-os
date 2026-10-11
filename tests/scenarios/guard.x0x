@@ -2,21 +2,7 @@
 # and lets go after 3 s back under 75% (T5perf raised the release from 65% so it does not stay on at
 # 66-69%). "load N" stands in for the FM-1's measured load.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
-# 909 kick on the quarters, 808 too, 303 A on a TB-3PO line
-tapkey b0
-tapkey w0
-tapkey w4
-tapkey w8
-tapkey w12
-turn ALGO 1
-tapkey w0
-tapkey w8
-turn ALGO 1
-tap ARP
-tap OCT+
+# TCLS: the boot song is the Starter template, so PLAY drives the clip engine.
 tap PLAY
 wait 1500
 expect guard 0
@@ -52,23 +38,3 @@ expect guard 1
 load 70
 wait 3500
 expect guard 0
-# the PERF test measures the full cost: no guard while it runs, back after
-load 95
-tap PLAY
-tap GLO
-turn SELECT 16
-tap SEL
-expect view 7
-tap SEL
-turn SELECT 1
-tap SEL
-wait 1000
-expect perftest 0
-expect guard 0
-shot g02_perftest.png
-tap HOME
-wait 300
-expect perftest -1
-wait 100
-expect guard 1
-shot g03_perf_after.png

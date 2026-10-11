@@ -2,12 +2,8 @@
 # long press switches the mode and never starts or stops either transport. Tested in STUDIO and
 # in LIVE, entering and leaving.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
+# TCLS: the boot song is the Starter template, so there are clips to launch.
 # STUDIO: during a short press the transport has not started; it starts on release
-# T7a: the song is the edited object; seed its clips from the patterns just built.
-songseed
 press PLAY
 wait 100
 expect playing 0
@@ -46,4 +42,4 @@ wait 400
 expect mode 0
 release PLAY
 wait 20
-expect view 1
+expect view 10

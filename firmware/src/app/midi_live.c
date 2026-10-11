@@ -12,8 +12,8 @@
  * Routing is by the song: notes on `song.live_channel` (0 = omni) play the focused role through
  * the LIVE bridge, Program Change (when `song.pc_launch`) launches that clip quantized, CC 120 /
  * 123 release everything, and 24-ppqn clock (Internal/Auto, a GLOBAL row) follows the tempo and
- * drives Start / Continue / Stop. In Classic X0X's own per-part handling owns the ring instead
- * (live_bridge_active() is 0), so this unit does nothing there.
+ * drives Start / Continue / Stop. TCLS: the clip engine is the only audio source, so this unit
+ * owns the ring in every view (there is no X0X per-part MIDI handling left).
  *
  * The two `song_t`s (X0X's and model.h's) collide, so this unit speaks model.h's only: it includes
  * midi_in.h (which includes model.h) and declares the live-bridge/engine entry points it needs,
@@ -25,7 +25,6 @@
 extern int  plat_midi_in(uint32_t *pkt, uint32_t *sample);   /* the TRS/USB ring (plat.h) */
 extern int  plat_midi_overflow(void);                        /* the ring dropped a packet */
 extern void *live_bridge_song(void);                         /* live_bridge.h */
-extern int  live_bridge_active(void);
 extern void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
 extern void live_bridge_transport_restart(void);
 extern void live_bridge_transport_continue(void);
@@ -162,11 +161,6 @@ int midi_live_poll(uint32_t sample)
 {
     uint32_t pkt, ts;
     int n = 0;
-    if (!live_bridge_active()) {                    /* Classic: engine.c owns the ring and X0X's handling */
-        if (g_nheld)
-            midi_live_reset();
-        return 0;
-    }
     ml_ensure();
     ml_sync_cfg();
     while (n < 256 && plat_midi_in(&pkt, &ts)) {

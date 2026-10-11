@@ -169,7 +169,7 @@ def run_probe(p, n, cap, seconds):
 
 def main():
     ap = argparse.ArgumentParser(description="FM-1 CPU-headroom probe (RC1p)")
-    ap.add_argument("--stress", type=int, choices=[1, 2, 3, 4, 5, 6], help="stress level to run")
+    ap.add_argument("--stress", type=int, choices=[2, 3, 4, 5], help="stress level to run (TCLS: the old X0X baseline levels 1/6 are gone)")
     ap.add_argument("--cap", type=int, default=0, help="FM6 voice cap for --stress 4 (6 or 8)")
     ap.add_argument("--seconds", type=float, default=60.0, help="how long to sample (default 60)")
     ap.add_argument("--port", help="the FM-1's MIDI port name")
@@ -187,7 +187,7 @@ def main():
 
     p = Probe(a.port)
     tag = (" cap %d" % a.cap) if a.stress == 4 and a.cap else ""
-    if a.stress in (5, 6):
+    if a.stress == 5:
         tag = " (core 1 forced off)"
     print("rc_probe: %s, stress %d%s, %.0f s" % (p.name, a.stress, tag, a.seconds))
     summary = run_probe(p, a.stress, a.cap, a.seconds)

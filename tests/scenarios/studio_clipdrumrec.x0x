@@ -1,6 +1,7 @@
 # T7b STUDIO 4 + REC: on a DRUMS clip, REC turns the white keys into finger drumming: white key N
 # triggers and records lane N-1 at the playhead; HOME + a white key accents the hit.
 wait 300
+newsong 0
 cursor 0 0
 tap REC
 expect view 13

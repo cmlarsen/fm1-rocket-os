@@ -118,12 +118,10 @@ static void st_action(int type, int clip, char *out)
 /* ================================================================ the mode === */
 
 int studio_mode(void) { return ui.view == V_STUDIO; }
-static int studio_classic(void) { return ui.classic; }
 int studio_holding(void) { return st.clear_clip != 0xFF; }
 
 void studio_enter(void)
 {
-    ui.classic = 0;
     if (st.role >= ST_ROLE_N)
         st.role = 0;
     if (st_role_n(st.role) <= 0) {
@@ -134,27 +132,6 @@ void studio_enter(void)
         st.col = 0;
     st.copy_src = 0xFF;
     build_pages();
-}
-
-/* T7a: the switch between the song (clip engine) and the classic X0X pages. Entering Classic hands
- * the audio to X0X's sequencer (the clip transport stops, all off); leaving stops that sequencer
- * and gives the audio back to the clip engine, whose clips keep playing. */
-void studio_set_classic(int on)
-{
-    if (on) {
-        ui.classic = 1;
-        live_bridge_exit();           /* stop the clip transport and release its voices */
-        engine_all_off();
-        set_view(V_PART);
-        say("CLASSIC", 0);
-    } else {
-        ui.classic = 0;
-        engine_all_off();             /* stop X0X's sequencer and release its voices */
-        live_bridge_enter(&proj.pat[0], 0);
-        set_view(V_STUDIO);
-        studio_enter();
-        say("STUDIO", 0);
-    }
 }
 
 /* ============================================================ the gestures === */
@@ -281,7 +258,7 @@ static void studio_handle_key(int k, int down)
     }
 }
 
-/* T7a D2: outside Classic, EDIT opens the cursor role's sound page (never an X0X pattern editor):
+/* T7a D2: EDIT opens the cursor role's sound page (never an X0X pattern editor):
  * DRUMS -> the 909, BASS -> 303A, LEAD -> 303B, CHORDS -> the FM6 card, FX -> the NOISE card. */
 static void studio_open_sound(void)
 {
@@ -323,9 +300,6 @@ static int studio_handle_button(int b)
             set_view(V_STUDIO);
             studio_enter();
             return 1;
-        case B_ARP:
-            say("CLASSIC: GLO", 0);
-            return 1;
         case B_REC:
             return (ui.btn & (1u << B_HOME)) ? 0 : 1;    /* HOME + REC: undo, handled by ui.c */
         default:
@@ -349,9 +323,6 @@ static int studio_handle_button(int b)
         }
         return 1;
     }
-    case B_ARP:                                          /* TB-3PO is a classic pattern tool */
-        say("CLASSIC: GLO", 0);
-        return 1;
     case B_REC:
         if (ui.btn & (1u << B_HOME))
             return 0;                                    /* HOME + REC: undo, handled by ui.c */
@@ -600,7 +571,7 @@ static void st_draw_clipset(int band)
     }
 }
 
-/* T7a D2: outside Classic, V_PART is a sound page only — a card, no X0X step grid or gestures */
+/* T7a D2 / TCLS: V_PART is a sound page only — a card, no X0X step grid or gestures */
 static void studio_draw_part(int band)
 {
     int role = ui.part == PART_303A ? 1 : ui.part == PART_303B ? 2 : 0;
@@ -610,7 +581,7 @@ static void studio_draw_part(int band)
         cv_text(14, vc(&AF_S, 42, 12), &AF_S, is_303() ? "303 tone - K1-K4" : "909 kit - K1-K4", TOK_MID);
         cv_text(14, vc(&AF_S, 54, 12), &AF_S, is_303() ? "keys play the line" : "keys play the kit", TOK_MID);
     } else {
-        cv_text(10, vc(&AF_S, 4, 12), &AF_S, "HOME: song    GLO: classic pages", TOK_MID);
+        cv_text(10, vc(&AF_S, 4, 12), &AF_S, "HOME: song    GLO: setup", TOK_MID);
     }
 }
 
@@ -625,7 +596,7 @@ static void studio_draw_sound(int band)
         cv_text(14, vc(&AF_S, 42, 12), &AF_S, role == 3 ? "the CHORDS sound" : "the FX sound", TOK_MID);
         cv_text(14, vc(&AF_S, 54, 12), &AF_S, "macros on K1-K4; EDIT: next page", TOK_MID);
     } else {
-        cv_text(10, vc(&AF_S, 4, 12), &AF_S, "HOME: song    GLO: classic pages", TOK_MID);
+        cv_text(10, vc(&AF_S, 4, 12), &AF_S, "HOME: song    GLO: setup", TOK_MID);
     }
 }
 

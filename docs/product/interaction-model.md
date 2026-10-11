@@ -41,7 +41,7 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 - **The song on screen is the song.** It autosaves when the transport is stopped and no voices are sounding.
 - **SAVE tap saves now.** The header dot means "not yet written".
 - **There is no separate saved copy** that can disagree with what you hear. Recovery comes from **undo**, which covers clears, copies, record passes and the take.
-- **The song persists in slot 0 on the flash** (0xA0000–0xDBFFF, beside the project). Its record is written header-last, so a power cut during an autosave leaves the version before it. At boot the stored song *is* the current song; with an empty slot the current song is built from the project. LIVE performs the current song — it is not rebuilt from the project on every entry — and changes that belong to the song (T10 adds assign-keys, K1–K4 and the launch default) mark it dirty.
+- **The song persists in slot 0 on the flash** (0xA0000–0xDBFFF, beside the project). Its record is written header-last, so a power cut during an autosave leaves the version before it. At boot the stored song *is* the current song; with an empty store (a first boot) the current song is the **Starter** template from `song_templates.c` (TCLS/ADR-0004), so a new device plays something at once. LIVE performs the current song — it is not rebuilt on every entry — and changes that belong to the song (T10 adds assign-keys, K1–K4 and the launch default) mark it dirty.
 
 ## Modes
 
@@ -66,17 +66,15 @@ with a ring (STUDIO 9); holding a loaded pad copies onto a blinking empty same-r
 the only audio source in every normal view** (the song home, the sound/FX/MIX/GLOBAL pages and
 LIVE), so tweaking a sound never stops the clips.
 
-### Classic patterns
-X0X's pattern editors are not on the normal button paths any more. They live behind
-**GLOBAL → Classic patterns**: entering Classic hands the audio to X0X's sequencer (the clip engine
-stops with all-off and the header shows CLASSIC). Inside Classic, X0X behaves exactly as before
-except for two exits that both return to the song home and hand the audio back to the clip engine
-(its clips keep playing): **HOME on X0X's SONG page**, and **GLOBAL → Back to song** (the classic
-row). Classic pages show a `GLO: BACK TO SONG` footer hint. Outside Classic, HOME and SEQ on a
-sound/FX/MIX/GLOBAL page return to the song home, and EDIT opens the cursor role's sound page
-(the 909/303 pages, or an FM6/NOISE macro card) rather than a pattern editor. This is T7a's
-decision, recorded here for the owner to confirm; the 909/303 editors stay available as classic
-pages until T7b replaces clip editing.
+### Classic patterns: removed
+X0X's pattern editors, its pattern sequencer and its song arranger are **gone** (TCLS, owner
+decision [ADR-0004](../decisions/0004-remove-classic-shorten-delay.md)). There is no GLOBAL →
+Classic row, no CLASSIC header, no `GLO: BACK TO SONG` footer and no path into a pattern editor:
+HOME and SEQ on a sound/FX/MIX/GLOBAL page return to the song home, and EDIT opens the cursor
+role's sound page (the 909/303 pages, or an FM6/NOISE macro card). The clip engine is the only
+thing that owns the audio, so there is no hand-over and no third context next to STUDIO and LIVE.
+X0X's project patterns are no longer held in RAM or written to flash; the sound and kit settings
+are still read at boot, and the inherited sound/FX/MIX/GLOBAL pages survive.
 
 ## LIVE mode
 
@@ -189,11 +187,10 @@ Deferred: HOME+SAVE capture, OCT± clip banks, and the Gate clip mode.
 - T11i: **Start** (0xFA) restarts at bar 1, step 0, relaunching what was playing; **Continue**
   (0xFB) resumes from the stop point; **Stop** (0xFC) stops. Song Position Pointer is not
   supported (the clip engine has no seek).
-- T11i: external MIDI notes, Program Change and the clock reach the app in **STUDIO and LIVE**;
-  in **Classic** X0X's own per-part MIDI channels and clock keep working instead.
+- T11i/TCLS: external MIDI notes, Program Change and the clock reach the app in **STUDIO and
+  LIVE**; the clip engine is the only audio source, so there is no X0X per-part MIDI handling.
 
 ## Open
-- Which inherited X0X views survive.
 - Velocity.
 - Whether drum clips share the melodic step model.
 - The minimum text size, set at RC0.

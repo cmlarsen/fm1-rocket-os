@@ -27,8 +27,9 @@ midi FC 00 00
 wait 20
 expect playing 0
 # GLOBAL -> CLOCK IN -> INTERNAL: the clock and the transport are not ours
+# (TCLS: CLOCK OUT is row 0, CLOCK IN row 1)
 tap GLO
-turn SELECT 2 80
+turn SELECT 1 80
 turn ALGO 1 80
 tap GLO
 wait 20
@@ -41,7 +42,7 @@ expect ext 0
 expect bpm 125
 # back to AUTO: the 120 bpm clock is followed
 tap GLO
-turn SELECT 2 80
+turn SELECT 1 80
 turn ALGO -1 80
 tap GLO
 wait 20

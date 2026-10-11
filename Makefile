@@ -293,7 +293,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-name unit-songs
+unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-delay unit-name unit-songs
 
 # T7b re-review: the host plat_crit nesting (host/plat_crit_host.c).
 .PHONY: unit-crit
@@ -360,6 +360,18 @@ unit-fx:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src/dsp \
 	    -o build/host/perform_test_san tests/host/perform_test.c firmware/src/dsp/perform.c
 	build/host/perform_test_san
+
+# TCLS: the 0.75 s delay line's clamp edge (fxbus_retime). Needs the generated drum tables.
+.PHONY: unit-delay
+unit-delay:
+	@mkdir -p build/host build/gen
+	@[ -f build/gen/x0x_drum_tables.h ] || python3 tools/gen_drum_samples.py build/gen/x0x_drum_samples.h >/dev/null
+	$(HOST_CC) $(CORE_CFLAGS) -Wno-double-promotion -Werror -Ifirmware/src/dsp -Ibuild/gen \
+	    -o build/host/delay_clamp_test tests/host/delay_clamp_test.c firmware/src/dsp/fxbus.c -lm
+	build/host/delay_clamp_test
+	$(HOST_CC) $(SAN_CFLAGS) -Ifirmware/src/dsp -Ibuild/gen \
+	    -o build/host/delay_clamp_test_san tests/host/delay_clamp_test.c firmware/src/dsp/fxbus.c -lm
+	build/host/delay_clamp_test_san
 
 # T8c: the NAME state machine and its render. ui_name.c is an include-style view that
 # draws through gfx.c's statics, so the test is one translation unit holding gfx.c +

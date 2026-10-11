@@ -2,6 +2,7 @@
 # key picks the lane, a white key toggles the visible step, HOME + a white key toggles the accent.
 # The grid reopens while the clip plays (the playhead), and the edited hits play as engine events.
 wait 300
+newsong 0
 cursor 0 0
 tap SEQ
 expect view 13

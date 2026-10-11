@@ -4,6 +4,13 @@ X0X turns the M-VAVE FM-1 into a groovebox: a 909, an 808 and two 303s,
 all playing at once, in stereo. Each part can play its own pattern, you can arrange patterns
 into a song, record knob moves, and give single steps a sound and a chance of their own.
 
+> **rocket-os note (TCLS).** This manual documents the inherited X0X firmware. rocket-os keeps
+> X0X's sound pages (909, 808, 303A/B, FX, MIX, GLOBAL) but **removes Classic patterns**: there is
+> no TB-3PO, no pattern editor, no pattern sequencer and no song arranger. Clips are built and
+> edited in STUDIO and performed in LIVE — see the [interaction model](product/interaction-model.md)
+> and [ADR-0004](decisions/0004-remove-classic-shorten-delay.md). Sections 7–11 below describe the
+> removed X0X workflow and are kept only for reference.
+
 New in this version: see [What's new](https://charlesvestal.github.io/fm1-x0x/new/).
 
 ![The FM-1 (a drawing), running X0X, each control labelled](img/fm1-panel.svg)
@@ -526,22 +533,20 @@ Press GLO for these settings:
 | LIGHTS | ON: the key lights show the steps, and the unlit buttons glow dimly so they can be read. KEYS: the key lights only. OFF: neither. |
 | KEY SOUND | STOPPED (the default): picking a drum or editing a 303 step is silent while the pattern plays, unless REC is on. ALWAYS: you always hear it. The 303 keyboard always plays either way. |
 | THEME | The screen colour: green, amber, cyan, red or mono. |
-| MODE | PATTERN, or SONG to play the song. |
-| SAVE PROJECT | Saves everything. |
-| AUTOSAVE | ON (the default): while the pattern is stopped, changes are saved by themselves once nothing has been touched for four seconds. OFF: only SAVE saves. |
-| CLEAR PATTERN | Clears all four parts of the current pattern. |
-| FACTORY RESET | Goes back to the factory sounds and empty patterns, with no song and no knob motion. Your saved project is kept until you save over it. |
+| SAVE | Saves the settings, the sound and the current song. (rocket-os: the pattern bank is gone.) |
+| AUTOSAVE | ON (the default): while the transport is stopped, changes are saved by themselves once nothing has been touched for four seconds. OFF: only SAVE saves. |
+| FACTORY RESET | Goes back to the factory sounds and settings. The current song is kept until you save over it. |
 | PERFORMANCE | Opens the performance page (below). |
-| ABOUT X0X | Shows the version, how full the memory for patterns is (MEM), and the audio load. |
+| ABOUT X0X | Shows the version, how full the memory for the settings and sound is (MEM), and the audio load. |
 | BATTERY | The battery's charge: FULL, 2/3, 1/3 or EMPTY; USB POWER while a computer powers the FM-1. Read only. |
 
 ### Saving
 
-**SAVE** saves the sounds, all 32 patterns, the song, the knob motion, the tempo and the
-settings. A small grey dot at the top right of the screen means there are unsaved changes, and
-anything unsaved is lost when you switch off.
+**SAVE** saves the settings, the sound and the current song (rocket-os: X0X's pattern bank, song
+arranger and knob-motion lanes are no longer stored). A small grey dot at the top right of the
+screen means there are unsaved changes, and anything unsaved is lost when you switch off.
 
-With **AUTOSAVE** on (the default) you'll rarely need SAVE: whenever the pattern is stopped and
+With **AUTOSAVE** on (the default) you'll rarely need SAVE: whenever the transport is stopped and
 nothing has been touched for four seconds, X0X saves and says AUTOSAVED.
 
 > **X0X never saves while playing.** Saving pauses the sound for a moment (the FM-1 plays from the
@@ -550,11 +555,10 @@ nothing has been touched for four seconds, X0X saves and says AUTOSAVED.
 
 <details><summary>How much fits</summary>
 
-X0X packs the patterns, the song and the knob motion to fit them in the FM-1's memory; empty
-steps take almost no room, so a typical project uses a small part of it (GLO > ABOUT X0X shows
-how much, as MEM). If a project ever grows too big to fit, X0X says MEMORY FULL: NOT SAVED and
-keeps what was saved before; clearing patterns you don't need makes room. Projects saved by
-earlier versions load as they were, with their steps on 1–32 and their patterns on 1–16.
+rocket-os saves the settings and the sound as two small objects, and the current song beside them
+(GLO > ABOUT X0X shows how full that room is, as MEM). X0X's pattern bank, song arranger and
+knob-motion lanes are not stored any more, so the room is far larger than it needs. Settings and
+sounds saved by earlier versions still load.
 
 </details>
 
@@ -563,9 +567,8 @@ earlier versions load as they were, with their steps on 1–32 and their pattern
 GLO > PERFORMANCE shows how hard the FM-1 is working, updated every second: the audio load and
 its peak, any dropouts, and how much of the processor each part is using.
 
-For a proper measurement, press SEL and choose RUN PERF TEST. X0X plays three patterns of its
-own for about 15 seconds, from a simple loop up to everything as busy as it gets, then puts your
-project back exactly as it was and shows the results. HOME or PLAY stops the test early.
+(rocket-os: RUN PERF TEST played X0X's own patterns through its sequencer, which is gone; the page
+keeps its live readout. The device CPU probe is `tools/rc_probe.py`.)
 
 X0X uses both of the FM-1's processor cores: the 808 runs on the second, so the 808's
 share on the performance page is the time the first core waits for it, and the whole load is lower: on

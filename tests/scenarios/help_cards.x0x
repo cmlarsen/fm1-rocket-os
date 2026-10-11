@@ -1,9 +1,10 @@
 # T11h: the two help systems on the device.
 # SYSTEM 1: holding HOME for 400 ms shows the context's HOME combos; releasing closes it, and a
 # short HOME tap still goes back. SYSTEM 2: GLO + a button shows that button's card; releasing
-# closes it. Cards are written for STUDIO, LIVE and SONGS (ui_help.c); Classic keeps X0X's own
-# 1 s help (tests/scenarios/help.x0x).
+# closes it. Cards are written for STUDIO, LIVE and SONGS (ui_help.c). TCLS: X0X's own 1 s help
+# (the old Classic help) is gone.
 wait 300
+expect helpfits 1
 expect sheet 0
 expect card 0
 
@@ -24,7 +25,7 @@ wait 60
 press REC
 wait 60
 expect card 12                    # REC is button 11, +1 like the help card
-expect help 0                     # the Classic 1 s help is off outside Classic
+expect help 0                     # TCLS: X0X's 1 s help is gone
 shot help_card_rec_studio.png
 release REC
 wait 60
