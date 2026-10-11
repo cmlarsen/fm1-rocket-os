@@ -59,6 +59,7 @@ void live_bridge_init(void);
  * them when the project changed. */
 void *live_bridge_song(void);
 void  live_bridge_song_reload(void);
+void  live_bridge_sync_tempo(void);                      /* T7a: X0X's sequencer follows the song's bpm */
 uint32_t live_bridge_pats_hash(const pattern_t *pats);   /* FNV-1a over proj.pat */
 uint32_t live_bridge_song_hash(void);                    /* the hash the current clips match */
 /* Re-derive the clips from the project, keeping the song's own fields (key map, LIVE SETUP, tempo,
@@ -66,10 +67,10 @@ uint32_t live_bridge_song_hash(void);                    /* the hash the current
 uint32_t live_bridge_rebuild(const pattern_t *pats);
 void     live_bridge_song_baseline(uint32_t pat_hash);
 
-/* Build the song from the project's patterns and make the bridge the audio source. The clip
- * transport starts stopped. `pats` is proj.pat (NPAT patterns), `bpm_x10` the project tempo.
- * T6i: returns 1 when it rebuilt the clips from the project (its patterns changed since the last
- * rebuild), 0 when the current song was already the project's. */
+/* T7a: make the bridge the audio source (the clip engine). The clip transport is not reset, so
+ * clips keep playing across a mode change. `pats` is proj.pat, used only to seed the song when
+ * nothing has been built or loaded yet. `bpm_x10` is ignored: the song's own tempo is authoritative.
+ * Returns 0 (the T6i pattern-hash rebuild is gone). */
 int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10);
 
 /* Stop the clip transport, release every sounding note and hand the audio back to X0X. */

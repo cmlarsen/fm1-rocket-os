@@ -25,6 +25,7 @@ static live_song_t g_song LIVE_POOL;
 static clip_engine_t g_eng LIVE_POOL;
 static uint8_t g_active;
 static uint8_t g_song_ready;                          /* T6i: g_song holds a loaded song or a mapped project */
+static uint8_t g_eng_ready;                           /* T7a: clip_engine_init has been called on g_eng */
 static uint32_t g_pat_hash;                           /* the project pattern hash the clips match */
 static uint8_t g_stop_q[NROLES];                      /* a stop on the role is pending (for the LED) */
 
@@ -253,15 +254,21 @@ void live_bridge_map(const pattern_t *pats, void *songp)
 
 void live_bridge_init(void)
 {
-    g_active = 0;
+    g_active = 1;                                     /* T7a: the clip engine is the audio source in
+                                                       * every normal view, from power-on. Classic
+                                                       * mode (live_bridge_exit) hands it to X0X. */
     g_song_ready = 0;                                 /* T6i: nothing mapped or loaded yet */
     clip_engine_init(&g_eng, &g_song);
+    g_eng_ready = 1;
 }
 
 /* T6i: the current song, owned here. song_io reads and edits it and tracks the project pattern hash
  * the clips were derived from, so LIVE rebuilds them when the project changes. */
 void *live_bridge_song(void) { return &g_song; }
-void live_bridge_song_reload(void) { clip_engine_init(&g_eng, &g_song); }
+/* T7a: the song's tempo is authoritative in both modes; X0X's sequencer follows it. */
+static void sync_seq_tempo(void) { seq.bpm = (float)g_song.bpm_x10 / 10.0f; }
+void live_bridge_song_reload(void) { clip_engine_init(&g_eng, &g_song); g_eng_ready = 1; sync_seq_tempo(); }
+void live_bridge_sync_tempo(void) { sync_seq_tempo(); }
 uint32_t live_bridge_pats_hash(const pattern_t *pats)
 {
     const uint8_t *p = (const uint8_t *)pats;
@@ -315,31 +322,23 @@ void live_bridge_song_baseline(uint32_t pat_hash)
     g_song_ready = 1;
 }
 
-static uint16_t clamp_bpm(uint16_t b)
-{
-    if (b < CLIP_ENGINE_BPM_MIN) return CLIP_ENGINE_BPM_MIN;
-    if (b > CLIP_ENGINE_BPM_MAX) return CLIP_ENGINE_BPM_MAX;
-    return b;
-}
-
+/* T7a: hand the audio to the clip engine (the song is the edited object; X0X's pattern-hash remap
+ * is gone). The song's own tempo is kept — the argument is the project's tempo, which the song
+ * overrides (decision 4). Only the first call with nothing built seeds from the project. The clip
+ * engine is not re-initialised, so clips keep playing across the STUDIO <-> LIVE switch. */
 int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
 {
-    uint32_t h = live_bridge_pats_hash(pats);
-    int rebuilt = 0;
-    if (!g_song_ready || h != g_pat_hash) {           /* the project changed, or nothing built yet */
-        live_bridge_rebuild(pats);
-        rebuilt = 1;
+    (void)bpm_x10;
+    if (!g_song_ready)
+        live_bridge_rebuild(pats);                     /* one-time seed, when no stored song existed */
+    if (!g_eng_ready)
+        live_bridge_song_reload();                     /* a caller (a unit test) that skipped init */
+    if (!g_active) {
+        g_active = 1;
+        engine_all_off();                              /* stop X0X's sequencer and release its voices */
     }
-    g_song.bpm_x10 = clamp_bpm(bpm_x10 ? bpm_x10 : 1200u);
-    clip_engine_init(&g_eng, &g_song);
-    engine_all_off();                                  /* T3: stop X0X's sequencer and release the voices */
-    g_active = 1;
-    {
-        int i;
-        for (i = 0; i < NROLES; i++)
-            g_stop_q[i] = 0;
-    }
-    return rebuilt;
+    sync_seq_tempo();
+    return 0;
 }
 
 void live_bridge_exit(void)

@@ -103,6 +103,7 @@ static void rc_live_enter(void)
     live.focus = LIVE_BASS;
     live.octv = 0;
     live_clear_held();
+    live_bridge_rebuild(rc_pat);           /* T7a: map the stress patterns explicitly (no auto-remap) */
     live_bridge_enter(rc_pat, bpm ? bpm : 1200u);
     set_view(V_LIVE);
     say("LIVE", 0);

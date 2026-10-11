@@ -180,8 +180,9 @@ static void test_save_reload(void)
     CHECK(((song_t *)live_bridge_song())->key_clip[0] == 5);
 }
 
-/* item 2: a STUDIO pattern edit (the project hash changed) rebuilds at boot, keeping the key map */
-static void test_project_change_rebuilds(void)
+/* T7a: the song is the edited object. A change to the project's patterns no longer rebuilds a
+ * stored song; slot 0 is adopted as it is, key map and all (the T6i pattern-hash remap is gone). */
+static void test_project_change_kept(void)
 {
     reset_flash();
     g_proj_hash = 0x1111u;
@@ -193,11 +194,45 @@ static void test_project_change_rebuilds(void)
     g_rebuilds = g_baselines = 0;
     boot();
     CHECK(song_io_loaded() == 1);
-    CHECK(song_io_dirty() == 1);                /* the rebuild marks the song dirty */
-    CHECK(g_rebuilds == 1 && g_baselines == 0);
-    CHECK(live_bridge_song_hash() == 0x2222u);
+    CHECK(song_io_dirty() == 0);                /* used as it is: nothing to write back */
+    CHECK(g_rebuilds == 0 && g_baselines == 1); /* no rebuild: the song is the object */
     CHECK(((song_t *)live_bridge_song())->key_clip[0] == 5);   /* the assignments survive */
     CHECK(((song_t *)live_bridge_song())->key_clip[1] == 6);
+}
+
+/* T7a: the clip edits the song home makes (create, length/mode/quant, clear, copy) and undo/redo */
+static void test_clip_edits(void)
+{
+    clip_t before;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    CHECK(song_io_clip_used(0) == 0);
+    song_io_clip_create(0, 16, 0, 0);
+    CHECK(song_io_clip_used(0) == 1);
+    CHECK(song_io_clip_len(0) == 16 && song_io_clip_mode(0) == 0 && song_io_clip_quant(0) == 0);
+    song_io_clip_set_len(0, 32);
+    song_io_clip_set_mode(0, 1);
+    song_io_clip_set_quant(0, 2);
+    CHECK(song_io_clip_len(0) == 32 && song_io_clip_mode(0) == 1 && song_io_clip_quant(0) == 2);
+    CHECK(song_io_dirty() == 1);
+    /* clear pushes an undo entry; undo restores the clip, redo clears it again */
+    song_io_clip_clear(0);
+    CHECK(song_io_clip_used(0) == 0);
+    CHECK(song_io_undo_type() == 1 /* UNDO_CLEAR_CLIP */ && song_io_undo_clip() == 0);
+    CHECK(song_io_undo() == 1);
+    CHECK(song_io_clip_used(0) == 1 && song_io_clip_len(0) == 32);
+    CHECK(song_io_redo() == 1 && song_io_clip_used(0) == 0);
+    CHECK(song_io_undo() == 1 && song_io_clip_used(0) == 1);
+    /* copy: create a second clip, copy 0 over 1, undo restores 1's old (empty) clip */
+    before = ((song_t *)live_bridge_song())->clip[1];
+    song_io_clip_create(1, 16, 0, 0);
+    song_io_clip_copy(1, 0);
+    CHECK(song_io_clip_len(1) == 32);
+    CHECK(song_io_undo_type() == 2 /* UNDO_COPY_CLIP */ && song_io_undo_clip() == 1);
+    CHECK(song_io_undo() == 1);
+    CHECK(song_io_clip_used(1) == 1 && song_io_clip_len(1) == 16);   /* the copied-in clip it replaced */
+    (void)before;
 }
 
 static void test_backend_refuses_out_of_region(void)
@@ -294,7 +329,8 @@ int main(void)
 {
     test_boot_empty_builds();
     test_save_reload();
-    test_project_change_rebuilds();
+    test_project_change_kept();
+    test_clip_edits();
     test_backend_refuses_out_of_region();
     test_power_cut_keeps_previous();
     test_failed_save_no_retry();

@@ -36,9 +36,31 @@ int  song_io_flush(void);
 /* T6i behaviour 2: an edit to the current song marks it dirty. T10's assign-keys UI calls this. */
 void song_io_set_key_clip(int key, int clip);
 
+/* T7a: the clip under the cursor. Indices are the model's clip order (0..26); a role index is
+ * 0..4 (DRUMS..FX). The clip-settings edits mark the song dirty; the copy/clear edits push an undo
+ * entry of their own. Creating a clip only fills an unused slot. */
+int  song_io_clip_used(int clip);
+int  song_io_clip_len(int clip);          /* 0 when unused */
+int  song_io_clip_mode(int clip);         /* 0 Loop, 1 Once */
+int  song_io_clip_quant(int clip);        /* 0 Bar, 1 Beat, 2 End */
+int  song_io_clip_nnotes(int clip);
+int  song_io_clip_motion(int clip);       /* the used motion lanes */
+int  song_io_clip_role(int clip);
+void song_io_clip_create(int clip, int len, int mode, int quant);
+void song_io_clip_clear(int clip);
+void song_io_clip_copy(int dst, int src);
+void song_io_clip_set_len(int clip, int len);
+void song_io_clip_set_mode(int clip, int mode);
+void song_io_clip_set_quant(int clip, int quant);
+int  song_io_swing(void);
+void song_io_set_swing(int v);            /* 0..100 */
+void song_io_set_bpm(int bpm_x10);
+void song_io_name(char *out, int n);      /* the song's name, NUL-terminated */
+
 /* Undo entry points (T7 wires the UI; no UI yet). The clip args are the model's `clip_t *`, passed
  * as void here. `push_*` are called after the edit, with the value it replaced. `undo`/`redo`
- * return model's UNDO_DONE / UNDO_EMPTY / UNDO_CANNOT and mark the song dirty when they act. */
+ * return model's UNDO_DONE (1) / UNDO_EMPTY (0) / UNDO_CANNOT (-1) and mark the song dirty when
+ * they act. `undo_clip`/`redo_clip` name the clip the next undo/redo touches, -1 when none. */
 void song_io_push_clear(int clip, const void *old_clip);
 void song_io_push_record(int clip, const void *old_clip);
 void song_io_push_copy(int dst, int src, const void *old_dst);
@@ -46,6 +68,10 @@ int  song_io_undo(void);
 int  song_io_redo(void);
 int  song_io_undo_type(void);
 int  song_io_redo_type(void);
+int  song_io_undo_clip(void);           /* the clip the next undo touches, -1 none */
+int  song_io_undo_depth(void);
+int  song_io_undo_pos(void);
+int  song_io_redo_clip(void);           /* the clip the next redo touches, -1 none */
 
 /* Takes (T9i): the model's `take_hdr_t *` / `take_event_t *`, passed as void here. Nothing calls
  * them yet. */

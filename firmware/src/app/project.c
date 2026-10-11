@@ -524,12 +524,7 @@ int project_save(void)
         if (rc)
             return rc;              /* -7 (or a write error): nothing more was written */
     }
-    /* T6i: the project just changed. Re-derive the song's clips from it so the persisted song
-     * (saved next, with the matching hash) keeps STUDIO edits reaching LIVE across a reboot. Only
-     * when they actually differ; the song's own fields (key map, LIVE SETUP, tempo) are kept. */
-    if (live_bridge_pats_hash(&proj.pat[0]) != live_bridge_song_hash()) {
-        live_bridge_rebuild(&proj.pat[0]);
-        song_io_mark_dirty();
-    }
+    /* T7a: the song is the edited object, so the project save no longer re-derives its clips. The
+     * T6i pattern-hash remap is gone; the project and the song are written independently. */
     return song_io_flush();         /* T6i: the song, after the project, in the same idle window */
 }
