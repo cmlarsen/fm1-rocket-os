@@ -34,6 +34,12 @@
 /* publish we have written the slot / read the head before the slot */
 #define CLIP_BARRIER() __asm__ volatile("" ::: "memory")
 
+#ifdef X0X_HOST
+/* T9i r1: the host test traps a command-ring push from the audio-ISR side (the take player). Set by
+ * the test around the ISR-side call; never set on the device (the guard compiles out). */
+volatile int clip_engine_isr;
+#endif
+
 /* ---- tempo --------------------------------------------------------------- */
 
 static uint16_t clamp_bpm(uint16_t b)
@@ -354,6 +360,10 @@ void clip_engine_transport_stop(clip_engine_t *e)
 static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm, uint32_t at)
 {
     uint8_t head = e->cmd_head, next = (uint8_t)((head + 1u) % CLIP_CMD_RING);
+#ifdef X0X_HOST
+    if (clip_engine_isr)               /* T9i r1: an ISR-side path must never push onto this ring */
+        __builtin_trap();
+#endif
     if (next == e->cmd_tail)
         return -1;                        /* full: the UI may retry */
     e->cmd[head].cmd = cmd;
@@ -431,6 +441,14 @@ void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
         e->play[role] = e->song->clip[clip];
     if (e->next_set[role] && e->next_clip[role] == clip)   /* a launch is staged: refresh that too */
         e->next[role] = e->song->clip[clip];
+    /* T9i r4: refresh any take FIFO slot that staged this clip (LIVE input is ignored during
+     * playback, so this only matters if an edit reaches here; it keeps the copies honest). */
+    {
+        uint8_t i;
+        for (i = 0; i < 2u; i++)
+            if (i < e->ts_n[role] && e->ts_clip[role][i] == clip)
+                e->ts[role][i] = e->song->clip[clip];
+    }
 }
 
 /* T11i: the external clock's tempo: the running tempo only, never the song's */
@@ -462,6 +480,191 @@ void clip_engine_mute_clear(clip_engine_t *e)
     push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0, 0);
 }
 
+/* ---- T9i: the take player's ISR-side entry points ------------------------ *
+ * These run from the audio ISR (the take sink), so they never push onto the command ring and never
+ * read song->clip[]. The main loop stages the launch's copy in next[role]; apply_role swaps it in at
+ * the boundary, so the sound is the staged snapshot. */
+
+/* how: 0 = queue at `quant` (0xFF = the staged copy's own quantize), 1 = next step. */
+int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant, uint16_t event)
+{
+    uint8_t role;
+    if (clip >= NCLIPS)
+        return 0;
+    role = clip_role(clip);
+    /* Keep a queued launch's front copy until it applies or is superseded. Any other copy older
+     * than this replayed event arrived too late; discard it before matching this event. */
+    if (e->ts_queued[role]) {
+        if (e->ts_n[role] > 1u && e->ts_event[role][1] < event)
+            e->ts_n[role] = 1u;
+    } else {
+        while (e->ts_n[role] && e->ts_event[role][0] < event) {
+            if (e->ts_n[role] > 1u) {
+                e->ts[role][0] = e->ts[role][1];
+                e->ts_clip[role][0] = e->ts_clip[role][1];
+                e->ts_event[role][0] = e->ts_event[role][1];
+            }
+            e->ts_n[role]--;
+        }
+    }
+    /* T9i r4: the copy for this launch is the FIFO front (slot 0) when no launch is queued for the
+     * role, or slot 1 when a queued launch is still waiting (this event overrides it). The main loop
+     * stages copies ahead of the replayed events, so both are normally there; if the copy is missing
+     * (the UI never staged it) DROP the launch, keep cur/play consistent, and count it. */
+    if (e->ts_queued[role]) {
+        if (e->ts_n[role] < 2u || e->ts_event[role][1] != event || e->ts_clip[role][1] != clip) {
+            e->take_drop++;
+            return 0;
+        }
+        /* a relay launch of the already-queued clip cancels it (not for NOW): the queued copy and
+         * this event's own copy are both consumed. */
+        if (how == 0u && e->que[role] == clip) {
+            e->ts_n[role] = 0u;
+            e->ts_queued[role] = 0u;
+            e->que_set[role] = 0u;
+            e->que[role] = CLIP_NONE;
+            return 1;
+        }
+        /* override: discard the queued launch's copy at slot 0, shift slot 1 into slot 0. */
+        e->ts[role][0] = e->ts[role][1];
+        e->ts_clip[role][0] = e->ts_clip[role][1];
+        e->ts_event[role][0] = e->ts_event[role][1];
+        e->ts_n[role] = 1u;
+    } else {
+        if (e->ts_n[role] < 1u || e->ts_event[role][0] != event || e->ts_clip[role][0] != clip) {
+            e->take_drop++;
+            return 0;
+        }
+    }
+    e->que[role] = clip;
+    e->que_set[role] = 1;
+    e->ts_queued[role] = 1;                    /* slot 0 now holds this queued launch's copy */
+    if (how == 1u)
+        e->que_at[role] = e->global_step + 1u;
+    else {
+        uint8_t q = (quant == 0xFFu) ? e->ts[role][0].quant : quant;
+        e->que_at[role] = e->global_step + action_lead(e, role, q);
+    }
+    return 1;
+}
+
+void clip_engine_take_stop(clip_engine_t *e, uint8_t role)
+{
+    uint8_t q;
+    if (role >= NROLES)
+        return;
+    if (e->que_set[role] && e->que[role] == CLIP_NONE) {   /* a second stop cancels, as consume_cmds */
+        e->que_set[role] = 0;
+        return;
+    }
+    /* T9i r4: a stop supersedes any queued take launch: discard its copy (slot 0), shift slot 1. */
+    if (e->ts_queued[role]) {
+        if (e->ts_n[role] > 1u) {
+            e->ts[role][0] = e->ts[role][1];
+            e->ts_clip[role][0] = e->ts_clip[role][1];
+            e->ts_event[role][0] = e->ts_event[role][1];
+            e->ts_n[role] = 1u;
+        } else {
+            e->ts_n[role] = 0u;
+        }
+        e->ts_queued[role] = 0u;
+    }
+    e->que[role] = CLIP_NONE;
+    e->que_set[role] = 1;
+    q = (e->cur[role] != CLIP_NONE) ? e->play[role].quant : Q_BAR;
+    e->que_at[role] = e->global_step + action_lead(e, role, q);
+}
+
+/* Latch a take mute; clip_engine_render() applies it at the window start (release_role needs the
+ * sink, which only the render has). */
+void clip_engine_take_mute(clip_engine_t *e, uint8_t role, int on)
+{
+    if (role >= NROLES)
+        return;
+    e->take_mute[role] = (uint8_t)(on ? 1 : 0);
+    e->take_mute_set = 1;
+}
+
+void clip_engine_take_mute_clear(clip_engine_t *e)
+{
+    uint8_t r;
+    for (r = 0; r < NROLES; r++) {
+        e->muted[r] = 0;
+        e->take_mute[r] = 0;
+    }
+    e->take_mute_set = 0;
+}
+
+void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10)
+{
+    if (!e->bpm_take_on) {
+        e->bpm_ext_saved = e->bpm_ext;                 /* r4: remember the pre-take source */
+        e->bpm_take_on = 1;
+    }
+    set_bpm(e, bpm_x10);                               /* r4: the recorded tempo wins over any clock */
+}
+
+/* B2: the take playback begins: hold whatever tempo is running (the prelude's tempo mark follows at
+ * offset 0) so the song's own tempo cannot clobber it in the meantime. */
+void clip_engine_take_bpm_hold(clip_engine_t *e)
+{
+    if (!e->bpm_take_on) {
+        e->bpm_ext_saved = e->bpm_ext;                 /* r4: remember the pre-take source */
+        e->bpm_take_on = 1;
+    }
+}
+
+/* B2/r4: the take ended/stopped: release the hold and restore the pre-take tempo source. An
+ * external clock that was followed before the take resumes; otherwise the song's own tempo. Pure
+ * arithmetic (no ring), so the take's natural ISR end may call it. */
+void clip_engine_take_bpm_clear(clip_engine_t *e)
+{
+    e->bpm_take_on = 0;
+    /* Account for a song edit even if no render has observed it yet, so the next render cannot
+     * mistake an edit made during the take for a new edit and clear the restored clock. */
+    if (e->song)
+        e->song_bpm = e->song->bpm_x10;
+    if (e->bpm_ext_saved) {
+        e->bpm_ext = e->bpm_ext_saved;
+        set_bpm(e, e->bpm_ext_saved);
+    } else if (e->song && e->song->bpm_x10)
+        set_bpm(e, e->song->bpm_x10);
+}
+
+int clip_engine_take_drops(const clip_engine_t *e) { return e ? e->take_drop : 0; }
+
+/* T9i r4: the take staging FIFO's producer. */
+int clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const clip_t *copy, uint16_t event)
+{
+    uint8_t n;
+    if (role >= NROLES || !copy)
+        return 0;
+    n = e->ts_n[role];
+    if (n >= 2u)
+        return 0;
+    e->ts[role][n] = *copy;
+    e->ts_clip[role][n] = clip;
+    e->ts_event[role][n] = event;
+    e->ts_n[role] = (uint8_t)(n + 1u);
+    return 1;
+}
+
+int clip_engine_take_stage_free(const clip_engine_t *e, uint8_t role)
+{
+    if (role >= NROLES)
+        return 0;
+    return e->ts_n[role] < 2u ? (int)(2u - e->ts_n[role]) : 0;
+}
+
+void clip_engine_take_stage_clear(clip_engine_t *e)
+{
+    uint8_t r;
+    for (r = 0; r < NROLES; r++) {
+        e->ts_n[r] = 0u;
+        e->ts_queued[r] = 0u;
+    }
+}
+
 /* ---- the render loop ----------------------------------------------------- */
 
 /* apply a queued action (off = the boundary's window offset) */
@@ -477,14 +680,33 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
             e->cur[role] = CLIP_NONE;
         }
         e->pos[role] = 0;
-    } else {
-        if (e->next_set[role] && e->next_clip[role] == target) {   /* T7b: next -> play swap */
-            e->play[role] = e->next[role];
-            e->next_set[role] = 0;
+    } else if (e->ts_queued[role] && e->ts_clip[role][0] == target) {
+        /* T9i r4: the take staging FIFO. Pop slot 0 into play[], then slot 1 becomes slot 0. The
+         * invariant cur[role] == the clip in play[role] holds byte-for-byte. */
+        e->play[role] = e->ts[role][0];
+        if (e->ts_n[role] > 1u) {
+            e->ts[role][0] = e->ts[role][1];
+            e->ts_clip[role][0] = e->ts_clip[role][1];
+            e->ts_event[role][0] = e->ts_event[role][1];
+            e->ts_n[role] = 1u;
+        } else {
+            e->ts_n[role] = 0u;
         }
+        e->ts_queued[role] = 0u;
         e->cur[role] = target;
         e->pos[role] = 0;
         ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
+    } else if (e->next_set[role] && e->next_clip[role] == target) {
+        /* T7b: a live (non-take) launch: next -> play swap */
+        e->play[role] = e->next[role];
+        e->next_set[role] = 0;
+        e->cur[role] = target;
+        e->pos[role] = 0;
+        ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
+    } else {
+        /* T9i r2/B1: the hard invariant. The staged copy is missing (a missed window): drop the
+         * launch, count it, and keep cur/play consistent. */
+        e->take_drop++;
     }
 }
 
@@ -538,13 +760,20 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         if (c.cmd == CLIP_CMD_SET_BPM) {
             if (e->song)
                 e->song->bpm_x10 = c.bpm_x10;  /* one source of truth */
-            e->bpm_ext = 0;                    /* T11i: the song's tempo wins again */
-            set_bpm(e, c.bpm_x10);
+            /* T9i r4: while a take playback owns the tempo, a song/UI tempo edit does not move the
+             * transport (the take's recorded tempo wins); the pre-take source is restored at the
+             * take's end/stop. */
+            if (!e->bpm_take_on) {
+                e->bpm_ext = 0;                /* T11i: the song's tempo wins again */
+                set_bpm(e, c.bpm_x10);
+            }
             continue;
         }
         if (c.cmd == CLIP_CMD_SET_BPM_SOFT) {  /* T11i: the external clock's live tempo */
-            e->bpm_ext = c.bpm_x10;
-            set_bpm(e, c.bpm_x10);
+            if (!e->bpm_take_on) {
+                e->bpm_ext = c.bpm_x10;
+                set_bpm(e, c.bpm_x10);
+            }
             continue;
         }
         if (c.cmd == CLIP_CMD_RESTART) {       /* T11i: MIDI Start, applied here so only the ISR
@@ -671,14 +900,33 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
     if (!nframes)
         return;
 
+    /* T9i: a take mute latched by the sink is applied here, at the window start, so its release's
+     * note-offs reach the sink (the sink is only available during the render). */
+    if (e->take_mute_set) {
+        uint8_t r;
+        e->take_mute_set = 0;
+        for (r = 0; r < NROLES; r++) {
+            if (e->take_mute[r]) {
+                if (!e->muted[r]) {
+                    e->muted[r] = 1;
+                    release_role(e, r, 0, sink);
+                }
+            } else {
+                e->muted[r] = 0;
+            }
+        }
+    }
+
     /* the song is the tempo source of truth: the UI writes song->bpm_x10 directly, or a
-     * ring tempo command writes it (in consume_cmds) */
+     * ring tempo command writes it (in consume_cmds). T9i r2/B2: while a take playback owns the
+     * tempo (bpm_take_on), the song's tempo (and an edited/stored value) must NOT clobber it. */
     if (e->song->bpm_x10 && e->song->bpm_x10 != e->song_bpm) {
         e->song_bpm = e->song->bpm_x10;     /* T11i: a loaded or edited song's tempo wins over a
                                              * clock that is no longer present */
-        e->bpm_ext = 0;
+        if (!e->bpm_take_on)
+            e->bpm_ext = 0;
     }
-    if (e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src && !e->bpm_ext)
+    if (!e->bpm_take_on && e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src && !e->bpm_ext)
         set_bpm(e, e->song->bpm_x10);
 
     consume_cmds(e, sink);
@@ -815,6 +1063,21 @@ void clip_engine_pos(const clip_engine_t *e, uint8_t *bar, uint8_t *beat, uint8_
 }
 
 uint32_t clip_engine_global_step(const clip_engine_t *e) { return e->global_step; }
+
+/* T9i r3/S1: the absolute sample global step `step` begins on, from the current transport. The take
+ * staging (main loop) uses it to tell whether a not-yet-replayed launch is due before a queued
+ * launch's boundary, so it only steals the staged copy when the new launch supersedes it. The
+ * caller masks the audio IRQs (the ISR advances these words every block). */
+uint32_t clip_engine_step_sample(const clip_engine_t *e, uint32_t step)
+{
+    uint32_t d;
+    if (!e->playing || !e->bpm_x10 || !e->step_L)
+        return e->elapsed;
+    if ((int32_t)(step - e->global_step) <= 0)
+        return e->elapsed;                             /* already reached */
+    d = step - e->global_step;
+    return e->step_sample + d * e->step_L + (e->step_frac + d * e->step_f) / e->bpm_x10;
+}
 
 uint8_t clip_engine_step_phase(const clip_engine_t *e)
 {

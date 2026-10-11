@@ -912,7 +912,19 @@ static int sst_try_take(const song_store_t *st, int ext, uint8_t slot, take_hdr_
             return -1;
         c = sst_crc(c, (const uint8_t *)ev, nevents * 8u);
     }
-    return ~c == h.crc ? 0 : -1;
+    if (~c != h.crc)
+        return -1;
+    /* T9i NIT: validate the header against the record length and the event order, so a torn or
+     * hand-edged record is refused rather than replayed. */
+    if (hdr->nevents != (uint16_t)nevents)
+        return -1;
+    {
+        uint32_t k;
+        for (k = 1; k < nevents; k++)
+            if ((int32_t)(ev[k].sample - ev[k - 1u].sample) < 0)
+                return -1;
+    }
+    return 0;
 }
 
 int song_store_take_load(song_store_t *st, int slot, take_hdr_t *hdr, take_event_t *ev, uint32_t max_events)

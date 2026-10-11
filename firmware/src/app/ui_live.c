@@ -5,8 +5,19 @@
  * belong to live_bridge.c. Screens follow design/project/Live-Pads-*.dc.html, Live-Play.dc.html,
  * Header.dc.html and PadGrid.dc.html, at 1:1. */
 #include "live_bridge.h"
+#include "song_io.h"                      /* T9i: the take's store calls (model-free) */
 
 #define LIVE_HOLD_MS 600u                 /* the interaction model's ring: ~600 ms */
+#define LIVE_TAKE_CLEAR_MS 1500u          /* hold REC this long to clear the take (design LIVE 8) */
+#define LIVE_REC_TAP_MS 300u              /* a REC tap (arm/stop) vs a hold (clear) */
+
+/* ---- T9i: the take, in LIVE --------------------------------------------- */
+static uint8_t take_open;                 /* the take card (EDIT in LIVE) is showing */
+static uint8_t rec_pressed, rec_cleared;  /* REC is down; the hold-to-clear already fired */
+static uint32_t rec_t0;
+static uint8_t take_prev_state;           /* the take state last frame (a finished recording) */
+static uint8_t take_full_toast;           /* "take full" shown for the current recording */
+static uint8_t take_knob_moved;           /* K1-K4 whose moves the take has recorded (the red dots) */
 
 static const uint16_t LV_COL[LIVE_NROLES] = {TOK_DRUM, TOK_BASS, TOK_LEAD, TOK_CHORD, TOK_FX};
 static const char *const LV_ROLE[LIVE_NROLES] = {"DR", "BA", "LE", "CH", "FX"};   /* 2 letters: clears the first cell */
@@ -60,6 +71,115 @@ static void live_fx_reset_ui(void)
  * per key whatever the layer/focus/octave does, and a release (or a view/mode change) always
  * releases what that key started. */
 
+/* ---- T9i: the take gestures --------------------------------------------- */
+
+static int live_recording(void) { return live_bridge_take_recording() || live_bridge_take_armed(); }
+static void live_len_str(char *out, uint32_t samples);
+
+/* the clear gesture: the take is gone in RAM and queued for the next flush (stopped and idle) */
+static void live_clear_take(void)
+{
+    song_io_take_request_clear();
+    take_open = 0;
+    say("TAKE CLEARED", 0);
+}
+
+/* a REC tap: arm at the next bar, or stop the recording at the next bar */
+static void live_rec_tap(void)
+{
+    if (live_bridge_take_recording() || live_bridge_take_armed()) {
+        live_bridge_take_stop();
+        say("TAKE STOP", 0);
+    } else {
+        live_bridge_take_arm();
+        say("REC", 0);
+    }
+}
+
+/* REC's edges, once per frame (the press is consumed by live_handle_button; the release is ours).
+ * A short tap arms/stops; holding it 1.5 s clears the take (nothing recording). */
+static void live_rec_tick(uint32_t btn)
+{
+    uint32_t now = plat_ms();
+    int down = (int)((btn >> B_REC) & 1u);
+    if (!live_mode()) {
+        rec_pressed = 0;
+        rec_cleared = 0;
+        return;
+    }
+    if (down && !rec_pressed) {
+        if (ui.btn & (1u << B_HOME)) {          /* HOME + REC: undo, handled by button_tap */
+            rec_pressed = 0;
+            rec_cleared = 0;
+            return;
+        }
+        rec_pressed = 1;
+        rec_cleared = 0;
+        rec_t0 = now;
+    } else if (down && rec_pressed && !rec_cleared && !live_recording() &&
+               (now - rec_t0) >= LIVE_TAKE_CLEAR_MS) {
+        if (live_bridge_take_has()) {
+            rec_cleared = 1;                    /* the ring completed: clear on the spot */
+            live_clear_take();
+        }
+    } else if (!down && rec_pressed) {
+        rec_pressed = 0;
+        if (!rec_cleared && (now - rec_t0) < LIVE_TAKE_CLEAR_MS)
+            live_rec_tap();
+        rec_cleared = 0;
+    }
+}
+
+/* once per frame: notice a recording that just finished and queue its store write; keep the
+ * "take full" toast. Also reload the take card's source when nothing is pending. */
+static void live_take_tick(void)
+{
+    int st = live_bridge_take_state();
+    if (st == 2 && take_prev_state != 2)
+        take_knob_moved = 0;                    /* a fresh recording: no knob marked yet */
+    if ((take_prev_state == 2 /*REC*/ || take_prev_state == 1 /*ARMED*/) && st == 0 /*IDLE*/ &&
+        live_bridge_take_has()) {
+        song_io_take_request_save();            /* the take is the song's: written on the next flush */
+        if (live_bridge_take_full())
+            take_full_toast = 1;
+        say(live_bridge_take_full() ? "TAKE FULL" : "TAKE SAVED", 0);
+    }
+    take_prev_state = (uint8_t)st;
+    /* T9i/B3: no in-LIVE flash write. A finished take's store write stays pending and rides the
+     * normal autosave path (stopped and idle, after leaving LIVE), so autosave's own rules hold. */
+    live_bridge_take_end_pending();             /* B1: clear the ISR's natural-end flag */
+    if (live_bridge_take_reload_pending() && !song_io_take_pending())
+        song_io_take_load_ram();                /* NIT: an arm-then-cancel restores the song's take */
+    live_bridge_take_stage();                   /* B1: stage the queued launches ahead of the event time */
+}
+
+/* how much of the take each role covers, for the card's timeline (first/last event offsets) */
+static int live_take_role_span(int role, uint32_t *lo, uint32_t *hi)
+{
+    const uint32_t *ev = (const uint32_t *)live_bridge_take_events();   /* {sample, cmd} pairs */
+    int i, n = live_bridge_take_nevents(), seen = 0;
+    uint32_t l = 0xFFFFFFFFu, h = 0;
+    for (i = 0; i < n; i++) {
+        uint32_t off = ev[i * 2u], cmd = ev[i * 2u + 1u];
+        uint32_t type = (cmd >> 28) & 0xFu, a = (cmd >> 20) & 0xFFu;
+        int r = -1;
+        if (type == 12u) r = (int)(cmd & 0xFFu);             /* TAKE_LAUNCH: c = role | quant<<8 */
+        else if (type == 13u) r = (int)a;                    /* TAKE_MUTE: a = role */
+        if (r != role)
+            continue;
+        seen = 1;
+        if (off < l)
+            l = off;
+        if (off > h)
+            h = off;
+    }
+    if (lo)
+        *lo = l;
+    if (hi)
+        *hi = h;
+    return seen;
+}
+
 /* ---- mode in and out ---- */
 
 static void live_enter(void)
@@ -72,6 +192,11 @@ static void live_enter(void)
     live_fx_reset_ui();                   /* T10i: a fresh LIVE starts with no FX layer open */
     engine_perform_reset();               /* T10i: and no effect left from a previous visit */
     live_bridge_mute_all(0);              /* T10i: and no mute */
+    take_open = 0;                        /* T9i: the take card is closed on entry */
+    rec_pressed = rec_cleared = take_full_toast = 0;
+    take_prev_state = (uint8_t)live_bridge_take_state();
+    if (!song_io_take_pending())          /* an unsaved recording is the in-RAM take; keep it */
+        song_io_take_load_ram();
     live_bridge_enter();                  /* the clip engine is already the source; it does not
                                            * reset the transport, so clips keep playing */
     set_view(V_LIVE);
@@ -82,8 +207,13 @@ static void live_leave(void)
 {
     note_release_all();                   /* T7a D1/r2: leaving LIVE releases every held note */
     live_fx_reset_ui();                   /* T10i: the FX layer closes */
+    /* T9i B2/S3: finalize the take at once and stop any playback first, then reset the perform FX
+     * and mutes the take may have set (after the stop, as the review asks). */
+    live_bridge_take_live(0);
     engine_perform_reset();               /* T10i: leaving LIVE releases every effect */
     live_bridge_mute_all(0);              /* T10i: and clears every mute */
+    take_open = 0;
+    rec_pressed = rec_cleared = 0;
     if (!live_bridge_transport_playing())
         engine_all_off();                 /* safety: release any other held voice when stopped */
     set_view(live.back == V_LIVE ? V_STUDIO : live.back);
@@ -169,6 +299,8 @@ static int live_handle_key(int k, int down)
         live_fx_key(k, 0);
         return 1;
     }
+    if (live_bridge_take_playing())
+        return 1;                          /* T9i: LIVE input is ignored while the take plays */
     if (fx_layer_active()) {              /* T10i: FX held: keys 0-5 punch, upper keys mute */
         if (k >= 0 && k < 6) {
             if (down)
@@ -210,8 +342,20 @@ static int live_handle_key(int k, int down)
 
 static int live_handle_button(int b)
 {
+    if (live_bridge_take_playing()) {                      /* T9i: only STOP is live during playback */
+        if (b == B_PLAY || b == B_SEL) {                   /* NIT: SEL stops the take too, as the spec */
+            live_bridge_take_stop_play();
+            say("TAKE STOP", 0);
+        }
+        return 1;
+    }
     switch (b) {
     case B_PLAY:
+        if (ui.btn & (1u << B_HOME)) {                     /* HOME + PLAY: redo (T9i) */
+            ui.btn_used |= 1u << B_HOME;
+            studio_redo();
+            break;
+        }
         if (live_bridge_transport_playing()) {
             live_bridge_transport_stop();
             engine_all_off();                      /* TCLS: STOP releases every voice, as X0X's did */
@@ -221,10 +365,35 @@ static int live_handle_button(int b)
             say("PLAY", 0);
         }
         break;
-    case B_SEL:                                            /* SCL toggles the layers */
+    case B_SEL:                                            /* SCL toggles the layers; on the card: play */
+        if (take_open) {
+            if (live_bridge_take_has()) {
+                live_bridge_take_play();
+                say("TAKE PLAY", 0);
+            }
+            break;
+        }
         live.layer = (uint8_t)(live.layer == LIVE_PADS ? LIVE_PLAY : LIVE_PADS);
         say(live.layer == LIVE_PADS ? "PADS" : "PLAY", 0);
         break;
+    case B_EDIT:                                           /* T9i: EDIT in LIVE opens the take card */
+        take_open = (uint8_t)!take_open;
+        if (take_open && !song_io_take_pending())
+            song_io_take_load_ram();
+        say(take_open ? "THE TAKE" : "LIVE", 0);
+        break;
+    case B_HOME:                                           /* close the card; LIVE has no back */
+        if (take_open) {
+            take_open = 0;
+            say("LIVE", 0);
+        }
+        break;
+    case B_REC:
+        if (ui.btn & (1u << B_HOME)) {                     /* HOME + REC: undo the last take op */
+            ui.btn_used |= 1u << B_HOME;
+            studio_undo();
+        }
+        break;                                             /* else live_rec_tick arms/stops/clears */
     case B_OCTDN:
     case B_OCTUP: {
         int o = live.octv + (b == B_OCTUP ? 1 : -1);
@@ -232,7 +401,7 @@ static int live_handle_button(int b)
         break;
     }
     default:
-        break;                                             /* SEL, HOME, REC, FX ...: inert in T3 */
+        break;                                             /* HOME, FX ...: inert in T3 */
     }
     return 1;
 }
@@ -281,6 +450,8 @@ static void live_fx_button(void)
 static void live_input(void)
 {
     int i, e, pgi = cur_page();
+    if (live_bridge_take_playing() || take_open)
+        return;                            /* T9i: the take card and playback take no encoders */
     live_fx_button();
     for (i = 0; i < NE; i++) {
         e = (int)enc(i);
@@ -291,6 +462,8 @@ static void live_input(void)
             turn_ref(pg.r[pgi][i - EN_K1], e, i);     /* FILTER / SPACE / ECHO / DRIVE */
             ui.touched = (int8_t)(i - EN_K1);
             ui.touch_until = plat_ms() + 900u;
+            if (live_bridge_take_recording())
+                take_knob_moved |= (uint8_t)(1u << (i - EN_K1));   /* the red "recorded" dot */
         }
     }
 }
@@ -362,9 +535,16 @@ static void live_draw_header(void)
     w = tw(&AF_S, "LIVE") + 10;
     box(4, 3, w, 14, TOK_THEME);
     cv_text(4 + 5, vc(&AF_S, 3, 14), &AF_S, "LIVE", C_BLACK);
-    cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
-            help_shift_active() ? "SHIFT" : fx_layer_active() ? "FX" : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
-            fx_layer_active() && !help_shift_active() ? TOK_ACCENT : TOK_MID);
+    if (live_bridge_take_recording()) {                /* T9i: a red REC chip while recording */
+        int32_t rw = tw(&AF_S, "REC") + 10;
+        box(4 + w + 6, 3, rw, 14, TOK_REC);
+        cv_text(4 + w + 11, vc(&AF_S, 3, 14), &AF_S, "REC", C_BLACK);
+    } else {
+        cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
+                help_shift_active() ? "SHIFT" : take_open ? "TAKE" : fx_layer_active() ? "FX"
+                                   : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
+                (take_open || fx_layer_active()) && !help_shift_active() ? TOK_ACCENT : TOK_MID);
+    }
     x = 104;
     if (playing)
         play_icon(x, 4, C_WHITE);
@@ -372,7 +552,12 @@ static void live_draw_header(void)
         box(x + 1, 5, 8, 8, TOK_MID);
     put_i(t, (int)(live_bridge_bpm_x10() / 10u));
     cv_text(x + 14, vc(&AF_M, 1, 17), &AF_M, t, C_WHITE);
-    {
+    if (live_bridge_take_recording()) {                /* T9i: the elapsed bars while recording */
+        char u[10], *q = put_s(u, "+");
+        q = put_i(q, live_bridge_take_rec_bars());
+        put_s(q, "bar");
+        text_r(226, vc(&AF_S, 1, 17), &AF_S, u, TOK_REC);
+    } else {
         uint8_t bar = 0, beat = 0;
         char u[8], *q = u;
         live_bridge_pos(&bar, &beat, 0);
@@ -392,6 +577,21 @@ static uint16_t live_footer(const char **a, const char **b, const char **c)
 {
     /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
     *a = *b = *c = 0;
+    if (live_bridge_take_recording() || live_bridge_take_armed()) {
+        *a = "REC STOP";
+        *b = "hold REC: CLEAR";
+        return TOK_REC;
+    }
+    if (live_bridge_take_playing()) {
+        *a = "PLAY: STOP";
+        return TOK_REC;
+    }
+    if (take_open) {
+        *a = "SEL: PLAY";
+        *b = "HOLD REC: CLEAR";
+        *c = "EDIT: BACK";
+        return C_DIM;
+    }
     if (fx_layer_active()) {
         *a = "TAP LATCH";
         *b = "HOME+FX RESET";
@@ -563,9 +763,108 @@ static void live_draw_fx(int band)
     }
 }
 
+/* ---- T9i: the take card (LIVE 10) and the recording border ---- */
+
+static void live_len_str(char *out, uint32_t samples)
+{
+    uint32_t sec = samples / (uint32_t)FS, s = sec % 60u;
+    char *q;
+    q = put_i(out, (int)(sec / 60u));
+    *q++ = ':';
+    *q++ = (char)('0' + (s / 10u));
+    put_i(q, (int)(s % 10u));
+}
+
+static void live_draw_take(int band)
+{
+    int i;
+    if (band == 0) {
+        char len[10], u[20];
+        box(4, 2, 232, 100, TOK_SURF);
+        frame(4, 2, 232, 100, TOK_LINE);
+        cv_text(12, vc(&AF_M, 5, 16), &AF_M, "This song's take", TOK_TEXT);
+        if (!live_bridge_take_has()) {
+            cv_text(12, vc(&AF_S, 30, 12), &AF_S, "no take yet", TOK_MID);
+            cv_text(12, vc(&AF_S, 46, 12), &AF_S, "REC records one from the next bar", TOK_MID);
+            return;
+        }
+        live_len_str(len, live_bridge_take_length_samples());
+        {
+            char *q = put_s(u, len);
+            q = put_s(q, " - ");
+            q = put_i(q, live_bridge_take_bars());
+            put_s(q, " bars");
+            text_r(228, vc(&AF_S, 5, 14), &AF_S, u, TOK_MID);
+        }
+        for (i = 0; i < LIVE_NROLES; i++) {                  /* role lanes (launches and mutes) */
+            uint32_t lo = 0, hi = 0, len2 = live_bridge_take_length_samples();
+            int y = 24 + i * 13, on = live_take_role_span(i, &lo, &hi);
+            box(12, y, 216, 9, TOK_RAISE);
+            if (on && len2) {
+                int x0 = 12 + (int)(216u * lo / len2);
+                int x1 = 12 + (int)(216u * hi / len2);
+                if (x1 <= x0)
+                    x1 = x0 + 2;
+                if (x0 < 12) x0 = 12;
+                if (x1 > 228) x1 = 228;
+                box(x0, y, x1 - x0, 9, LV_COL[i]);
+            }
+        }
+        cv_text(12, vc(&AF_S, 92, 10), &AF_S, "lanes: launches and mutes", TOK_MID);
+    } else {
+        box(4, 2, 232, 60, TOK_SURF);
+        frame(4, 2, 232, 60, TOK_LINE);
+        box(6, 6, 106, 18, TOK_THEME);
+        cv_text(12, vc(&AF_M, 6, 18), &AF_M, "Play the take", TOK_INK);
+        text_r(228, vc(&AF_S, 8, 14), &AF_S, live_bridge_take_playing() ? "playing" : "SEL", TOK_MID);
+        cv_text(12, vc(&AF_M, 28, 15), &AF_M, "Clear", TOK_TEXT);
+        text_r(228, vc(&AF_S, 28, 15), &AF_S, "hold REC", TOK_MID);
+        cv_text(12, vc(&AF_S, 46, 11), &AF_S, "recording again replaces it - undo restores", TOK_MID);
+    }
+}
+
+static void live_draw_rec_border(void)
+{
+    frame(0, 0, 240, 2 * BAND_H, TOK_REC);
+    frame(1, 1, 238, 2 * BAND_H - 2, TOK_REC);
+}
+
+/* the clear-take ring (LIVE 8): filling while REC is held, nothing recording */
+int live_clear_holding(void)
+{
+    return rec_pressed && !rec_cleared && !live_recording() && live_bridge_take_has() &&
+           (plat_ms() - rec_t0) < LIVE_TAKE_CLEAR_MS;
+}
+int live_take_knob_moved(int i) { return i >= 0 && i < 4 && (take_knob_moved >> i & 1u); }
+int live_take_open(void) { return take_open != 0; }
+
+static void live_draw_clear_ring(void)
+{
+    uint32_t el = plat_ms() - rec_t0;
+    float p = (float)el / (float)LIVE_TAKE_CLEAR_MS;
+    char len[10], sum[20], *q;
+    if (p > 1.0f)
+        p = 1.0f;
+    box(0, 0, 240, 2 * BAND_H, TOK_BG);
+    box(40, 26, 160, 90, TOK_SURF);
+    frame(40, 26, 160, 90, TOK_LINE);
+    disc(74.0f, 71.0f, 27.0f, TOK_LINE);
+    disc(74.0f, 71.0f, 22.0f, TOK_SURF);
+    arc(74, 71, 24, p, TOK_LINE, TOK_REC, 0);
+    cv_text(112, vc(&AF_S, 34, 12), &AF_S, "clear", TOK_REC);
+    cv_text(112, vc(&AF_M, 50, 16), &AF_M, "This song's take", TOK_TEXT);
+    live_len_str(len, live_bridge_take_length_samples());
+    q = put_s(sum, len);
+    put_s(q, " long");
+    cv_text(112, vc(&AF_S, 70, 11), &AF_S, sum, TOK_MID);
+    text_c(120, vc(&AF_S, 96, 11), &AF_S, "clips stay - music keeps playing", TOK_MID);
+}
+
 static void live_draw(int band)
 {
-    if (fx_layer_active())
+    if (take_open)
+        live_draw_take(band);
+    else if (fx_layer_active())
         live_draw_fx(band);
     else if (live.layer == LIVE_PLAY)
         live_draw_play(band);

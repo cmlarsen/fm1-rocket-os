@@ -137,6 +137,27 @@ void live_bridge_stop(uint8_t role) { (void)role; }
 int live_bridge_stop_queued(int role) { (void)role; return 0; }
 int live_bridge_transport_playing(void) { return 0; }   /* T8i: the test is never playing */
 
+/* ---- T9i: the take buffer song_io reads/writes (a plain in-RAM stub) ---- */
+static take_hdr_t g_take_hdr;
+static take_event_t g_take_ev[TAKE_MAX_EVENTS];
+static int g_take_n;
+const void *live_bridge_take_hdr(void) { return &g_take_hdr; }
+const void *live_bridge_take_events(void) { return g_take_ev; }
+void *live_bridge_take_hdr_mut(void) { return &g_take_hdr; }
+void *live_bridge_take_events_mut(void) { return g_take_ev; }
+int live_bridge_take_nevents(void) { return g_take_n; }
+void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_x10)
+{
+    g_take_n = nevents;
+    g_take_hdr.nevents = (uint16_t)nevents;
+    g_take_hdr.length_samples = length_samples;
+    g_take_hdr.bpm_x10 = bpm_x10;
+}
+void live_bridge_take_clear_ram(void) { g_take_n = 0; g_take_hdr.nevents = 0; g_take_hdr.length_samples = 0; }
+int live_bridge_take_recording(void) { return 0; }       /* T9i r1: never live in this test */
+int live_bridge_take_armed(void) { return 0; }
+int live_bridge_take_playing(void) { return 0; }
+
 static void reset_flash(void)
 {
     memset(nor, 0xFF, sizeof nor);
@@ -435,6 +456,51 @@ static void test_corrupt_record_falls_back(void)
     CHECK(strcmp(((song_t *)live_bridge_song())->name, "STARTER") == 0);
 }
 
+/* T9i r2/S5: with a full undo ring, `undo.cur` saturates, so ordering a pending take by cur index
+ * wrongly cancelled it. A newer clip edit must be undone first; the take goes when nothing newer is
+ * above it. */
+static void test_take_undo_order_full_ring(void)
+{
+    clip_t old;
+    int i, rc;
+    reset_flash();
+    boot();
+    song_io_clip_create(0, 16, 0, 0);           /* a clip to clear (undoably) */
+    memset(&old, 0, sizeof old);
+    for (i = 0; i < 12; i++)
+        song_io_push_clear(0, &old);            /* overfill the 11-deep ring */
+    CHECK(song_io_undo_depth() == 11);
+    song_io_take_request_save();
+    CHECK(song_io_take_pending());
+    song_io_push_clear(0, &old);                /* a newer edit while the ring is full */
+    rc = song_io_undo();
+    CHECK(rc == 1 /* UNDO_DONE */);
+    CHECK(song_io_take_pending());              /* S5: the newer edit went first, not the take */
+    rc = song_io_undo();
+    CHECK(rc == 1);
+    CHECK(!song_io_take_pending());             /* now nothing newer: the take is cancelled */
+}
+
+/* T9i r3/NIT: the durable take undo is stamped when the take ended, not at the deferred flush, so a
+ * clip edit made after the take is undone first. */
+static void test_take_undo_order_flush(void)
+{
+    clip_t old;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    live_bridge_take_loaded(3, 1234u, 1200u);   /* the take buffer holds a finished recording */
+    song_io_take_request_save();                /* the recording ended: stamp the undo position */
+    CHECK(song_io_take_pending());
+    memset(&old, 0, sizeof old);
+    song_io_push_clear(0, &old);                /* a clip edit made after the take ended */
+    CHECK(song_io_take_flush() == 0);           /* the deferred write happens now */
+    CHECK(!song_io_take_pending());
+    CHECK(song_io_undo_type() == 1 /* UNDO_CLEAR_CLIP */);      /* the newer edit is on top ... */
+    CHECK(song_io_undo() == 1);
+    CHECK(song_io_undo_type() == 4 /* UNDO_REPLACE_TAKE */);    /* ... then the take */
+}
+
 int main(void)
 {
     test_boot_empty_builds();
@@ -448,6 +514,8 @@ int main(void)
     test_power_cut_keeps_previous();
     test_failed_save_no_retry();
     test_corrupt_record_falls_back();
+    test_take_undo_order_full_ring();
+    test_take_undo_order_flush();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

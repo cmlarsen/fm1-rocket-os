@@ -1,0 +1,41 @@
+# T9i: no hung notes. A recorded held FM6 note (no note-off) must be released when the take ends
+# mid-note, and leaving LIVE during playback must release everything too.
+wait 300
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+note 4 40 100
+wait-bar 1
+tap REC
+wait-bar 2
+tap PLAY
+wait 400
+expect takehas 1
+echo take recorded (the store write is pending, per B3)
+# the take ends with the FM6 note still held: the end must release it (the take is ~3 bars)
+takeplay
+wait 9000
+expect takestate 0
+expect takeplaying 0
+wait 4000
+expect voices 0
+expect fm6held 0
+echo ended mid-note, voices 0
+# leave LIVE during playback
+takeplay
+wait-bar 1
+expect takeplaying 1
+press PLAY
+wait 700
+release PLAY
+wait 2000
+expect mode 0
+expect voices 0
+expect heldnotes 0
+echo left during playback, voices 0
+dump t9i_take_hung.json

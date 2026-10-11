@@ -30,6 +30,7 @@ enum {
     RC_ST_POOL,          /* the .pool section in use                     */
     RC_ST_POOL_TOTAL,    /* the .pool region's size                      */
     RC_ST_IRQ,           /* the interrupts' stack high-water, bytes      */
+    RC_ST_TAKEDROP,      /* T9i r2: take launches dropped for a missing staged copy */
     RC_ST_N
 };
 

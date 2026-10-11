@@ -1,0 +1,19 @@
+# T9i: a full buffer stops cleanly with "take full". Arm and start recording, then feed notes
+# until the cap; the take closes with the end mark, take_full is set, and 2,048 events are held.
+wait 300
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+takefill 1100
+expect takefull 1
+expect takestate 0
+expect taken 1024
+echo full
+tap PLAY
+wait 500
+dump t9i_take_full.json

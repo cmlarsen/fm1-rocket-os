@@ -182,6 +182,30 @@ int main(void)
         check("new edit clears redo", undo_stack_redo_type(&u) == UNDO_NONE);
     }
 
+    /* T6c fix (r3): a new edit after an undo discards the redo tail. The old code kept the entry
+     * above `cur`, so edit v0->v1, undo, edit v0->v2, undo, undo wrongly restored v1. */
+    {
+        clip_t v0, v1, v2, v1b;
+        undo_stack_init(&u);
+        fill_clip(&v0, 10);
+        fill_clip(&v1, 20);
+        fill_clip(&v2, 30);
+        fill_clip(&v1b, 21);                            /* a detectable "branch" clip */
+        song.clip[0] = v0;
+        undo_stack_push_record(&u, 0, &v0);             /* the clip is about to become v1 */
+        song.clip[0] = v1;
+        check("branch: the first edit undoes", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE &&
+              memcmp(&song.clip[0], &v0, sizeof v0) == 0);
+        song.clip[0] = v1b;                             /* (the branch value lives only in the song) */
+        undo_stack_push_record(&u, 0, &v0);             /* a new edit from v0, so the clip becomes v2 */
+        song.clip[0] = v2;
+        check("branch: the new edit undoes", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE &&
+              memcmp(&song.clip[0], &v0, sizeof v0) == 0);
+        check("branch: the discarded redo is not undone again",
+              undo_stack_undo(&u, &song, 0, 0) == UNDO_EMPTY &&
+              memcmp(&song.clip[0], &v0, sizeof v0) == 0);
+    }
+
     /* the ring drops the oldest when full */
     {
         clip_t cl;
@@ -223,6 +247,40 @@ int main(void)
     check("second undo cannot (only the newest take entry is live)",
           undo_stack_undo(&u, &song, &store, &TS) == UNDO_CANNOT && cur(2) == 2u);
 
+    /* T9i r4 NIT: the deferred take flush inserts the take entry *behind* a later clip edit. When
+     * that edit has been undone (a redo tail above `cur`), the flush must keep it redoable instead
+     * of truncating the tail (the old code set n = cur unconditionally). */
+    {
+        clip_t e0, e1, e2;
+        uint32_t ser;
+        undo_stack_init(&u);
+        take(1, 111);
+        take(1, 222);                                  /* slot 1 has a restorable previous take */
+        fill_clip(&e0, 60); fill_clip(&e1, 61); fill_clip(&e2, 62);
+        undo_stack_push_clear(&u, 3, &e0);             /* E0: cur = 1 */
+        ser = undo_stack_serial(&u);                   /* the take ended here (serial 1) */
+        undo_stack_push_clear(&u, 3, &e1);             /* E1: cur = 2 */
+        undo_stack_push_clear(&u, 3, &e2);             /* E2: cur = 3 */
+        check("flush: undo E2", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE);
+        undo_stack_push_take_at(&u, &store, 1, ser);   /* the deferred flush: pos 1 < cur 2 */
+        check("flush: the redo tail is kept", undo_stack_redo_type(&u) == UNDO_CLEAR_CLIP);
+        check("flush: the tail redoes", undo_stack_redo(&u, &song, 0, 0) == UNDO_DONE);
+    }
+
+    /* T9i r5: take ends, E1 is made and undone, then the flush inserts at pos == cur. */
+    {
+        clip_t e0, e1; uint32_t ser;
+        undo_stack_init(&u);
+        take(1, 111); take(1, 222);
+        fill_clip(&e0, 60); fill_clip(&e1, 61);
+        undo_stack_push_clear(&u, 3, &e0);
+        ser = undo_stack_serial(&u);
+        undo_stack_push_clear(&u, 3, &e1);
+        check("flush at cursor: undo E1", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE);
+        undo_stack_push_take_at(&u, &store, 1, ser);
+        check("flush at cursor: redo tail survives", undo_stack_redo_type(&u) == UNDO_CLEAR_CLIP);
+        check("flush at cursor: E1 redoes", undo_stack_redo(&u, &song, 0, 0) == UNDO_DONE);
+    }
     /* delete: persists, undoes and redoes with the sequence-number check */
     {
         song_t other;

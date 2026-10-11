@@ -148,6 +148,47 @@ int live_bridge_role_of(int clip);                /* the role a clip belongs to 
 int live_bridge_clip_used(int clip);              /* 1 if the clip slot holds a clip */
 int live_bridge_key_clip(int key);                /* song.key_clip[key] */
 
+/* ---- T9i: the take recorder and player ----------------------------------- *
+ * The take state (a `take_t`, ~16 KiB) lives in .pool, owned here where the song and the clip
+ * engine are. ui.c reaches it through these plain prototypes (it cannot see model.h). The ISR
+ * hooks (`take_feed`, `take_block`) are called from engine.c; every other call is the main loop.
+ * Storage (song_io_take_save/load) reads the raw bytes through `_hdr`/`_events`. */
+void live_bridge_take_init(void);
+void live_bridge_take_feed(uint32_t sample, uint32_t cmd);       /* ISR: one drained command */
+void live_bridge_take_block(uint32_t base, uint32_t nframes);    /* ISR: post/setup/playback pump */
+void live_bridge_take_fx(int id, int how);                       /* record a punch FX (0 off/1 on/2 latch) */
+
+void live_bridge_take_arm(void);            /* the REC tap: at the next bar, or the next PLAY */
+void live_bridge_take_stop(void);           /* the second REC tap: end at the next bar */
+void live_bridge_take_finish(void);         /* T9i/B2: close the take at once (leaving LIVE) */
+void live_bridge_take_play(void);           /* play the song's take (or stop a playing one) */
+void live_bridge_take_stop_play(void);
+void live_bridge_take_stage(void);          /* T9i/B1: main loop: stage the queued launches' copies */
+void live_bridge_take_live(int on);         /* T9i/B2: enter (1) / leave (0) LIVE's take scope */
+int  live_bridge_take_end_pending(void);    /* T9i/B1: the ISR's natural end, polled by the main loop */
+int  live_bridge_take_reload_pending(void); /* T9i NIT: an arm was cancelled; reload the song's take */
+void live_bridge_take_clear_ram(void);      /* the clear gesture: the in-RAM take is gone */
+void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_x10);
+
+int  live_bridge_take_state(void);          /* take.h: TAKE_IDLE / _ARMED / _REC / _PLAY */
+int  live_bridge_take_recording(void);
+int  live_bridge_take_armed(void);
+int  live_bridge_take_playing(void);
+int  live_bridge_take_full(void);
+int  live_bridge_take_has(void);
+int  live_bridge_take_nevents(void);
+int  live_bridge_take_drops(void);          /* T9i r2: launches dropped for a missing staged copy */
+uint16_t live_bridge_take_bpm_x10(void);
+uint32_t live_bridge_take_length_samples(void);
+int  live_bridge_take_bars(void);
+int  live_bridge_take_rec_elapsed_ms(void);  /* while recording: how long the red chip has run */
+int  live_bridge_take_rec_bars(void);        /* while recording: the bar the chip shows */
+
+const void *live_bridge_take_hdr(void);      /* the take_hdr_t bytes, for storage */
+const void *live_bridge_take_events(void);   /* the take_event_t array, for storage */
+void *live_bridge_take_hdr_mut(void);        /* the load/undo destination */
+void *live_bridge_take_events_mut(void);
+
 /* The pure pattern -> song mapping (T3 has a unit test for it). `song` is a model.h `song_t *`;
  * it is `void *` here only so this header can be included from ui.c. Fills all 27 clips and the
  * roles; CHORDS and FX stay empty. */

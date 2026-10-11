@@ -1,0 +1,55 @@
+# T9i: record a take, save it, reboot, and replay it: the note stream is still exact. The take
+# and the song ride the normal (stopped and quiet) flush.
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+eventsnotes rec_notes.txt
+tapkey 0
+wait-bar 1
+tapkey 7
+wait-bar 1
+waitbarabs 5
+eventsstop
+tap REC
+wait-bar 2
+tap PLAY
+wait 400
+# T9i r1/B3: the take save rides autosave, so leave LIVE and wait for quiet before rebooting.
+press PLAY
+wait 700
+release PLAY
+wait 4500
+expect songsaves 1
+expect takepend 0
+echo flushed; rebooting
+reboot
+wait 200
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+expect takehas 1
+eventsnotes play_notes.txt
+takeplay
+waitbarabs 5
+eventsstop
+eventscmp rec_notes.txt play_notes.txt
+tap PLAY
+wait 300
+expect takeplaying 0
+dump t9i_take_reboot.json
+echo done

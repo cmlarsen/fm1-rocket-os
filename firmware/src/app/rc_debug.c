@@ -12,8 +12,9 @@
  * own `rc_pat` (the .pool on the device), so a stress run cannot make the project dirty or autosave.
  *
  * The FM6 voice cap is the debug build's only lie: `tools/build.py` compiles a X0X_DEBUG=1 build
- * with -DENG_FM6_VOICES=8 (release stays 4), and a level's voice count is how many notes the CHORDS
- * chord holds. Level 2 holds exactly 4, so it measures what a release build would play. */
+ * with -DENG_FM6_VOICES=4 (the same as release; T9i r1 cut it from 6 once the 8-voice measurement
+ * was done), and a level's voice count is how many notes the CHORDS chord holds. Level 2 holds
+ * exactly 4, so it measures what a release build would play. */
 #include "rc_debug.h"
 #if defined(X0X_HOST) || (defined(X0X_DEBUG) && X0X_DEBUG)
 #include "plat.h"
@@ -40,8 +41,10 @@ typedef char rc_prof_n_fixed[(ENG_PROF_N == 9) ? 1 : -1];
 
 /* The generated song lives here, never in proj: the LIVE bridge copies it into its own song and
  * the X0X baseline points the sequencer at it. T10i: one pattern, not NPAT — live_bridge_map_n()
- * maps just it, so the debug build need not carry a full pattern array in the pool. */
-static pattern_t rc_pat X0X_POOL;
+ * maps just it, so the debug build need not carry a full pattern array in the pool. T9i r1: this
+ * debug-only buffer lives in .bss (not the pool), which frees the pool's 8 KiB headroom for the
+ * take after the FM6 array dropped to 4 voices. */
+static pattern_t rc_pat;
 
 /* The 909 / 808 track orders come from drum909.h / drum808.h (DR_* / D8_*, included above). */
 
@@ -92,8 +95,9 @@ static void rc_build_pattern(pattern_t *p)
 
 /* ------------------------------------------------------------------ LIVE --- */
 
-/* The stress chord: up to eight notes. Level 2 holds the first four (the release cap). */
-static const uint8_t RC_CHORD[8] = {48, 52, 55, 59, 62, 65, 69, 72};
+/* The stress chord: up to six notes (the debug array's cap, T9i). Level 2 holds the first four
+ * (the release cap). */
+static const uint8_t RC_CHORD[6] = {48, 52, 55, 59, 62, 65};
 
 /* Enter LIVE with the stress patterns: ui_live.c's live_enter, but the bridge maps rc_pat, not the
  * project. The UI switches to V_LIVE so the LEDs, the header and autosave behave as in LIVE. */
@@ -253,8 +257,8 @@ int rc_stress(int n, int cap)
     rc_launch_all();
     {
         int voices = (base == 4) ? (cap > 0 ? cap : 6) : 4;
-        if (voices > 8)
-            voices = 8;
+        if (voices > 6)
+            voices = 6;                              /* T9i: the debug array holds six */
         rc_hold_chord(voices);
     }
     if (base == 3) {
@@ -316,6 +320,7 @@ int rc_stats(uint32_t *out, int max)
     RC_PUT(0);
 #endif
     RC_PUT(plat_irq_stack_used());
+    RC_PUT((uint32_t)live_bridge_take_drops());   /* T9i r2: the take player's drop counter */
 #undef RC_PUT
     return n;
 }

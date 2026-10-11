@@ -1,0 +1,71 @@
+# T9i: recording again replaces the song's take; undo restores the previous one. Record take 1
+# (drum A), flush it, record take 2 (bass A), flush it, then HOME + REC: the take must be take 1
+# again (its event log matches).
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+# take 1: drum A
+tap REC
+tap PLAY
+wait-bar 1
+tapkey 0
+wait-bar 2
+tap REC
+wait-bar 2
+tap PLAY
+wait 400
+takedump take1.txt
+# T9i r1/B3: flush take1 by leaving LIVE (the save rides autosave)
+press PLAY
+wait 700
+release PLAY
+wait 4500
+expect songsaves 1
+expect takepend 0
+echo take1 flushed
+# re-enter LIVE; take 2: bass A
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap REC
+tap PLAY
+wait-bar 1
+tapkey 7
+wait-bar 2
+tap REC
+wait-bar 2
+tap PLAY
+wait 400
+takedump take2.txt
+# flush take2
+press PLAY
+wait 700
+release PLAY
+wait 22000
+expect songsaves 2
+expect takepend 0
+echo take2 flushed
+# re-enter LIVE; undo -> take 1
+press PLAY
+wait 700
+release PLAY
+wait 50
+press HOME
+tap REC
+release HOME
+wait 200
+expect takehas 1
+takedump take1b.txt
+eventscmp take1.txt take1b.txt
+dump t9i_take_replace.json
+echo undone

@@ -46,9 +46,14 @@
 #define TAKE_T_FX     14u
 #define TAKE_T_MARK   15u
 
-/* TAKE_LAUNCH: a = clip, b = how, c = role. TAKE_LAUNCH_STOP ignores a. */
-enum { TAKE_LAUNCH_QUEUE, TAKE_LAUNCH_NOW, TAKE_LAUNCH_STOP };
+/* TAKE_LAUNCH: a = clip, b = how, c = role. TAKE_LAUNCH_STOP ignores a.
+ * TAKE_LAUNCH_QUANT (S1): a Program Change launch, b = how, c = role | (quant << 8), so the replay
+ * uses the recorded quantize rather than the clip's own. */
+enum { TAKE_LAUNCH_QUEUE, TAKE_LAUNCH_NOW, TAKE_LAUNCH_STOP, TAKE_LAUNCH_QUANT };
 #define TAKE_LAUNCH(clip, how, role) TAKE_CMD(TAKE_T_LAUNCH, (clip), (how), (role))
+#define TAKE_LAUNCH_Q(clip, quant, role) \
+    TAKE_CMD(TAKE_T_LAUNCH, (clip), TAKE_LAUNCH_QUANT, \
+             ((uint32_t)(role) & 0xFFu) | (((uint32_t)(quant) & 3u) << 8))
 /* TAKE_MUTE: a = role, b = 0/1 */
 #define TAKE_MUTE(role, on)          TAKE_CMD(TAKE_T_MUTE, (role), (on), 0)
 /* TAKE_FX: a = punch FX id, b = 0 off / 1 on / 2 latch */
@@ -117,6 +122,7 @@ void take_arm(take_t *t, uint32_t now);                  /* start at the next ba
 void take_feed(take_t *t, uint32_t sample, uint32_t cmd);/* ISR: append one drained command */
 void take_stop(take_t *t, uint32_t now);                 /* request the end at the next boundary */
 void take_tick(take_t *t, uint32_t now);                 /* call every block: arm/stop, END here */
+void take_finish(take_t *t, uint32_t now);               /* T9i: end now, no bar wait (leaving LIVE) */
 
 /* ---- player -------------------------------------------------------------- */
 

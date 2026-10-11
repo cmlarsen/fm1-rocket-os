@@ -86,8 +86,8 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 | Echo throw | 0: it drives X0X's fxbus delay (send, feedback, synced time) instead of its own line |
 | `song_t` (the live song) | −14,352 |
 | TRAM: one shared `song_t` scratch for `song_io`'s open/clip-count and the store's recommit, not two | **+14,352** freed |
-| `take_t` | −16,436 |
-| Undo ring | −12,240 |
+| `take_t` (T9i: cut to 1,024 events, 8 KiB) | −8,244 |
+| Undo ring (T9i: cut to 11 entries, 6 KiB) | −5,856 |
 | T7b clip editor: the clip engine's per-role playing copy and launch staging (`clip_t play[5]` + `next[5]`) | −5,280 |
 | FM6 + NOISE state, moved to the pool if `.bss` is tight | about −3,000 |
 | TCLS: the delay line 1.0 s → 0.75 s (33,075 int16) | **+22,050** freed |

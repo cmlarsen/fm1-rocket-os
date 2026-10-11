@@ -45,7 +45,8 @@ ST_PROF0 = 9
 ST_PROF_N = 9
 ST_BSS, ST_POOL, ST_POOL_TOTAL, ST_IRQ = ST_PROF0 + ST_PROF_N, ST_PROF0 + ST_PROF_N + 1, \
     ST_PROF0 + ST_PROF_N + 2, ST_PROF0 + ST_PROF_N + 3
-ST_N = ST_IRQ + 1
+ST_TAKEDROP = ST_IRQ + 1                       # T9i r2: the take player's drop counter
+ST_N = ST_TAKEDROP + 1
 PROF = ["909", "808", "303A", "303B", "FX", "MASTER", "SEQ", "FM6", "NOISE"]
 HERE = os.path.dirname(os.path.abspath(__file__))
 # the FM-1's port name: the same names tools/fm1_install.py trusts (never probe other gear)

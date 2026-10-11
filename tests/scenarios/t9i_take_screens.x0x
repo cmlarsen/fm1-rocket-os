@@ -1,0 +1,42 @@
+# T9i screen goldens: LIVE 4 (recording: a red border, the REC chip and the elapsed bars, the
+# recorded knob marked), LIVE 10 (the take card) and LIVE 8 (the hold-to-clear ring).
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+# LIVE 4: recording a take
+tap REC
+tap PLAY
+wait-bar 1
+tapkey 0
+tapkey 7
+wait 900
+turn K1 6 60
+shot t9i_live4_recording.png
+tap REC
+wait-bar 2
+# LIVE 10: the take card (EDIT in LIVE)
+tap EDIT
+wait 300
+shot t9i_live10_take.png
+tap EDIT
+wait 200
+# LIVE 8: the clear-take ring (hold REC)
+press REC
+wait 750
+shot t9i_live8_clear.png
+release REC
+wait 100
+press PLAY
+wait 700
+release PLAY
+wait 50
+dump t9i_take_screens.json

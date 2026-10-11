@@ -46,7 +46,7 @@ O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/fxbus.c", "d
             "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c",
             "app/live_bridge.c", "app/midi_live.c", "app/song_io.c", "app/song_templates.c"]
 # the new core modules live at the repo root's core/, not under firmware/src
-CORE_UNITS = ["core/seq/clip_engine.c", "core/model/song_store.c", "core/model/undo_stack.c",
+CORE_UNITS = ["core/seq/clip_engine.c", "core/seq/take.c", "core/model/song_store.c", "core/model/undo_stack.c",
               "core/midi/midi_in.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
@@ -218,10 +218,11 @@ def build_app():
         v = os.environ.get(flag)    # unset: the default in firmware/src/x0x.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
-    # RC1p: the debug build's FM6 array is 8 so the stress command can raise the voice cap to 6/8
-    # without an eng_fm6.c change. A release build keeps eng_fm6.h's 4 (see the probe docs).
+    # RC1p/T9i r1: the debug build's FM6 array was 6 so the stress command could raise the voice cap to
+    # 6; the r1 pool fix drops it to eng_fm6.h's release 4 (the 8- and 6-voice measurements are done)
+    # and the stress content moves to .bss, so the debug pool keeps its 8 KiB headroom.
     if os.environ.get("X0X_DEBUG") == "1":
-        flags.append("-DENG_FM6_VOICES=8")
+        flags.append("-DENG_FM6_VOICES=4")
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DX0X_VERSION="{VERSION}"')

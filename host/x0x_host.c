@@ -324,6 +324,9 @@ static int rc_host_words;                            /* fields the last `stats` 
  * b:8 | c:12, type 0..7 = a parameter's target (engine.h T_*), 8 = a drum note, 9 = a bass note
  * on, 10 = a bass note off. */
 static FILE *events_log;
+static int events_notes_only;            /* T9i: `eventsnotes` logs notes only, relative to the first */
+static int events_rel;
+static uint32_t events_base;
 static uint32_t bar_count;               /* the 909's wraps since the transport started */
 static uint32_t boffs;                   /* T7a: note-offs the tap has seen (leaving LIVE releases) */
 static uint8_t bass_on[2];               /* T7a r2: the 303 gates the tap has seen stick (expect bassheld) */
@@ -337,6 +340,13 @@ static void host_engine_tap(uint32_t sample, uint32_t cmd)
     uint32_t type = cmd >> 28, a = (cmd >> 20) & 0xFFu, b = (cmd >> 12) & 0xFFu, v = cmd & 0xFFFu;
     if (!events_log)
         return;
+    if (events_notes_only && type != 8u && type != 9u && type != 10u)
+        return;                                        /* T9i: the note/drum stream, for rec vs replay */
+    if (events_rel) {
+        if (!events_base)
+            events_base = sample;
+        sample -= events_base;
+    }
     switch (type) {
     case 8:  fprintf(events_log, "%u drum %u %u %u\n", sample, a, b, v); break;
     case 9:
@@ -781,7 +791,29 @@ static int expect(const char *what, const char *val)
         got = live_bridge_stop_queued(atoi(what + 8) % LIVE_NROLES);
     } else if (!strncmp(what, "liveused", 8)) {     /* liveusedC: the clip slot C holds a clip */
         got = live_bridge_clip_used(atoi(what + 8) % (int)LIVE_NCLIPS);
-    } else if (!strcmp(what, "sample"))            /* frames rendered since boot */
+    } else if (!strcmp(what, "takestate"))         /* T9i: 0 idle, 1 armed, 2 rec, 3 play */
+        got = live_bridge_take_state();
+    else if (!strcmp(what, "takerec"))             /* T9i: recording (state 2) */
+        got = live_bridge_take_recording();
+    else if (!strcmp(what, "takearmed"))
+        got = live_bridge_take_armed();
+    else if (!strcmp(what, "takeplaying"))
+        got = live_bridge_take_playing();
+    else if (!strcmp(what, "takefull"))
+        got = live_bridge_take_full();
+    else if (!strcmp(what, "takehas"))
+        got = live_bridge_take_has();
+    else if (!strcmp(what, "taken"))
+        got = live_bridge_take_nevents();
+    else if (!strcmp(what, "takebars"))
+        got = live_bridge_take_bars();
+    else if (!strcmp(what, "takelen"))
+        got = (int)live_bridge_take_length_samples();
+    else if (!strcmp(what, "takedrops"))           /* T9i r2: launches dropped for a missing copy */
+        got = live_bridge_take_drops();
+    else if (!strcmp(what, "takepend"))            /* T9i: a take store write is queued */
+        got = song_io_take_pending();
+    else if (!strcmp(what, "sample"))            /* frames rendered since boot */
         got = (int)host_sample;
     else if (!strcmp(what, "pattern"))
         got = seq.ppat[PART_909] + 1;
@@ -1850,6 +1882,14 @@ int main(int argc, char **argv)
                 printf("FAIL keyblink %s: not blinking (on=%d off=%d)\n", a, on, off);
                 fails++;
             }
+        } else if (!strcmp(cmd, "waitbarabs")) {         /* T9i: run until bar_count reaches N */
+            uint32_t target = (uint32_t)atoi(a), guard = 0;
+            while (bar_count < target && guard++ < 120000u)
+                run_ms(1);
+            if (bar_count < target) {
+                printf("FAIL waitbarabs %s: bar_count %u\n", a, bar_count);
+                fails++;
+            }
         } else if (!strcmp(cmd, "wait-bar")) {           /* run until N bar boundaries have passed */
             uint32_t target = bar_count + (uint32_t)atoi(a), guard = 0;
             while (bar_count < target && guard++ < 120000u)
@@ -1866,18 +1906,98 @@ int main(int argc, char **argv)
                 return 2;
             }
             engine_tap = host_engine_tap;
+            events_notes_only = events_rel = 0;
             {
                 int t;
                 for (t = 0; t < NPARTS; t++)             /* no stale cue from before */
                     prev_pcue[t] = seq.pcue[t];
             }
             prev_mute = seq.mute;
+        } else if (!strcmp(cmd, "eventsnotes")) {        /* T9i: notes only, relative to the first */
+            snprintf(out, sizeof out, "%s/%s", dir, a);
+            events_log = fopen(out, "w");
+            if (!events_log) {
+                printf("line %d: cannot write %s\n", lineno, out);
+                return 2;
+            }
+            events_notes_only = 1;
+            events_rel = 1;
+            events_base = 0;
+            engine_tap = host_engine_tap;
+        } else if (!strcmp(cmd, "eventscmp")) {          /* T9i: two event logs must match line for line */
+            char pa[400], pb[400];
+            FILE *f1, *f2;
+            snprintf(pa, sizeof pa, "%s/%s", dir, a);
+            snprintf(pb, sizeof pb, "%s/%s", dir, b);
+            f1 = fopen(pa, "r");
+            f2 = fopen(pb, "r");
+            char l1[512], l2[512];
+            int line = 0, diff = 0;
+            if (!f1 || !f2) {
+                printf("FAIL eventscmp: cannot read %s / %s\n", pa, pb);
+                fails++;
+            } else {
+                for (;;) {
+                    char *r1 = fgets(l1, sizeof l1, f1), *r2 = fgets(l2, sizeof l2, f2);
+                    line++;
+                    if (!r1 && !r2)
+                        break;
+                    if (!r1 || !r2 || strcmp(l1, l2)) {
+                        printf("FAIL eventscmp %s vs %s: line %d: %s vs %s\n", a, b, line,
+                               r1 ? l1 : "<end>", r2 ? l2 : "<end>");
+                        diff = 1;
+                        break;
+                    }
+                }
+                fclose(f1);
+                fclose(f2);
+                if (!diff)
+                    printf("  ok eventscmp %s == %s\n", a, b);
+                else
+                    fails++;
+            }
+        } else if (!strcmp(cmd, "takefill")) {           /* T9i: feed N FM6 notes to fill the buffer */
+            int n = atoi(a), k;
+            for (k = 0; k < n; k++) {
+                engine_note_on(PART_FM6, 40 + (k % 12), 100);
+                engine_note_off(PART_FM6, 40 + (k % 12));
+                run_ms(7);
+            }
+        } else if (!strcmp(cmd, "takearm")) {
+            live_bridge_take_arm();
+        } else if (!strcmp(cmd, "takestop")) {
+            live_bridge_take_stop();
+        } else if (!strcmp(cmd, "takeplay")) {
+            live_bridge_take_play();
+            bar_count = 0;                      /* the pass restarts the transport at bar 0 */
+            live_was_playing = 0;
+            live_prev_bar = 0;
+        } else if (!strcmp(cmd, "takedump")) {           /* T9i: the take's log, offset + raw command */
+            const uint32_t *ev = (const uint32_t *)live_bridge_take_events();
+            int k, n = live_bridge_take_nevents();
+            char p2[400];
+            FILE *tf;
+            snprintf(p2, sizeof p2, "%s/%s", dir, a);
+            tf = fopen(p2, "w");
+            if (!tf) {
+                printf("line %d: cannot write %s\n", lineno, p2);
+                return 2;
+            }
+            fprintf(tf, "len %u bars %d bpm %u n %d drops %d\n", live_bridge_take_length_samples(),
+                    live_bridge_take_bars(), (unsigned)live_bridge_take_bpm_x10(), n,
+                    live_bridge_take_drops());
+            for (k = 0; k < n; k++)
+                fprintf(tf, "%u %08x\n", ev[k * 2u], ev[k * 2u + 1u]);
+            fclose(tf);
+        } else if (!strcmp(cmd, "takeclear")) {
+            song_io_take_request_clear();
         } else if (!strcmp(cmd, "eventsstop")) {
             if (events_log) {
                 fclose(events_log);
                 events_log = 0;
             }
             engine_tap = 0;
+            events_notes_only = events_rel = 0;
         } else if (!strcmp(cmd, "expect")) {
             if (!strcmp(a, "key"))
                 fails += expect_key(b, c);               /* expect key K LEVEL */

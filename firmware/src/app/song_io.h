@@ -111,10 +111,20 @@ int  song_io_undo_depth(void);
 int  song_io_undo_pos(void);
 int  song_io_redo_clip(void);           /* the clip the next redo touches, -1 none */
 
-/* Takes (T9i): the model's `take_hdr_t *` / `take_event_t *`, passed as void here. Nothing calls
- * them yet. */
+/* Takes (T9i): the model's `take_hdr_t *` / `take_event_t *`, passed as void here. The in-RAM
+ * take lives in live_bridge (`live_bridge_take_hdr()` and friends); song_io reads it to store it
+ * and writes it back on load/undo. `song_io_take_save`/`_load` are the raw store calls. */
 int song_io_take_save(int slot, const void *hdr, const void *ev);
 int song_io_take_load(int slot, void *hdr, void *ev, uint32_t max_events);
+
+/* T9i: a finished recording (or a clear) marks the take for the next flush; the store write is
+ * deferred until the transport is stopped and quiet, like the song (project_save -> song_io_flush). */
+void song_io_take_request_save(void);          /* a recording finished: the in-RAM take is the song's */
+void song_io_take_request_clear(void);         /* the clear gesture: on the next flush, store the empty take */
+int  song_io_take_pending(void);               /* a take store write is queued */
+int  song_io_take_flush(void);                 /* the deferred store write (called by song_io_flush) */
+int  song_io_take_load_ram(void);              /* the song's stored take into live_bridge's buffer */
+int  song_io_take_loaded_ram(void);            /* 1 while the in-RAM take holds the song's take */
 
 /* ---- T8i: the songs list and its CRUD (a block separate from T7a/T7b's clip API) ------- */
 /* The SONGS view reaches the store only through these, via the songs_ops_t table in
