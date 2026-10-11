@@ -107,6 +107,7 @@ static uint16_t live_footer(const char **a, const char **b, const char **c);
 /* the runner (host/x0x_host.c) reads the layer and the focused role through these */
 int  live_layer(void);
 int  live_focus(void);
+int  live_fx_layer(void);                    /* T10i: the FX layer is showing */
 
 /* ============================================================ T7a: STUDIO === */
 /* ui_studio.c is included near the bottom (after ui_live.c). The song home is the default view:
@@ -4244,6 +4245,7 @@ void ui_frame(void)
 {
     uint32_t i;
     input();
+    engine_perform_tick();                          /* T10i: the echo controller's targets */
     studio_tick();                                  /* T7a: the clear / copy hold timers */
     undo_tick();
     autosave();

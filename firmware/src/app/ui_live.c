@@ -31,6 +31,32 @@ static int live_holding(void) { return live.holding != 0; }
 int live_layer(void) { return live.layer; }
 int live_focus(void) { return live.focus; }
 
+/* ---- T10i: the FX layer ------------------------------------------------- *
+ * FX held (or double-tapped) turns the first six lower keys into the six punch FX and the upper
+ * keys into role mutes. A key tap latches an effect, a hold is momentary. The FX button released
+ * returns to the layer underneath; latched effects stay on. HOME + FX resets every effect. The
+ * perform state itself lives in engine.c (the pool); the lightest UI state — which keys are down,
+ * and the double-tap latch — lives here. */
+#define LIVE_FX_TAP_MS 250u          /* a tap (latch) vs a hold (momentary) */
+#define LIVE_FX_DBL_MS 320u          /* two FX taps inside this latch the FX layer on */
+static uint8_t fx_held;              /* the FX button is down */
+static uint8_t fx_layer_latch;       /* double-tapped: the FX layer stays on */
+static uint32_t fx_press_t, fx_last_tap;
+static uint32_t fx_key_t[6];         /* each FX key's press time */
+static uint8_t fx_key_dn[6];         /* the key is down (the effect is momentary) */
+static uint8_t fx_key_used[6];       /* the key went down in the FX layer: its release is ours */
+
+static int fx_layer_active(void) { return fx_held || fx_layer_latch; }
+int live_fx_layer(void) { return fx_layer_active(); }
+static void live_fx_reset_ui(void)
+{
+    int i;
+    fx_held = fx_layer_latch = 0;
+    fx_press_t = fx_last_tap = 0;
+    for (i = 0; i < 6; i++)
+        fx_key_dn[i] = fx_key_used[i] = 0;
+}
+
 /* T7a round 2: the held-note table lives in the shared key path (ui.c), so a key's note is tracked
  * per key whatever the layer/focus/octave does, and a release (or a view/mode change) always
  * releases what that key started. */
@@ -45,6 +71,9 @@ static void live_enter(void)
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
     note_release_all();                   /* T7a r2: changing mode releases every held note */
+    live_fx_reset_ui();                   /* T10i: a fresh LIVE starts with no FX layer open */
+    engine_perform_reset();               /* T10i: and no effect left from a previous visit */
+    live_bridge_mute_all(0);              /* T10i: and no mute */
     ui.classic = 0;                       /* LIVE is the clip engine, wherever it was entered from */
     live_bridge_enter(&proj.pat[0], 0);   /* T7a: make the clip engine the source; it does not
                                            * rebuild and does not reset the transport, so clips keep
@@ -56,6 +85,9 @@ static void live_enter(void)
 static void live_leave(void)
 {
     note_release_all();                   /* T7a D1/r2: leaving LIVE releases every held note */
+    live_fx_reset_ui();                   /* T10i: the FX layer closes */
+    engine_perform_reset();               /* T10i: leaving LIVE releases every effect */
+    live_bridge_mute_all(0);              /* T10i: and clears every mute */
     if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
         ui.classic = 1;
         live_bridge_exit();
@@ -108,8 +140,56 @@ static void live_play_tick(uint32_t btn)
 
 /* ---- the keys ---- */
 
+/* ---- the FX layer's keys: the six effects and the role mutes ---- */
+
+static const char *const LV_FX_L1[6] = {"REPEAT", "REPEAT", "TAPE", "FILTER", "ECHO", "FREEZE"};
+static const char *const LV_FX_L2[6] = {"1/8", "1/16", "STOP", "DIVE", "THROW", ""};
+
+static void live_fx_key(int k, int down)
+{
+    if (down) {
+        fx_key_t[k] = plat_ms();
+        fx_key_dn[k] = 1;
+        fx_key_used[k] = 1;
+        if (!engine_perform_latched(k))
+            engine_perform_engage(k, 0);          /* hold: momentary (a tap latches on release) */
+    } else {
+        fx_key_used[k] = 0;
+        if (fx_key_dn[k]) {
+            uint32_t dt = plat_ms() - fx_key_t[k];
+            fx_key_dn[k] = 0;
+            if (dt < LIVE_FX_TAP_MS)
+                engine_perform_engage(k, 1);      /* a tap: latch it, or unlatch a latched one */
+            else if (!engine_perform_latched(k))
+                engine_perform_release(k);        /* a hold that ended: back off */
+        }
+    }
+}
+
+static void live_fx_mute(int role)
+{
+    int on = !live_bridge_muted((uint8_t)role);
+    live_bridge_mute((uint8_t)role, on);
+    say(on ? "MUTE " : "UNMUTE ", LV_ROLE_L[role]);
+}
+
 static int live_handle_key(int k, int down)
 {
+    /* an FX key's release is ours even if the layer closed while it was held */
+    if (k >= 0 && k < 6 && fx_key_used[k] && !down) {
+        live_fx_key(k, 0);
+        return 1;
+    }
+    if (fx_layer_active()) {              /* T10i: FX held: keys 0-5 punch, upper keys mute */
+        if (k >= 0 && k < 6) {
+            if (down)
+                live_fx_key(k, 1);
+        } else if (k >= 16 && k < 16 + LIVE_NROLES) {
+            if (down)
+                live_fx_mute(k - 16);
+        }
+        return 1;                          /* the other keys are inert while FX is showing */
+    }
     if (!down)
         return 1;                         /* the release is done by the shared table (ui.c) */
     if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, chromatically */
@@ -169,9 +249,51 @@ static int live_handle_button(int b)
 
 /* ---- the encoders: ALGORITHM steps the focused role; K1-K4 are the LIVE performance knobs ---- */
 
+/* T10i: the FX button's edges. Held: the FX layer. Double-tapped: the layer latches on. A tap on
+ * a held effect key latches the effect; releasing FX ends any momentary effect and returns to the
+ * layer underneath (latched effects stay on, in perform's own state). HOME + FX resets. */
+static void live_fx_button(void)
+{
+    int down = (ui.btn & (1u << B_FX)) != 0;
+    uint32_t now = plat_ms();
+    if (down && !fx_held) {
+        fx_held = 1;
+        ui.btn_used |= 1u << B_FX;                 /* the release must not also act */
+        if (ui.btn & (1u << B_HOME)) {
+            ui.btn_used |= 1u << B_HOME;
+            engine_perform_reset();                /* HOME + FX: every effect off */
+            fx_held = 0;                           /* the reset press does not open the layer */
+            say("FX RESET", 0);
+        } else {
+            fx_press_t = now;
+            say("FX", 0);
+        }
+    } else if (!down && fx_held) {
+        uint32_t dt = now - fx_press_t;
+        int i;
+        fx_held = 0;
+        for (i = 0; i < 6; i++)                    /* a held (momentary) effect ends with the layer */
+            if (fx_key_dn[i]) {
+                if (!engine_perform_latched(i))
+                    engine_perform_release(i);
+                fx_key_dn[i] = 0;
+            }
+        if (dt < LIVE_FX_TAP_MS) {                 /* a tap */
+            if (now - fx_last_tap < LIVE_FX_DBL_MS) {
+                fx_layer_latch = (uint8_t)!fx_layer_latch;   /* a double tap latches the layer */
+                fx_last_tap = 0;
+                say(fx_layer_latch ? "FX ON" : "FX OFF", 0);
+            } else {
+                fx_last_tap = now;
+            }
+        }
+    }
+}
+
 static void live_input(void)
 {
     int i, e, pgi = cur_page();
+    live_fx_button();
     for (i = 0; i < NE; i++) {
         e = (int)enc(i);
         if (i == EN_ALGO && e) {
@@ -193,6 +315,22 @@ static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
     int k;
     if (live_bridge_transport_playing())
         *btn |= 1u << B_PLAY;
+    if (fx_layer_active()) {                           /* T10i: the six punches and the role mutes */
+        int i;
+        for (i = 0; i < 6; i++) {
+            if (engine_perform_latched(i) || fx_key_dn[i])
+                *key |= 1u << i;                       /* active: latched or held */
+            else
+                *dim |= 1u << i;
+        }
+        for (i = 0; i < LIVE_NROLES; i++) {
+            if (live_bridge_muted((uint8_t)i))
+                *key |= 1u << (16 + i);                /* the upper keys: a muted role lit */
+            else
+                *dim |= 1u << (16 + i);
+        }
+        return;
+    }
     if (live.layer == LIVE_PLAY)
         *btn |= 1u << B_SEL;                               /* the SCL LED: off = PADS, lit = PLAY */
     for (k = 0; k < NKEYS; k++) {
@@ -236,7 +374,9 @@ static void live_draw_header(void)
     w = tw(&AF_S, "LIVE") + 10;
     box(4, 3, w, 14, TOK_THEME);
     cv_text(4 + 5, vc(&AF_S, 3, 14), &AF_S, "LIVE", C_BLACK);
-    cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S, live.layer == LIVE_PADS ? "PADS" : "PLAY", TOK_MID);
+    cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
+            fx_layer_active() ? "FX" : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
+            fx_layer_active() ? TOK_ACCENT : TOK_MID);
     x = 104;
     if (playing)
         play_icon(x, 4, C_WHITE);
@@ -263,7 +403,10 @@ static void live_draw_header(void)
 static uint16_t live_footer(const char **a, const char **b, const char **c)
 {
     *a = *b = *c = 0;
-    if (live.layer == LIVE_PLAY) {
+    if (fx_layer_active()) {
+        *a = "tap latch hold moment";
+        *b = "HOME+FX reset";
+    } else if (live.layer == LIVE_PLAY) {
         static char t[24];
         char *q;
         q = put_s(t, "keys play ");
@@ -383,9 +526,34 @@ static void live_draw_play(int band)
     }
 }
 
+/* ---- the FX layer: the six punch cells (LIVE 6) ---- */
+
+static void live_draw_fx(int band)
+{
+    int i;
+    for (i = 0; i < 3; i++) {
+        int idx = band * 3 + i;
+        int cx = 3 + i * 78, cy = 3, w = 74, h = BAND_H - 6;
+        int lat = engine_perform_latched(idx);
+        int hold = fx_key_dn[idx];
+        int act = lat || hold;
+        uint16_t bg = !act ? TOK_SURF : lat ? dim(TOK_ACCENT, 5) : dim(TOK_THEME, 5);
+        uint16_t fg = !act ? TOK_MID : lat ? TOK_ACCENT : TOK_THEME;
+        box(cx, cy, w, h, bg);
+        frame(cx, cy, w, h, act ? fg : TOK_LINE);
+        text_c(cx + w / 2, vc(&AF_S, cy + 6, 12), &AF_S, LV_FX_L1[idx], fg);
+        if (LV_FX_L2[idx][0])
+            text_c(cx + w / 2, vc(&AF_M, cy + 20, 18), &AF_M, LV_FX_L2[idx], fg);
+        text_c(cx + w / 2, vc(&AF_S, cy + h - 13, 10), &AF_S,
+               lat ? "LATCH" : hold ? "HOLD" : "OFF", act ? fg : TOK_DIM);
+    }
+}
+
 static void live_draw(int band)
 {
-    if (live.layer == LIVE_PLAY)
+    if (fx_layer_active())
+        live_draw_fx(band);
+    else if (live.layer == LIVE_PLAY)
         live_draw_play(band);
     else
         live_draw_pads(band);
