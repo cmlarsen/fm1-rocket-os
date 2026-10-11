@@ -152,6 +152,8 @@ The keyboard splits at its natural gaps, the places where two lower keys meet wi
   - HOME+FX resets everything.
 - **K1–K4 changes you didn't record revert** when you leave LIVE.
 
+**SONGS is a stopped view (2026-10-11).** Opening SONGS stops the transport. PLAY, HOME+PLAY and REC do nothing there, so song files are only written while everything is silent. Clip undo belongs to one song: opening another song starts a fresh undo history, and HOME+REC in SONGS undoes the last song delete.
+
 ## STUDIO tasks (R15)
 | Task | Gesture |
 |---|---|
