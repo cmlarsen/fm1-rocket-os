@@ -104,5 +104,6 @@ Reviews found hung notes in T3, T7a and T7a's re-review, each through a differen
 - **Every note a key starts lives in one held-note table.** Releasing the key releases that note, whatever view is showing.
 - **Every view, layer or mode change releases what is still held.**
 - **Every audio-source handoff calls `engine_all_off`.**
+- **On monophonic parts (the 303s),** releasing a key silences the part only if that key's note is the one sounding (legato). Polyphonic engines release per note.
 
 Task **T2c (UI fuzz)** enforces this. The host runner plays random sequences of key, button and encoder events across every view and mode, then releases all inputs and stops the transport. After the release tail, the engine must report zero active voices on every engine. It runs in `make check`.
