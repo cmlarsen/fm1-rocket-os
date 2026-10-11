@@ -182,6 +182,13 @@ static void r2_b1_play_race_test(void)
     live_bridge_take_init();
     live_bridge_enter(pats, 1200u);
     g_now = 0;
+    /* Prime play[DRUMS] with a DIFFERENT clip (2), so a corrupt apply of clip 0 is detectable by
+     * the invariant probe (take_play's reset clears cur[] but not play[]). */
+    live_bridge_transport_start();
+    live_bridge_launch_now(2);
+    live_bridge_render(12000u, 0);
+    CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 2);
+
     ev = (uint32_t *)live_bridge_take_events_mut();
     ev[0] = 0u;      ev[1] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
     ev[2] = 400000u; ev[3] = TAKE_MARK_END;

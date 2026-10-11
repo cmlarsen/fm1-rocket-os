@@ -201,3 +201,109 @@ The debug pool is freed with debug-only levers: `tools/build.py` drops the debug
 from 6 to 4 and `rc_debug.c`'s `rc_pat` moves from `.pool` to `.bss` (both measurement-only; no
 user-facing buffer was cut). `TAKE_MAX_EVENTS`, the perform history and the delay line are
 unchanged.
+
+## r2: the Opus re-review findings on fdbfa34
+
+B1's r1 fix (the take sink never pushes a ring or reads `song->clip[]`) holds and is kept. r2 adds
+the hard invariant, fixes the four remaining race/ordering holes, and turns "replay silently
+diverges" into "a launch is dropped and counted".
+
+### The hard invariant
+
+`cur[role]` and `play[role]` always describe the same clip. `clip_engine_take_launch()` queues a
+launch only when its staged copy is in `next[role]` (`next_set[role] && next_clip[role] == clip`);
+otherwise it drops the launch, leaves `cur`/`play` untouched, and bumps `take_drop`.
+`apply_role()` enforces the same at the boundary: it swaps `next -> play` and sets `cur` together, or
+drops. The counter is visible in the take report (`takedump`'s header, and a `expect takedrops`
+query) and in `rc_debug`'s ED_STATS (`RC_ST_TAKEDROP`, `tools/rc_probe.py` updated).
+
+### Blockers
+
+- **1 — the `take_play` race.** `live_bridge_take_play` now resets the transport, starts the take,
+  holds the take's tempo and stages the offset-0 prelude launches **inside one `engine_crit` section,
+  before `playing = 1`**. The main loop can no longer publish PLAY before the staged copy exists, so
+  the first ISR block fires the prelude launches against valid copies. (fdbfa34 staged after the
+  critical section.) The false "the ISR never sees PLAY before … a stale staged copy" comment is
+  rewritten. Test: `unit-live`'s `r2_b1_play_race_test` (the hook fires the ISR at the play point).
+- **2 — the recorded tempo never replayed.** `clip_engine_take_bpm()` now sets a take-owned hold
+  (`bpm_take_on`); the render's song-tempo check must not clobber the take while it is on, and an
+  edit to `song->bpm_x10` mid-replay is ignored. `clip_engine_take_bpm_hold()` arms the hold at
+  `take_play` and `clip_engine_take_bpm_clear()` restores the song's tempo at the take's end and at
+  `live_bridge_take_stop_play` (both ISR-safe: no ring). Test: `unit-live`'s `r2_b2_tempo_test`.
+
+### Should-fix
+
+- **3 — one `next[]` slot per role.** `live_bridge_take_stage` now stages a recorded launch only once
+  its event is within `TAKE_STAGE_MARGIN` (`CLIP_ENGINE_FS / 32`, ~two UI frames) of the replay
+  playhead, instead of staging the first launch after `play_i` however far off (fdbfa34). A later
+  launch for the same role therefore no longer overwrites the copy of a queued launch that has not
+  applied yet, and a launch that is genuinely missed is dropped by the invariant rather than
+  corrupting `play[]`. The recorded launch now also carries its quantize in the event
+  (`live_bridge_launch` posts `TP_LAUNCH_Q`), so `clip_engine_take_launch`'s `quant == 0xFF` path no
+  longer reads `next[role].quant` from a since-overwritten copy. Test:
+  `unit-live`'s `r2_s3_next_stage_test` (A queued at the bar, then NOW-B; B must play from B's copy).
+- **4 — `take_finish` from the main loop was unmasked.** `live_bridge_take_finish` (and so
+  `live_bridge_take_live(0)`, `live_bridge_transport_restart`/`_continue`) now runs `take_finish`
+  inside `engine_crit`, so an ISR `take_feed` cannot land between `ended = 1` and `state = IDLE` and
+  clobber the END mark or `n`. Test: `unit-live`'s `r2_s4_finish_race_test` (the hook runs the ISR
+  at that exact window inside `take_end`).
+- **5 — S6 failed with a full undo ring.** The pending take is now ordered by a monotonic position
+  stamp `undo_stack_serial()` = `base_ser + cur` (bumped even when the full ring drops the oldest
+  entry, where `cur` alone saturates), not by `undo.cur`. A newer clip edit is undone first; the take
+  goes when nothing newer is above it. Test: `song_io_test`'s `test_take_undo_order_full_ring`.
+- **6 — race tests did not model preemption.** A host-only hook runs the ISR at injected points
+  inside the main-loop take functions: `live_bridge_test_hook` (at the `take_play` PLAY point and
+  between `take_stage` roles) and `take_test_hook` (inside `take_end`). The handler models a real
+  IRQ: it does nothing while `plat_crit_active()` (which is why the fixes hold), else runs one audio
+  block's ISR half or a single ISR feed. `unit-live` now links `host/plat_crit_host.c` so the
+  critical section is the nest-safe host model. `live_bridge_test_consistent()` is the invariant
+  probe (cur/play byte-for-byte).
+
+### NITs
+
+- `ui_live.c`'s take-card role parse masks the role with `0xFF` (a Program Change launch carries its
+  quantize in bits 8-9, so `quant > 0` no longer hid the lane).
+- MIDI Start/Continue during take playback now stop the take playback cleanly first
+  (`live_bridge_take_stop_play`) before the transport restart/continue, so there is no desync.
+- `rc_debug.c`'s header comment says the debug FM6 cap is 4 (it was cut from 6 in r1), matching
+  `tools/build.py`.
+
+### Proof the race tests fail on fdbfa34
+
+The three race tests are written against the fix. To show they catch the reviewed behaviour, the
+fix hunks were temporarily reverted to fdbfa34's semantics (staging after the `engine_crit` in
+`take_play`; no invariant in `take_launch`; unconditional `cur` in `apply_role`; `take_bpm` setting
+only `bpm_src`; `take_finish` unmasked; the "que owns" staging), the tests rebuilt, and reverted
+with `git checkout`. `make unit-live` then reports:
+
+```
+FAIL tests/host/live_bridge_test.c:201 live_bridge_test_consistent()   # r2_b1
+FAIL tests/host/live_bridge_test.c:229 live_bridge_bpm_x10() == 1400u  # r2_b2
+FAIL tests/host/live_bridge_test.c:231 live_bridge_bpm_x10() == 1400u  # r2_b2
+FAIL tests/host/live_bridge_test.c:270 live_bridge_test_consistent()   # r2_s3
+FAIL tests/host/live_bridge_test.c:295 live_bridge_take_nevents() == n0 + 1  # r2_s4
+```
+
+(The S5 test similarly fails when `song_io_undo`'s condition is put back to `undo.cur <=
+take_pending_cur`: `FAIL tests/host/song_io_test.c:467 song_io_take_pending()`.) With the fix in
+place all pass, and the t9i scenarios' `eventscmp` is still exact (the recorded launch encoding
+changed from `TAKE_LAUNCH_QUEUE` to `TAKE_LAUNCH_QUANT` with the same quantize, so the replayed
+sample stream is unchanged; only `takedump`'s header gains `drops 0`).
+
+### RAM
+
+| build | pool | spare | margin over 8 KiB |
+|---|---|---|---|
+| release | 335,564 / 344,064 | **8,500** | 308 |
+| debug (`X0X_DEBUG=1`) | 335,564 / 344,064 | **8,500** | 308 |
+
+r2 adds only bookkeeping: `clip_engine_t` grows by `bpm_take_on` + `take_drop` and
+`undo_stack_t` by `base_ser` (8 B total). No FIFO/copy was added — the lookahead staging reuses the
+existing one `next[role]` slot — so no user-facing buffer was touched. Both builds keep the 8 KiB
+rule.
+
+### Ladder
+
+`make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass on the committed
+tree, and `tools/check_loader.sh` is ok on both packages (release and debug). Nothing was flashed.
+

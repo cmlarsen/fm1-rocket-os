@@ -583,13 +583,16 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
     } else {
         /* T9i r2/B1: the hard invariant. Only a target whose staged copy is present may become
          * cur[role]; the ISR never sets cur without swapping the matching play[] copy in. If the
-         * staging is missing (a missed window), drop the launch and keep cur/play consistent. */
+         * staging is missing (a missed window), drop the launch, count it, and keep cur/play
+         * consistent. */
         if (e->next_set[role] && e->next_clip[role] == target) {   /* T7b: next -> play swap */
             e->play[role] = e->next[role];
             e->next_set[role] = 0;
             e->cur[role] = target;
             e->pos[role] = 0;
             ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
+        } else {
+            e->take_drop++;
         }
     }
 }

@@ -8,7 +8,7 @@ tap SEL
 
 # ED_STATS is well formed from a cold boot, and stress 0 is a no-op
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect stressactive 0
 
@@ -22,7 +22,7 @@ peakreset
 wait-bar 2
 expect peak_db_min -40
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect stressactive 0
 expect playing 0
@@ -46,7 +46,7 @@ peakreset
 wait-bar 1
 expect peak_db_min -30
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect liveactive 0
 expect mode 0
@@ -59,7 +59,7 @@ expect liveactive 1
 expect stresslevel 3
 expect fm6voices 4
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect liveactive 0
 
@@ -71,7 +71,7 @@ expect liveactive 1
 expect stresslevel 4
 expect fm6voices 4
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect liveactive 0
 expect guard 0
@@ -85,7 +85,7 @@ expect stresslevel 5
 expect core2forced 1
 expect fm6voices 4
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect liveactive 0
 expect core2forced 0
@@ -97,7 +97,7 @@ expect stresslevel 6
 expect core2forced 1
 expect playing 1
 stats
-expect statswords 22
+expect statswords 23
 stress 0
 expect playing 0
 expect core2forced 0
