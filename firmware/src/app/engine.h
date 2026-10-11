@@ -8,10 +8,12 @@
  * the UI pages, the project file and the command queue use:
  *   T_909 / T_808   voice = track 0..10, or DR_KIT / D8_KIT (= 11) for the kit
  *   T_303           voice = 0 / 1 (303 A / B)
- *   T_RSV           reserved: the removed part's slot, kept so sound_t's size (and the
- *                   stored sound) is unchanged
+ *   T_RSV           the two engine-only parts (T5i): voice 0 = FM6, voice 1 = NOISE; the index is the
+ *                   adapter's own 0..7 (FM6 ALG/FB/MLVL/MRAT/MEG/VMOD/DTUN/SLOT, NOISE
+ *                   MODE/COLR/FREQ/RES/TRK/DENS/DRFT/CRSH). FM6's signed macros are a pot offset so
+ *                   they fit X0X's 0..max pots; SLOT is the raw SLOT number.
  *   T_FX            voice 0: fxbus.h params (reverb, delay, master drive / comp)
- *   T_MIX           voice = part 0..3: Level, Rev send, Dly send (drums: on top of the per-voice sends)
+ *   T_MIX           voice = part 0..5 (T5i: 4 and 5 are FM6 and NOISE), Level, Rev send, Dly send, Pan
  *   T_MST           voice 0: master filter + limiter
  */
 #pragma once
@@ -23,7 +25,11 @@
 enum { T_909, T_808, T_303, T_RSV, T_FX, T_MIX, T_MST, NTARGETS };
 #define T_PROB NTARGETS                /* a lane's pseudo-target: a step's chance, 5..100 % (not in sound_t);
                                         * voice = part << 4 | drum track (0 on the 303s) */
+/* X0X's four sequenced parts: the sequencer (NTRACKS), the UI and the stored project are built on
+ * NPARTS, so it must stay 4. T5i's two parts (FM6, NOISE) are engine-only: the mixer, the dispatch
+ * and the render know them (ENG_NPARTS), but no part table or stored format changes. */
 enum { PART_909, PART_808, PART_303A, PART_303B, NPARTS };
+enum { PART_FM6 = NPARTS, PART_NOISE, ENG_NPARTS };
 /* T_MIX, per part: level, reverb send, delay send, pan (64 = centre) */
 enum { MX_LEVEL, MX_REV, MX_DLY, MX_PAN, MX_NPARAMS };
 #define NVOICES_MAX 12                 /* a drum machine: 11 tracks + the kit */
@@ -37,13 +43,14 @@ typedef struct {
 typedef char sound_size_fixed[(sizeof(sound_t) == 1344) ? 1 : -1];
 
 extern seq_t seq;                      /* the sequencer (its pattern pointer is the project's) */
-/* render stages (the PERF screen): 909, 808, 303 A, 303 B, FX, MASTER, SEQ */
-enum { PR_909, PR_808, PR_303A, PR_303B, PR_FX, PR_MST, PR_SEQ, ENG_PROF_N };
+/* render stages (the PERF screen): 909, 808, 303 A, 303 B, FX, MASTER, SEQ, then T5i's FM6 and NOISE */
+enum { PR_909, PR_808, PR_303A, PR_303B, PR_FX, PR_MST, PR_SEQ, PR_FM6, PR_NOISE, ENG_PROF_N };
 extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames;
 void engine_motion_enable(int on);                          /* off: lanes do not play (the PERF test) */
 void engine_motion_reset(void);                             /* lanes replaced (undo): knobs to their own values */
-/* T3: stop X0X's transport and release every 303 gate at the start of the next block (main loop:
- * LIVE taking the transport). */
+/* All-notes-off (T3 + T5i): stop X0X's transport and release every gate/voice (the 303s, FM6 and
+ * NOISE; the one-shot drums need nothing) at the start of the next block. Main loop: LIVE taking the
+ * transport, a transport stop, the panic path and T3's live_bridge_exit. */
 void engine_all_off(void);
 /* overload guard (engine.c): the platform reports each block's load after rendering it */
 void engine_load(uint32_t pct, uint32_t frames);           /* ISR, after engine_render */
@@ -80,6 +87,13 @@ void engine_sound_centre_drum_pans(sound_t *s);             /* every drum voice'
 void engine_drum(int kit, int voice, float vel);            /* play now (keys) */
 void engine_bass_on(int part, int note, int accent, int slide);
 void engine_bass_off(int part);
+/* T5i: the engine-only parts' notes, through the same C_BON / C_BOFF commands (no new command type).
+ * part is PART_FM6 or PART_NOISE; on C_BON the command's c field carries velocity 0..127. */
+void engine_note_on(int part, int note, int vel);
+void engine_note_off(int part, int note);
+/* T5i: queue an FM6 preset (SLOT) load: 0..7 a ROM factory voice, 8 the own patch, 9..40 a bank voice.
+ * A bank voice that is not there (no bank, or an erased / corrupt sector) falls back to a ROM voice. */
+void engine_fm6_preset(int n);
 /* motion (seq/motion.h): lanes play into the engine, never into the sound_t mirror */
 int engine_motion_part(int target, int voice);              /* the part a parameter's lane follows */
 int engine_motion_value(int lane);                          /* what the lane plays now, -1 none */

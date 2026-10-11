@@ -40,3 +40,9 @@ void fm6_vbank_init(fm6_vbank_t *b);                       /* empty */
 int fm6_vbank_put(fm6_vbank_t *b, uint32_t k, const uint8_t *v155);   /* 0 ok, 1 bad index */
 /* voice k -> v155 (sanitized); 0 ok, 1 = no voice there (as Felucca's bank slots skip an empty one) */
 int fm6_vbank_read(const fm6_vbank_t *b, uint32_t k, uint8_t *v155);
+
+/* T5i: import the FM6 patch sector (PLAT_FM6_VBANK_LEN bytes of 32 packed records, as X0X reserves at
+ * 0x9F000). Every record is validated by round-tripping it (fm6_unpack -> fm6_pack): an out-of-range
+ * field, or blank / erased flash, fails, so a leftover or unwritten sector is refused and the caller
+ * falls back to the ROM factory voices. 1 = a usable bank (b->used = every slot). */
+int fm6_vbank_import(fm6_vbank_t *b, const uint8_t *img, uint32_t len);

@@ -3242,7 +3242,7 @@ static char *put_pct10(char *q, int v)                /* 123 -> "12.3%" */
 }
 static void draw_perf(int band)
 {
-    static const char *const SN[ENG_PROF_N] = {"909", "808", "303A", "303B", "FX", "MASTER", "SEQ"};
+    static const char *const SN[ENG_PROF_N] = {"909", "808", "303A", "303B", "FX", "MASTER", "SEQ", "FM6", "NOISE"};
     char t[40], *q;
     int k;
     if (band == 0) {
@@ -3331,11 +3331,11 @@ static void draw_perf(int band)
         }
         return;
     }
-    for (k = 0; k < ENG_PROF_N; k++) {                /* each stage's share of the CPU */
-        int x = (k & 1) * 118 + 4, y = (k >> 1) * 12;
+    for (k = 0; k < ENG_PROF_N; k++) {                /* each stage's share of the CPU (3 x 3) */
+        int x = (k % 3) * 78 + 4, y = (k / 3) * 12;
         cv_text(x, y, &AF_S, SN[k], C_GRAY);
         put_pct10(t, perf.stage[k]);
-        text_r(x + 108, y, &AF_S, t, C_WHITE);
+        text_r(x + 74, y, &AF_S, t, C_WHITE);
     }
     if (perf.cps) {
         q = put_s(t, "RENDER ");

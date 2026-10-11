@@ -182,6 +182,30 @@ unit-engines:
 	@sh tests/host/run_fm6.sh
 	@sh tests/host/run_noise.sh
 
+# T5i: the FM6 voice bank's flash import and the ROM fallback (fm6_vbank.c, eng_fm6.c). Its own test
+# file is at -Werror; the ported DSP keeps T5c's lighter flags (the parity scripts').
+.PHONY: unit-fm6bank
+unit-fm6bank:
+	@mkdir -p build/host build/gen
+	python3 tools/gen_fm6_patches.py build/gen/fm6_patches.h >/dev/null
+	$(HOST_CC) -std=c99 -O2 -ffp-contract=off -Wall -Wno-unused-function -Wno-unused-const-variable \
+	    -Ibuild/gen -Ifirmware/src/dsp -c firmware/src/dsp/fm6_core.c -o build/host/fm6_core_bank.o
+	$(HOST_CC) -std=c99 -O2 -ffp-contract=off -Wall -Wno-unused-function -Wno-unused-const-variable \
+	    -Ibuild/gen -Ifirmware/src/dsp -c firmware/src/dsp/fm6_vbank.c -o build/host/fm6_vbank_bank.o
+	$(HOST_CC) -std=c99 -O2 -ffp-contract=off -Wall -Wno-unused-function -Wno-unused-const-variable \
+	    -Ibuild/gen -Ifirmware/src/dsp -c firmware/src/dsp/eng_fm6.c -o build/host/eng_fm6_bank.o
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -Ibuild/gen -Ifirmware/src/dsp -c tests/host/fm6_bank_test.c \
+	    -o build/host/fm6_bank_test.o
+	$(HOST_CC) -o build/host/fm6_bank_test build/host/fm6_bank_test.o build/host/fm6_core_bank.o \
+	    build/host/fm6_vbank_bank.o build/host/eng_fm6_bank.o
+	build/host/fm6_bank_test
+	$(HOST_CC) $(SAN_CFLAGS) -Ibuild/gen -Ifirmware/src/dsp -c tests/host/fm6_bank_test.c \
+	    -o build/host/fm6_bank_test_san.o
+	$(HOST_CC) -fsanitize=address,undefined -fno-sanitize-recover=all -o build/host/fm6_bank_test_san \
+	    build/host/fm6_bank_test_san.o firmware/src/dsp/fm6_core.c firmware/src/dsp/fm6_vbank.c \
+	    firmware/src/dsp/eng_fm6.c -Ibuild/gen -Ifirmware/src/dsp
+	build/host/fm6_bank_test_san
+
 # T6c: the song/take store and the undo stack. The store includes X0X's lz.c, so
 # it is its own translation unit.
 .PHONY: unit-store
@@ -218,7 +242,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-store unit-take unit-midi unit-fx unit-name
+unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-take unit-midi unit-fx unit-name
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens

@@ -411,6 +411,24 @@ static void sound_bd_sends(int t, int pan)            /* (rev 3: the 909's at 8;
     }
 }
 
+/* T5i's parts arrived (rev 5): an older sound has no T_MIX 4/5 (FM6, NOISE) and no T_RSV parameters
+ * (the removed BREAK part left junk there). Give the two strips the other parts' level, centred, with
+ * no sends, and the adapter defaults: FM6's macros at their 0 offset and NOISE at its init values. */
+static void sound_rev5(void)
+{
+    int i;
+    for (i = 0; i < 2; i++) {                         /* PART_FM6, PART_NOISE */
+        uint8_t *m = proj.sound.v[T_MIX][PART_FM6 + i];
+        m[MX_LEVEL] = proj.sound.v[T_MIX][PART_303A][MX_LEVEL];   /* as the other parts (the BASS strip) */
+        m[MX_REV] = m[MX_DLY] = 0;
+        m[MX_PAN] = 64;                               /* centred */
+    }
+    for (i = 0; i < engine_nparams(T_RSV, 0); i++)
+        proj.sound.v[T_RSV][0][i] = engine_param(T_RSV, 0, i)->def;
+    for (i = 0; i < engine_nparams(T_RSV, 1); i++)
+        proj.sound.v[T_RSV][1][i] = engine_param(T_RSV, 1, i)->def;
+}
+
 static void patterns_defaults(void)
 {
     int i;
@@ -466,6 +484,8 @@ int project_load(void)
         sound_rev1();
     if (sound_ok && proj.set.snd_rev < 2)             /* before the one-knob COMP, FILTER, TAPE */
         sound_rev2();
+    if (sound_ok && proj.set.snd_rev < 5)             /* T5i: before the FM6/NOISE parts */
+        sound_rev5();
     proj.set.snd_rev = PROJ_SND_REV;
     return bad ? -1 : 0;
 }

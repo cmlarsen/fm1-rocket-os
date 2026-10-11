@@ -1,0 +1,68 @@
+# T5i follow-up: the note clamp, the overload guard's FM6 cap and NOISE shed, and the all-notes-off
+# (engine_all_off): the panic path and the transport-stop path.
+wait 300
+param 5 4 0 100
+param 5 5 0 100
+param 3 0 7 0
+param 3 1 0 0
+
+# 1. a note above 127 is clamped, so its note-off still finds it: no stuck voice
+note 4 200 110
+wait 100
+expect fm6held 1
+note 4 200 0
+wait 1500
+expect fm6held 0
+expect fm6voices 0
+
+# 2. the overload guard caps FM6 at 2 (releasing the oldest) and skips the NOISE density
+note 4 60 110
+note 4 64 110
+note 4 67 110
+note 4 72 110
+wait 100
+expect fm6held 4
+load 95
+wait 100
+expect guard 1
+expect fm6held 2
+alloff
+wait 100
+expect fm6held 0
+load 40
+wait 3500
+expect guard 0
+
+# 3. engine_all_off releases a held FM6 chord and a NOISE note (the panic all-notes-off)
+note 4 60 110
+note 4 64 110
+note 5 45 120
+wait 100
+expect fm6held 2
+expect nzvoices 1
+alloff
+wait 500
+expect fm6held 0
+expect nzvoices 0
+wait 1500
+expect fm6voices 0
+
+# 4. transport stop releases FM6 and NOISE, and the output decays to silence
+note 4 60 110
+note 4 64 110
+note 5 45 120
+wait 100
+expect fm6held 2
+tap PLAY
+wait 200
+expect playing 1
+tap PLAY
+wait 100
+expect playing 0
+expect fm6held 0
+wait 1500
+peakreset
+wait 500
+expect peak_db_max -60
+expect fm6voices 0
+expect nzvoices 0

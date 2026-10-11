@@ -1,0 +1,39 @@
+# T5i item 7: in LIVE, CHORDS plays FM6 and FX plays NOISE, through the clip engine's ISR-direct path.
+# Build a 303 A line (so a CHORDS clip is derived from BASS), enter LIVE, launch CHORDS A and FX A,
+# and check the FM6/NOISE events and non-silent audio.
+wait 300
+turn ALGO 2
+tapkey w0
+turn ALGO -2
+expect part 0
+# enter LIVE (a long press on PLAY)
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+expect liveused19 1
+expect liveused24 1
+events live_chordfx_events.txt
+wav live_chordfx.wav
+tapkey 19
+expect liveque3 19
+tapkey 24
+expect liveque4 24
+tap PLAY
+expect playing 1
+wait-bar 2
+expect liveclip3 19
+expect liveclip4 24
+shot live_chordfx.png
+wait-bar 2
+wavstop
+eventsstop
+dump live_chordfx.json
+expect peak_db_min -40
+# leave LIVE
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 0
