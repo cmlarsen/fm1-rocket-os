@@ -11,9 +11,11 @@
 #   make test         run tests/run_tests.sh on $(FW_HOST); brings back build/scenarios/
 #   make test-local   run tests/run_tests.sh here (the subset that works off-Linux)
 #   make check        make fw plus the build's own checks (soft-double, size)
-#   make emu-binary   build fm1-emulator on $(FW_HOST) and boot build/x0x.fwsc headless
 #   make push/pull    rsync the tree to / from $(FW_HOST)
 #   make help         this list
+#
+# (make emu-binary — fm1-emulator/QEMU — is not here: T1's step 8 was skipped on the
+# coordinator's call, and the current emulator rejects X0X's LCD SPI baud; see reports/T1.md.)
 #
 # FW_HOST may be overridden: make fw FW_HOST=other-host
 
@@ -24,7 +26,7 @@ REMOTE_DIR   := $(REMOTE_ROOT)/$(DIRNAME)
 SSH          := ssh $(FW_HOST)
 RSYNC_EXCL   := --exclude=.git --exclude=.venv --exclude=build --exclude=__pycache__
 
-.PHONY: all help fw release test test-local check emu-binary push pull clean-remote
+.PHONY: all help fw release test test-local check push pull clean-remote
 
 all: help
 
@@ -35,7 +37,6 @@ help:
 	@echo "  test         run tests/run_tests.sh on $(FW_HOST) (brings back build/scenarios/)"
 	@echo "  test-local   run tests/run_tests.sh here (the subset that works on this machine)"
 	@echo "  check        fw + the build's own checks (soft-double, size)"
-	@echo "  emu-binary   build fm1-emulator on $(FW_HOST) and boot build/x0x.fwsc headless"
 	@echo "  push         rsync this tree to $(FW_HOST):$(REMOTE_DIR)/"
 	@echo "  pull         rsync $(FW_HOST):$(REMOTE_DIR)/build/ back into ./build/"
 	@echo "  help         this list"
@@ -82,15 +83,6 @@ test-local:
 
 check: fw
 	@echo "check: make fw passed the build's own checks (soft-double routines, image/RAM/pool size)"
-
-# fm1-emulator (simonjohansson/fm1-emulator, QEMU for pi32v2) on $(FW_HOST): build it there
-# (once, into $(REMOTE_ROOT)/fm1-emulator), then boot build/x0x.fwsc headless and keep a screenshot.
-emu-binary: fw
-	@$(SSH) 'set -e; cd $(REMOTE_ROOT); [ -d fm1-emulator ] || git clone --depth 1 https://github.com/simonjohansson/fm1-emulator.git; \
-	  cd fm1-emulator; ./build.sh 2>/dev/null || make 2>/dev/null || true'
-	@$(SSH) 'cd $(REMOTE_DIR) && mkdir -p build/emu && $(REMOTE_ROOT)/fm1-emulator/run.sh build/x0x.fwsc build/emu 2>/dev/null || true'
-	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/emu/ ./build/emu/ || true
-	@echo "emu-binary: see build/emu/ (home.png when the emulator booted)"
 
 clean-remote:
 	@$(SSH) 'rm -rf $(REMOTE_DIR)/build'
