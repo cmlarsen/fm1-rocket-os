@@ -2,6 +2,9 @@
 # one per drum track; 100 % is no lane). Played: a kick on every step, step 1 at 50 %, step 2 at
 # 5 %, with NOTES OUT on, so midi_out.txt counts the kicks that played.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect part 0
 tapkey w0
 tapkey w1

@@ -1,6 +1,9 @@
 # 303 steps: pressing an empty step turns it on at once (hold it and the knobs edit it); a tap on a
 # step that is on takes it off; holding a step that is on only shows it.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 turn ALGO 2
 expect part 2
 # SEQ: a held step's knobs are its own (NOTE, GATE, ACCENT, SLIDE); on EDIT they p-lock its sound

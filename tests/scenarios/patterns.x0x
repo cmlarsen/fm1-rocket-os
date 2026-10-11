@@ -1,5 +1,8 @@
 # Patterns: cue on the bar, chain, copy, save, reboot, everything comes back.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 tapkey b0
 tapkey w0
 tapkey w8
@@ -56,6 +59,9 @@ expect gate0.0 1
 tap SAVE
 expect store_writes 6
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 wait 300
 expect pattern 1
 expect hit0.0.0 1

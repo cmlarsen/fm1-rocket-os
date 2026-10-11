@@ -1,0 +1,30 @@
+# T7a STUDIO 1: boot opens on the song home; the cursor moves between roles and along a row, and
+# SEL launches the clip under it. The clip engine is the audio source in every normal view.
+wait 300
+expect view 10
+expect mode 0
+expect classic 0
+expect studioclip 0
+expect clipused24 1
+# the cursor moves: SELECT between the roles, ALGORITHM along the row
+turn SELECT 4
+expect studiorole 4
+expect studiocol 0
+expect studioclip 24
+turn ALGO 1
+expect studioclip 25
+turn ALGO -1
+expect studioclip 24
+wait 1400
+shot studio_home_grid.png
+# SEL launches the clip under the cursor, at its quantize
+tap SEL
+expect liveque4 24
+tap PLAY
+expect playing 1
+wait-bar 1
+expect liveclip4 24
+shot studio_home_playing.png
+dump studio_home.json
+tap PLAY
+expect playing 0

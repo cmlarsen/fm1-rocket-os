@@ -1,6 +1,9 @@
 # T3 LIVE, the PLAY layer: SCL toggles layers, the keys play the focused role, and leaving LIVE
 # hands the transport back to X0X's sequencer with no hung note.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 # a 303 A line and a 303 B line, so BASS and LEAD have clips
 turn ALGO 2
 tapkey w0
@@ -8,6 +11,8 @@ turn ALGO 1
 tapkey w0
 turn ALGO -3
 # enter LIVE
+# T7a: the song is the edited object; seed its clips from the patterns just built.
+songseed
 press PLAY
 wait 700
 release PLAY

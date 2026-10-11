@@ -2,12 +2,17 @@
 # and slow blink (queued to stop). The levels are the single-colour ones X0X offers: lit and
 # dim; "blinking" is the UI toggling between them each frame.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 # two 909 patterns, so there is a second drum clip to queue
 tapkey w0
 turn PRESET 1
 tapkey w2
 turn PRESET -1
 # enter LIVE
+# T7a: the song is the edited object; seed its clips from the patterns just built.
+songseed
 press PLAY
 wait 700
 release PLAY

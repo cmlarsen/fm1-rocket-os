@@ -1,0 +1,29 @@
+# T7a: a song edited on the home (a clip created with settings) autosaves while stopped, and a
+# reboot brings the same song back (the T6i pattern-hash remap is gone; the song is the object).
+wait 300
+tap SEQ
+spin K1 16
+spin K2 1
+spin K3 1
+spin K3 1
+expect cliplen0 32
+expect clipmode0 1
+expect clipquant0 2
+tap HOME
+expect clipused0 1
+# autosave: stopped and quiet
+wait 5000
+expect songdirty 0
+expect songwrites >0
+wait 1400
+shot studio_persist_before.png
+reboot
+expect songloaded 1
+expect view 10
+expect clipused0 1
+expect cliplen0 32
+expect clipmode0 1
+expect clipquant0 2
+wait 1400
+shot studio_persist_after.png
+dump studio_persist.json

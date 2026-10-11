@@ -2,6 +2,27 @@
 # `make screens-lint` runs this with a host build that records every text draw (-DX0X_LINT)
 # and checks the shots for clipped or overlapping text. `make screens` shows them at 1:1.
 wait 300
+# T7a STUDIO: the song home, the empty slot, the clip settings and the clear ring (the default view)
+turn SELECT 4
+wait 1400
+shot s00_studio_home.png
+turn SELECT -4
+shot s00b_studio_empty.png
+tap SEQ
+wait 1400
+shot s00c_studio_clipset.png
+tap HOME
+wait 1400
+press HOME
+key w0 down
+wait 700
+shot s00d_studio_clear.png
+key w0 up
+release HOME
+# T7a: into the classic X0X pages (GLOBAL -> Classic patterns)
+tap GLO
+tap SEL
+wait 150
 # a little content, so the screens are not empty
 tapkey b0
 tapkey w0

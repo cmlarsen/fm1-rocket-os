@@ -63,6 +63,9 @@ tap PLAY
 tap SAVE
 wait 300
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 wait 300
 expect sound0.0.10 30
 expect sound0.1.4 70

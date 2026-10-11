@@ -1,5 +1,8 @@
 # Undo / redo (HOME + REC / HOME + PLAY): a step is one gesture, what changed between quiet moments.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect sound0.0.0 34
 # gesture 1: kick on steps 1 and 5; gesture 2: step 9; gesture 3: BD tune up
 tapkey b0

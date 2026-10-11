@@ -1,6 +1,9 @@
 # Help cards: hold one button ~1 s and a card says what it does; letting go after the card does
 # nothing else; a key, a turn or another button puts the card away and the combination works.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect helpfits 1
 # SAVE held: the card (sooner than the others: SAVE is held to copy), and letting go does not save
 expect store_writes 0

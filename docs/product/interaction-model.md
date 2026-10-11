@@ -54,6 +54,26 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 - **HOME never exits LIVE.** A HOME tap closes overlays. A HOME hold shows the cheat sheet.
 - Playing clips carry on across mode changes.
 
+### STUDIO: the song home is the default view
+The song is the edited object; STUDIO opens on its **song home** (STUDIO 1), not on X0X's pattern
+views. Its header names the song, the transport, BPM and bar.beat; below it sit the song card and
+the role × clip grid with its cursor, and the K1–K4 strip (the cursor clip's length, mode, launch
+and swing). SELECT moves the cursor between roles, ALGORITHM along a row, SEL launches the clip
+under the cursor; the keys mirror the grid. SEQ opens the cursor clip's settings (STUDIO 5),
+creating an empty clip first if the slot is empty; HOME + hold a pad (or SEL on the cursor) clears
+with a ring (STUDIO 9); holding a loaded pad copies onto a blinking empty same-role slot
+(STUDIO 14); HOME+REC undoes and HOME+PLAY redoes with a toast (STUDIO 10). **The clip engine is
+the only audio source in every normal view** (the song home, the sound/FX/MIX/GLOBAL pages and
+LIVE), so tweaking a sound never stops the clips.
+
+### Classic patterns
+X0X's pattern editors are not on the normal button paths any more. They live behind
+**GLOBAL → Classic patterns**: entering Classic hands the audio to X0X's sequencer (the clip engine
+stops with all-off and the header shows CLASSIC); leaving (GLOBAL → Song home, or HOME back) stops
+that sequencer with all-off and gives the audio back to the clip engine, whose clips keep playing.
+This is T7a's decision, recorded here for the owner to confirm; the 909/303 editors stay available
+as classic pages until T7b replaces clip editing.
+
 ## LIVE mode
 
 ### Two layers, toggled by SCL

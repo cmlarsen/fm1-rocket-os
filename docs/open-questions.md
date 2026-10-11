@@ -7,6 +7,14 @@ These questions are still unresolved. When one is answered, record the answer in
 - **FM sound design.** We keep the inherited engine and leave it out of the performance path. See [ADR-0003](decisions/0003-sound-design-scope.md).
 - **Live playing.** A long press on PLAY enters LIVE, and SEL toggles between PADS and PLAY. See the [interaction model](product/interaction-model.md#live-mode).
 
+## Resolved 2026-10-11 (T7a)
+- **LIVE → STUDIO transport (was #6).** The song is the edited object and the clip engine is the
+  only audio source in every normal view, so **playing clips carry on across mode changes**: LIVE
+  entered from the song home keeps what is playing and leaving keeps it playing. The classic X0X
+  pattern pages (GLOBAL → Classic patterns) hand the audio to X0X's sequencer instead; leaving
+  them gives it back. See the [interaction model](product/interaction-model.md#classic-patterns).
+  Extended by a coordinator decision for the owner to confirm.
+
 ## Resolved 2026-10-11 (plan review)
 - **Build host.** deltron.local: x86_64, Ubuntu 26.04, glibc 2.43, 12 cores, 30 GB RAM, 49 GB free, with Docker, gcc, rsync and qemu. SSH works as `caleb`. KVM doesn't speed up the pi32v2 emulator, because QEMU has to emulate the instructions in software.
 - **The LIVE layer toggle is SCL**, and SEL means confirm everywhere. Only a long press on PLAY leaves LIVE.
@@ -19,7 +27,6 @@ These questions are still unresolved. When one is answered, record the answer in
 2. **Default pad map.** The proposal is keyboard zones (see [screens](product/screens.md#design-decisions-made-while-drawing)). It is waiting for the owner's review on the design canvas.
 3. **Committing LIVE tweaks.** Should LIVE offer "commit tweaks to song", or should LIVE changes always revert? The v1 default is revert.
 5. **Name.** Is "rocket-os" the working name?
-6. **LIVE → STUDIO transport (T3).** In this build, leaving LIVE stops the clip engine and hands the transport back to X0X's sequencer, so playing clips do **not** carry on across the mode change (the [interaction model](product/interaction-model.md#modes) still says they do). T6i/T7 revisit this; the owner decides whether the current behaviour is acceptable until then.
 
 ## Hardware facts to verify
 1. **Key velocity.** The GrooveOS manual says yes; Felucca's HAL says the keys are switches only ([grooveos](research/grooveos.md#conflicting-facts-to-resolve)).

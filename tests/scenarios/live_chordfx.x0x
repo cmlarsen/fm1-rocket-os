@@ -2,11 +2,16 @@
 # Build a 303 A line (so a CHORDS clip is derived from BASS), enter LIVE, launch CHORDS A and FX A,
 # and check the FM6/NOISE events and non-silent audio.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 turn ALGO 2
 tapkey w0
 turn ALGO -2
 expect part 0
 # enter LIVE (a long press on PLAY)
+# T7a: the song is the edited object; seed its clips from the patterns just built.
+songseed
 press PLAY
 wait 700
 release PLAY

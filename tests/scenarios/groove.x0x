@@ -1,5 +1,8 @@
 # Build a groove from the panel, as a player would, and record it.
 wait 500
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect part 0
 shot 01_boot_909.png
 # 909: BD on the quarters (black key 1 = BD, white keys = steps)

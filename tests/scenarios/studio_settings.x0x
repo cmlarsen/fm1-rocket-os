@@ -1,0 +1,23 @@
+# T7a STUDIO 5: length (1-64) on K1, mode (Loop/Once) on K2 and launch (bar/beat/end of clip) on K3;
+# the changes mark the song dirty.
+wait 300
+tap SEQ
+expect view 11
+# LENGTH: 16 -> 32 steps (two bars)
+spin K1 16
+expect cliplen0 32
+# MODE: Loop -> Once
+spin K2 1
+expect clipmode0 1
+# LAUNCH: Bar -> Beat -> End of clip (a switch steps one position a detent)
+spin K3 1
+spin K3 1
+expect clipquant0 2
+expect songdirty 1
+wait 1400
+shot studio_settings.png
+dump studio_settings.json
+tap HOME
+# back on the song home the card reads the clip's length and mode
+wait 1400
+shot studio_settings_home.png

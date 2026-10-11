@@ -2,6 +2,9 @@
 # choose patterns 1-16 or 17-32; everything saves packed and comes back; a project too big to
 # pack is not saved (MEMORY FULL) and the flash keeps what it had.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 tapkey b0
 tapkey w0
 tap OCT+
@@ -48,6 +51,9 @@ expect pattern 31
 expect hit0.0.2 1
 tap SAVE
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 wait 300
 tap HOME
 tap OCT+
@@ -65,6 +71,9 @@ expect hit0.0.32 1
 noise 7
 tap SAVE
 reboot
+# T7a: back into the classic pages after the reboot.
+tap GLO
+tap SEL
 wait 300
 expect pattern 1
 expect hit0.0.63 1

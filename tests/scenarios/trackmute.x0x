@@ -1,6 +1,9 @@
 # Drum tracks mute on their own: HOME + a black key on the 909 / 808 screen. The part mute (HOME,
 # black 1-5) and the song leave them alone.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 expect vmute 0
 press HOME
 tapkey b1

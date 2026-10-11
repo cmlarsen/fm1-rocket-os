@@ -2,6 +2,9 @@
 # device's ED_STRESS / ED_STATS commands call (firmware/src/app/rc_debug.c), so the scenario is the
 # host half of tools/rc_probe.py. Each level starts, ED_STATS is well formed, and LIVE plays.
 wait 300
+# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
+tap GLO
+tap SEL
 
 # ED_STATS is well formed from a cold boot, and stress 0 is a no-op
 stats
