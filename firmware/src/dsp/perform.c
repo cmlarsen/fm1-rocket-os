@@ -10,7 +10,10 @@
  * Every hand-off is a linear crossfade over PERFORM_XFADE_IN / _OUT samples:
  *   out = live * (1 - a) + wet * a,   a = gain_act + gain_old
  * When nothing is engaged a == 0 and the output is the input, sample for
- * sample, so a released or reset effect leaves no residue.
+ * sample, so a released or reset effect leaves no residue. T10perf: that idle
+ * case is a fast path of its own (perf_idle / perf_record below) - the per-sample
+ * filter, crossfade and output work is skipped, and only the mono history write
+ * the next repeat or freeze captures from is paid for.
  *
  * The history keeps recording while a loop plays. The recording head skips the
  * active loop's slice (it is the only place the loop's audio lives), so the
@@ -46,6 +49,41 @@ static inline int16_t f2i16(float x)
 }
 
 static inline float i2f16(int16_t v) { return (float)v * (1.0f / 32768.0f); }
+
+/* T10perf: idle means nothing in the audio path can change this block's output -
+ * no buffer effect (act / old / pending), no crossfade under way and no filter.
+ * The echo throw is a controller for X0X's fxbus delay and never touches this
+ * audio, so it can be held while the path is idle. */
+static inline int perf_idle(const perform_t *p)
+{
+    return !p->act_on && !p->old_on && !p->pend_on
+        && p->xmode == PERF_XF_NONE && p->filt_state == 0;
+}
+
+/* T10perf: the idle path. Output is the input, in place, so the only work is the
+ * mono history write that repeat and freeze capture from. One downmix per sample
+ * and the ring wrap split out, so the inner loop carries no per-sample branch.
+ * The recording head records the live signal with no loop to skip (idle means no
+ * loop is engaged), so the write is a plain forward run over the ring. */
+static void perf_record(perform_t *p, const float *l, const float *r, uint32_t n)
+{
+    uint32_t i = 0, w = p->hist_w;
+    while (n) {
+        uint32_t run = PERFORM_HIST_N - w;
+        uint32_t k;
+        if (run > n)
+            run = n;
+        for (k = 0; k < run; k++) {
+            float mono = (l[i] + r[i]) * 0.5f;
+            p->hist[w + k] = f2i16(mono);
+            i++;
+        }
+        w = (w + run) & HIST_MASK;
+        n -= run;
+    }
+    p->hist_w = w;
+    p->hist_stalled = 0;
+}
 
 static inline int is_loop(uint8_t t)
 {
@@ -526,6 +564,14 @@ void perform_process(perform_t *p, float *l, float *r, uint32_t nframes,
 {
     uint32_t i;
     drain(p);
+    /* T10perf: nothing engaged? The output is the input, so skip the whole
+     * per-sample path and pay only for the history write a later repeat or
+     * freeze needs. A command that arrived in drain() changes the state, so a
+     * block where an effect just engaged still takes the full path below. */
+    if (perf_idle(p)) {
+        perf_record(p, l, r, nframes);
+        return;
+    }
     for (i = 0; i < nframes; i++) {
         float ll = l[i], rr = r[i];
         float mono = (ll + rr) * 0.5f;
