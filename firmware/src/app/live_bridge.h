@@ -2,8 +2,10 @@
 /* T3: the bridge between X0X's project and the LIVE clip engine.
  *
  * This is the only place where X0X's project (pattern_t / the four parts) is turned into a
- * `core/model/model.h` song and where the clip engine's events are mapped onto X0X's engine
- * commands. It owns the LIVE `song_t` and one `clip_engine_t`.
+ * `core/model/model.h` song, and where the clip engine is run for the LIVE view. It owns the
+ * LIVE `song_t` and one `clip_engine_t`. The events it produces are handed to the caller
+ * (engine.c) in plain terms, so engine.c applies them to the voices directly and
+ * sample-accurately; this module never queues an engine command from the clip render.
  *
  * The header stays free of model.h and engine.h on purpose: ui.c is one compilation unit that
  * already has X0X's own `song_t` (sequencer.h) in scope, so it can only include a header that
@@ -30,6 +32,24 @@ enum { LIVE_PADS, LIVE_PLAY };
  * byte is (target << 4) | voice. The bridge unpacks it back into engine_set(). */
 #define LIVE_PARAM(t, v, i) ((uint16_t)(((uint16_t)(t) << 12) | ((uint16_t)(v) << 8) | (uint8_t)(i)))
 
+/* A clip event, in plain terms, so engine.c can apply it without seeing model.h.
+ *   DRUM:      a = lane, b = accent 0/1, c = clip
+ *   NOTE_ON:   a = note, b = velocity (bit 7 = slide), c = clip, role = the part
+ *   NOTE_OFF:  a = note, role = the part
+ *   MOTION:    a = index, b = (target << 4) | voice, c = value */
+enum { LIVE_EV_DRUM, LIVE_EV_NOTE_ON, LIVE_EV_NOTE_OFF, LIVE_EV_MOTION };
+typedef struct {
+    uint32_t sample;      /* offset into the window passed to live_bridge_render() */
+    uint8_t kind;         /* LIVE_EV_* */
+    uint8_t role;         /* LIVE_DRUMS / LIVE_BASS / LIVE_LEAD */
+    uint8_t a, b, c;
+} live_ev_t;
+
+typedef struct {
+    void (*ev)(void *ctx, const live_ev_t *e);
+    void *ctx;
+} live_sink_t;
+
 /* Set up the static song and clip engine. Call once from engine_init()/ui_init(). */
 void live_bridge_init(void);
 
@@ -43,9 +63,10 @@ void live_bridge_exit(void);
 /* 1 while LIVE owns the audio path (between enter and exit). */
 int live_bridge_active(void);
 
-/* One audio block: advance the clip engine and map its events onto X0X's engine commands.
- * Called from engine_render() in place of seq_advance() while active. */
-void live_bridge_render(uint32_t nframes);
+/* One audio block: advance the clip engine and hand each event to `sink` at its exact sample
+ * offset. Called from engine_render() in place of seq_advance() while active; engine.c's sink
+ * applies the events to the voices in the ISR. */
+void live_bridge_render(uint32_t nframes, const live_sink_t *sink);
 
 /* Transport (the PLAY button in LIVE). */
 void live_bridge_transport_start(void);

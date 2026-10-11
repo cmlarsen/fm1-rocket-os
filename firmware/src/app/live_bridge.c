@@ -26,6 +26,13 @@ static clip_engine_t g_eng LIVE_POOL;
 static uint8_t g_active;
 static uint8_t g_stop_q[NROLES];                      /* a stop on the role is pending (for the LED) */
 
+/* T10: the clip engine's step length is fixed at compile time, so it must be built at the same
+ * rate as the audio sample counter (sequencer.h's FS). Both are visible here. */
+#ifndef CLIP_ENGINE_FS
+#define CLIP_ENGINE_FS 48000u
+#endif
+_Static_assert(CLIP_ENGINE_FS == FS, "CLIP_ENGINE_FS must match the sample counter's FS");
+
 /* ---------------------------------------------------------------- mapping --- */
 
 /* a drum pattern plays if any of its 11 lanes has a hit */
@@ -48,30 +55,36 @@ static int bass_used(const bpart_t *b)
     return 0;
 }
 
-/* one 303 line as a clip: NOTE steps become notes, a run of TIEs extends the note before them */
+/* one 303 line as a clip: NOTE steps become notes, a run of TIEs extends the note before them.
+ * A note's vel carries the slide in bit 7 (7 bits of velocity), matching `bass303_note_on`'s
+ * slide flag: a note slides when the step before it sounded and was marked BS_SLIDE (X0X's rule). */
 static void map_line(const bpart_t *bp, clip_t *c)
 {
     int s, nn = 0, tr = (int)bp->transpose - 24;
     int len = bp->len < 1 ? 1 : (bp->len > CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : bp->len);
+    int prev_sounded = 0, prev_slide = 0;
     c->used = 1;
     c->len = (uint8_t)len;
     c->mode = CLIP_LOOP;
     c->quant = Q_BAR;
     for (s = 0; s < len && nn < (int)CLIP_MAX_NOTES; s++) {
         note_t *nt;
-        int j, note;
-        if (bstep_gate(&bp->step[s]) != G_NOTE)
-            continue;
-        j = s + 1;
-        while (j < len && bstep_gate(&bp->step[j]) == G_TIE)
-            j++;
-        note = (int)bp->step[s].note + tr;
-        note = note < 0 ? 0 : note > 127 ? 127 : note;
-        nt = &c->d.notes[nn++];
-        nt->step = (uint8_t)s;
-        nt->note = (uint8_t)note;
-        nt->vel = (bp->step[s].flags & BS_ACCENT) ? 127u : 88u;
-        nt->len = (uint8_t)(j - s);
+        int j, note, gate = bstep_gate(&bp->step[s]);
+        if (gate == G_NOTE) {
+            j = s + 1;
+            while (j < len && bstep_gate(&bp->step[j]) == G_TIE)
+                j++;
+            note = (int)bp->step[s].note + tr;
+            note = note < 0 ? 0 : note > 127 ? 127 : note;
+            nt = &c->d.notes[nn++];
+            nt->step = (uint8_t)s;
+            nt->note = (uint8_t)note;
+            nt->vel = (uint8_t)(((bp->step[s].flags & BS_ACCENT) ? 127u : 88u) |
+                                ((prev_sounded && prev_slide) ? 0x80u : 0u));
+            nt->len = (uint8_t)(j - s);
+        }
+        prev_slide = (bp->step[s].flags & BS_SLIDE) != 0;
+        prev_sounded = gate != G_REST;
     }
     c->nnotes = (uint8_t)nn;
     if (!nn)
@@ -179,6 +192,7 @@ void live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
     g_song.bpm_x10 = clamp_bpm(bpm_x10 ? bpm_x10 : 1200u);
     g_song.swing = pats[0].swing ? pats[0].swing : 0;  /* the 909's shuffle is the song's */
     clip_engine_init(&g_eng, &g_song);
+    engine_all_off();                                  /* T3: stop X0X's sequencer and release the voices */
     g_active = 1;
     {
         int i;
@@ -202,42 +216,32 @@ void live_bridge_exit(void)
 
 int live_bridge_active(void) { return g_active; }
 
-/* ----- audio: clip events -> X0X's engine commands ----- */
+/* ----- audio: the clip engine's events, handed to engine.c in plain terms ----- */
 
-static void live_ev(void *ctx, const clip_event_t *e)
+static void bridge_ev(void *ctx, const clip_event_t *e)
 {
-    (void)ctx;
+    const live_sink_t *s = (const live_sink_t *)ctx;
+    live_ev_t o;
+    o.sample = e->sample;
+    o.role = e->role;
+    o.a = e->a;
+    o.b = e->b;
+    o.c = e->c;
     switch (e->kind) {
-    case CLIPEV_DRUM:
-        if (e->role == ROLE_DRUMS) {
-            float v = e->b ? 1.0f : (float)seq.accent_q7 / 127.0f;
-            engine_drum(0, e->a, v);                       /* kit 0 = 909; lane -> voice; accent -> velocity */
-        }
-        break;
-    case CLIPEV_NOTE_ON:
-        if (e->role == ROLE_BASS)
-            engine_bass_on(0, e->a, e->b >= 100, 0);       /* 303 A */
-        else if (e->role == ROLE_LEAD)
-            engine_bass_on(1, e->a, e->b >= 100, 0);       /* 303 B */
-        break;                                             /* CHORDS / FX: no sound until T5i */
-    case CLIPEV_NOTE_OFF:
-        if (e->role == ROLE_BASS)
-            engine_bass_off(0);
-        else if (e->role == ROLE_LEAD)
-            engine_bass_off(1);
-        break;
-    case CLIPEV_MOTION:
-        engine_set((int)(e->b >> 4), (int)(e->b & 15u), (int)e->a, (int)e->c);
-        break;
-    default:
-        break;                                             /* clip started/stopped/queued: not audio */
+    case CLIPEV_DRUM:     o.kind = LIVE_EV_DRUM; break;
+    case CLIPEV_NOTE_ON:  o.kind = LIVE_EV_NOTE_ON; break;
+    case CLIPEV_NOTE_OFF: o.kind = LIVE_EV_NOTE_OFF; break;
+    case CLIPEV_MOTION:   o.kind = LIVE_EV_MOTION; break;
+    default:              return;                      /* clip started/stopped/queued: not audio */
     }
+    if (s && s->ev)
+        s->ev(s->ctx, &o);
 }
 
-void live_bridge_render(uint32_t nframes)
+void live_bridge_render(uint32_t nframes, const live_sink_t *sink)
 {
-    clip_sink_t sink = {live_ev, 0};
-    clip_engine_render(&g_eng, nframes, &sink);
+    clip_sink_t cs = {bridge_ev, (void *)sink};
+    clip_engine_render(&g_eng, nframes, &cs);
 }
 
 /* ----- transport and launching (main loop) ----- */
