@@ -11,3 +11,13 @@ Notes, Program Change and panic are sound. Clock following reads the wrong tempo
 5. Keep everything else. Run `make unit unit-core scenarios screens-lint parity check fw fw-debug` on the merged branch and `tools/check_loader.sh` on both packages. Report the RAM numbers.
 
 Commit, update reports/T11i.md, and send worker_done.
+
+## Re-review: request changes (the clock fix itself is verified: ±0.5 bpm under stalls)
+The reviewer's tests are `/private/tmp/claude-502/-Users-caleb-CalebApps-fm1-rocket-os/10296272-f272-4eb6-9e65-5ca02d389a5d/scratchpad/clk3.c` and `restart_test.c`. Turn them into real tests.
+1. **[High] The audio ISR can lock up** (`plat_fm1.c:112-118`, `main_fm1.c:40-41`). The audio ISR writes the time base before setting `in_audio`. TIMER5 can preempt it in that window, run `usb_poll`, and spin in `plat_sample_now` (`plat_fm1.c:125`) waiting for a write that can't finish. **Make the time-base publish lock-free and wait-free:** a sequence counter, where the reader retries a bounded number of times and otherwise uses the previous snapshot, never spinning on the writer. **Also set `in_audio` before the sync.** No path in an ISR may wait on another ISR. Add a host test that interleaves the reader at every point of the writer.
+2. **[High] MIDI Start while playing leaves notes on** (`clip_engine.c:586-600`). Restart releases every sounding note (note-offs at the restart sample) before resetting the playhead, and the step-0 notes then sound. Same for Continue after Stop if any notes remain.
+3. **[Medium] Start/Continue aren't ring-ordered** (`clip_engine.c:305-307`). Restart and continue become ring commands, so `playing` changes only in the ISR as part of applying the command.
+4. **[Low] A song loaded after the clock is lost keeps the followed tempo** (`clip_engine.c:564`). Loading a song clears `bpm_ext`, unless the clock is currently present.
+5. `make fuzz-ui` now exists on `integration` (T2c). Merge `integration` again and run it.
+
+Then run the full ladder plus `make fuzz-ui`, and `tools/check_loader.sh` on both packages. Commit, update reports/T11i.md, and send worker_done.
