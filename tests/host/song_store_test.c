@@ -705,7 +705,10 @@ int main(void)
         {
             song_t v1 = got;
             unsigned t;
-            int bad = 0;
+            int bad = 0, k;
+            for (k = 0; k < (int)NKEYS; k++)
+                got.key_clip[k] = (uint8_t)k;
+            v1 = got;
             v1.version = 1u;
             v1.key_clip[0] = 26u;
             check("v1 clip target migrates", song_migrate(&v1) == 0 && v1.version == MODEL_VERSION);
