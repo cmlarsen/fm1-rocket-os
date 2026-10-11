@@ -230,6 +230,35 @@ static void test_transport(void)
     CHECK(ev[0].kind == E_START && ev[1].kind == E_CONT && ev[2].kind == E_STOP, "transport sequence");
 }
 
+static void test_stray_f7(void)
+{
+    reset(0, 0, 0);
+    b(0x90); b(60); b(100);        /* note on, running status 0x90 */
+    b(0xF7);                       /* a stray F7 cancels running status */
+    b(62); b(100);                 /* so these data bytes are ignored */
+    CHECK(nk(E_ON) == 1, "stray F7 clears running status (on=%d)", nk(E_ON));
+    b(0x90); b(64); b(110);        /* a fresh status works */
+    CHECK(nk(E_ON) == 2, "stray F7: fresh status works (on=%d)", nk(E_ON));
+}
+
+static void test_pc_running_status(void)
+{
+    /* Program Change via running status, across SysEx and a status-byte SysEx end. Expect 5. */
+    static const uint8_t bb[] = { 5, 6, 0xC0, 3, 0xF8, 4, 0xF0, 1, 2, 0xC0, 7,
+                                  0xF0, 9, 0xC1, 1, 26, 27 };
+    unsigned i;
+    reset(0, 1, Q_BEAT);
+    for (i = 0; i < sizeof bb; i++) { b(bb[i]); }
+    CHECK(nk(E_LAUNCH) == 5, "pc running status: launches=%d (want 5)", nk(E_LAUNCH));
+    {
+        int a, d, k;
+        static const int want[5] = { 3, 4, 7, 1, 26 };
+        for (k = 1; k <= 5; k++)
+            CHECK(nth(E_LAUNCH, k, &a, &d) && a == want[k - 1] && d == Q_BEAT,
+                  "pc running status: launch %d = %d (want %d)", k, a, want[k - 1]);
+    }
+}
+
 /* ---------------- clock ---------------- */
 
 /* one interval in Q16 samples, exact enough for 60/120/200 bpm at 44100 */
@@ -342,6 +371,80 @@ static void test_clock_lost(void)
     CHECK(midi_in_clock_ok(&m) == 1, "clock lost: follows again");
     midi_in_tick(&m, now + (uint32_t)(m.est_fp >> 10) + 1u);
     CHECK(nk(E_LOST) == 2, "clock lost: fires again after losing it twice");
+
+    /* above 240 bpm one beat is shorter than fs/4: the check must still be one beat */
+    reset(0, 0, 0);
+    p = period_q16(250);
+    t = 0;
+    for (i = 0; i < 96; i++) { t += p; now = (uint32_t)(t >> 16); midi_in_byte(&m, 0xF8, now); }
+    midi_in_tick(&m, now + (uint32_t)(m.est_fp >> 10) + 1u);
+    CHECK(nk(E_LOST) == 1, "clock lost above 240 bpm fires after one beat");
+}
+
+/* ticks at `bpm`, dropping drop_n F8s at tick drop_at; returns the worst |error| x0.1 bpm
+ * over the 30 ticks after the drop */
+static int32_t drop_run(int bpm, int drop_at, int drop_n)
+{
+    uint32_t p = period_q16(bpm);
+    uint64_t t = 0;
+    int32_t worst = 0;
+    int i;
+    reset(0, 0, 0);
+    for (i = 0; i < 24 * 12; i++) {
+        t += p;                                    /* the clock's time always advances */
+        now = (uint32_t)(t >> 16);
+        if (i >= drop_at && i < drop_at + drop_n)
+            continue;                              /* the F8 never arrives */
+        midi_in_byte(&m, 0xF8, now);
+        midi_in_tick(&m, now);
+        if (i > drop_at + drop_n && i < drop_at + drop_n + 30) {
+            int32_t e = (int32_t)midi_in_bpm_x10(&m) - bpm * 10;
+            if (e < 0) e = -e;
+            if (e > worst) worst = e;
+        }
+    }
+    return worst;
+}
+
+static void test_clock_drops(void)
+{
+    struct { int bpm, at, n; } c[3] = { { 120, 100, 2 }, { 120, 100, 4 }, { 250, 120, 5 } };
+    int k;
+    for (k = 0; k < 3; k++) {
+        int32_t e = drop_run(c[k].bpm, c[k].at, c[k].n);
+        CHECK(e <= 10, "clock drops %d bpm x%d: worst %d x0.1 bpm (want <= 10)",
+              c[k].bpm, c[k].n, (int)e);
+    }
+}
+
+static void test_clock_lost_no_tempo(void)
+{
+    reset(0, 0, 0);
+    midi_in_byte(&m, 0xF8, 1000u);       /* a single tick: no interval, so no tempo yet */
+    CHECK(midi_in_bpm_x10(&m) == 0, "no tempo: bpm_x10 = %u (want 0)", midi_in_bpm_x10(&m));
+    CHECK(midi_in_clock_ok(&m) == 1, "no tempo: still following");
+    midi_in_tick(&m, 1000u + FS);        /* exactly one second: not yet */
+    CHECK(nk(E_LOST) == 0, "no tempo: must not fire at exactly one second");
+    midi_in_tick(&m, 1000u + FS + 1u);   /* past it: fires */
+    CHECK(nk(E_LOST) == 1, "no tempo: fires past one second");
+}
+
+static void test_tick_wrap(void)
+{
+    uint32_t t = 0xFFFFFFFFu - 918u * 24u * 3u;
+    int i;
+    reset(0, 0, 0);
+    for (i = 0; i < 24 * 6; i++) {
+        midi_in_byte(&m, 0xF8, t);
+        t += 918u;
+        midi_in_tick(&m, t - 10u);
+    }
+    {
+        int32_t e = (int32_t)midi_in_bpm_x10(&m) - 1200;
+        if (e < 0) e = -e;
+        CHECK(e <= 5, "tick wrap: bpm_x10 error %d (want <= 5)", (int)e);
+    }
+    CHECK(nk(E_LOST) == 0, "tick wrap: no false clock_lost");
 }
 
 static void test_fuzz(void)
@@ -383,11 +486,16 @@ int main(void)
     test_cc();
     test_spp();
     test_transport();
+    test_stray_f7();
+    test_pc_running_status();
     test_clock_steady();
     test_clock_step();
     test_clock_ramp();
+    test_clock_drops();
     test_clock_lost();
+    test_clock_lost_no_tempo();
+    test_tick_wrap();
     test_fuzz();
-    printf(fails ? "midi_in: %d FAILED\n" : "midi_in: ok (15 cases)\n", fails);
+    printf(fails ? "midi_in: %d FAILED\n" : "midi_in: ok (20 cases)\n", fails);
     return fails != 0;
 }
