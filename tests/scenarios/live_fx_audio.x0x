@@ -1,0 +1,65 @@
+# T10i audio: each punch FX engaged and released on live audio. Tape stop ends in silence and the
+# audio returns on release; the echo throw drives X0X's fxbus delay (the engine command events).
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+tapkey 0
+tapkey 7
+tap PLAY
+wait-bar 2
+expect liveclip0 0
+expect liveclip1 7
+press FX
+wait 30
+expect fxlayer 1
+wav live_fx_audio.wav
+events live_fx_audio_events.txt
+
+# repeat 1/8: tap to latch, tap to release
+tapkey 0
+wait 400
+tapkey 0
+wait 120
+# repeat 1/16
+tapkey 1
+wait 300
+tapkey 1
+wait 120
+# filter dive: latch, then release
+tapkey 3
+wait 400
+tapkey 3
+wait 200
+# echo throw: it drives X0X's fxbus delay, so its engage/release show in the events
+tapkey 4
+wait 400
+tapkey 4
+wait 200
+
+# tape stop: hold it (momentary); it ends in silence, then the audio returns on release
+key 2 down
+wait 750
+silence 150 -30
+key 2 up
+peakreset
+wait 250
+expect peak_db_min -30
+
+# freeze: latch, then release
+tapkey 5
+wait 300
+tapkey 5
+wait 200
+wavstop
+eventsstop
+dump live_fx_audio.json
+release FX
