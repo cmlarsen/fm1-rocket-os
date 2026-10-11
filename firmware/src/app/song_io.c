@@ -340,17 +340,32 @@ void song_io_songs_list(void *ctx, int slot, song_row_t *out)
 
 int song_io_songs_current_slot(void *ctx) { (void)ctx; return cur_slot; }
 
+/* T8i: the one-level delete undo (SONGS only). It is separate from the clip undo stack,
+ * so opening/creating/copying a song can clear the clip undo without losing it. */
+static int8_t del_slot = -1;
+
+/* T8i: SONGS is a stopped, quiet view. Every store write refuses while the clip transport
+ * runs (the caller shows "SAVE FAILED"). live_bridge's transport is the app's. */
+static int store_quiet(void) { return !live_bridge_transport_playing(); }
+
+/* T8i: a song change clears the clip undo (it belongs to one song). */
+static void clip_undo_clear(void) { undo_stack_init(&undo); }
+
 int song_io_songs_open(void *ctx, int slot)
 {
     (void)ctx;
     if (!ready || slot < 0 || slot >= (int)SONG_STORE_SLOTS)
         return -1;
-    if (song_store_load(&store, slot, song()) != 0)     /* deleted or unreadable */
+    if (!store_quiet())
         return -1;
+    if (song_store_load(&store, slot, &scratch) != 0)   /* deleted or unreadable: g_song is untouched */
+        return -1;
+    *song() = scratch;                                  /* only now change the live song */
     cur_slot = slot;
     loaded = 1;
     dirty = 0;
     failed = 0;
+    clip_undo_clear();
     live_bridge_song_reload();
     live_bridge_song_baseline(song_store_tag(&store, slot));
     return 0;
@@ -361,6 +376,8 @@ int song_io_songs_create(void *ctx, int kind, uint16_t bpm_x10, int key)
     song_t s;
     int slot;
     (void)ctx;
+    if (!store_quiet())
+        return -1;
     slot = first_free_slot();
     if (slot < 0)
         return -2;                                      /* all slots taken */
@@ -370,6 +387,7 @@ int song_io_songs_create(void *ctx, int kind, uint16_t bpm_x10, int key)
         song_template_empty(&s, bpm_x10, key);
     if (song_store_save_tag(&store, slot, &s, 0u) != 0)
         return -1;
+    clip_undo_clear();                                  /* creating a song clears the clip undo */
     return slot;
 }
 
@@ -379,6 +397,8 @@ int song_io_songs_copy(void *ctx, int src)
     int slot, i;
     char nm[SONG_NAME_LEN];
     (void)ctx;
+    if (!store_quiet())
+        return -1;
     if (src < 0 || src >= (int)SONG_STORE_SLOTS)
         return -1;
     if (song_store_load(&store, src, &s) != 0)
@@ -398,6 +418,7 @@ int song_io_songs_copy(void *ctx, int src)
     s.has_take = 0;                                     /* the take is not copied with the song record */
     if (song_store_save_tag(&store, slot, &s, 0u) != 0)
         return -1;
+    clip_undo_clear();                                  /* copying a song clears the clip undo */
     return slot;
 }
 
@@ -407,6 +428,8 @@ int song_io_songs_rename(void *ctx, int slot, const char *name)
     song_t s;
     int i;
     (void)ctx;
+    if (!store_quiet())
+        return -1;
     if (slot < 0 || slot >= (int)SONG_STORE_SLOTS)
         return -1;
     if (slot == cur_slot) {                             /* the live song: rename in RAM, then save it */
@@ -431,26 +454,37 @@ int song_io_songs_rename(void *ctx, int slot, const char *name)
 int song_io_songs_delete(void *ctx, int slot)
 {
     (void)ctx;
+    if (!store_quiet())
+        return -1;
     if (slot < 0 || slot >= (int)SONG_STORE_SLOTS)
         return -1;
     if (song_store_delete(&store, slot) != 0)
         return -1;
-    undo_stack_push_delete(&undo, &store, (uint8_t)slot);   /* the durable, one-level undo */
+    del_slot = (int8_t)slot;                            /* the one-level delete undo, SONGS only */
     return 0;
 }
 
-int song_io_songs_undelete(void *ctx) { (void)ctx; return undo_run(0); }
+int song_io_songs_undelete(void *ctx)
+{
+    (void)ctx;
+    if (!store_quiet())
+        return -1;                                      /* UNDO_CANNOT */
+    if (del_slot < 0)
+        return 0;                                       /* UNDO_EMPTY */
+    if (!store.slot[del_slot].has_song || !store.slot[del_slot].deleted)
+        return -1;                                      /* the slot was reused: can't undo */
+    if (song_store_undelete(&store, (uint8_t)del_slot) != 0)
+        return -1;
+    del_slot = -1;
+    return 1;                                           /* UNDO_DONE */
+}
 
 int song_io_songs_first_free(void *ctx) { (void)ctx; return first_free_slot(); }
 
 int song_io_songs_can_undelete(void *ctx)
 {
-    uint8_t idx;
     (void)ctx;
-    if (undo.cur == 0 || undo.e[undo.cur - 1u].type != UNDO_DELETE_SONG)
-        return 0;
-    idx = undo.e[undo.cur - 1u].index;
-    return (idx < SONG_STORE_SLOTS && store.slot[idx].has_song && store.slot[idx].deleted) ? 1 : 0;
+    return (del_slot >= 0 && store.slot[del_slot].has_song && store.slot[del_slot].deleted) ? 1 : 0;
 }
 
 int song_io_songs_clip_count(void *ctx, int slot)

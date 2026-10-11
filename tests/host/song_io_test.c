@@ -131,6 +131,7 @@ uint32_t live_bridge_rebuild(const pattern_t *pats)
     return g_song_hash;
 }
 void live_bridge_song_baseline(uint32_t h) { g_baselines++; g_song_hash = h; }
+int live_bridge_transport_playing(void) { return 0; }   /* T8i: the test is never playing */
 
 static void reset_flash(void)
 {
