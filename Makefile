@@ -164,3 +164,14 @@ unit-clip:
 unit-engines:
 	@sh tests/host/run_fm6.sh
 	@sh tests/host/run_noise.sh
+
+.PHONY: unit-midi
+unit-midi:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/midi_in_test \
+	    tests/host/midi_in_test.c core/midi/midi_in.c
+	build/host/midi_in_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/midi_in_test_san \
+	    tests/host/midi_in_test.c core/midi/midi_in.c
+	build/host/midi_in_test_san
+
