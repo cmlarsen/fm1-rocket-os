@@ -239,3 +239,18 @@ unit-fx:
 	    -o build/host/perform_test_san tests/host/perform_test.c firmware/src/dsp/perform.c
 	build/host/perform_test_san
 
+# T8c: the NAME state machine and its render. ui_name.c is an include-style view that
+# draws through gfx.c's statics, so the test is one translation unit holding gfx.c +
+# ui_name.c (as X0X's x0x.c does); -Wno-unused-function is what host/build_host.sh uses
+# for gfx.c. The test writes build/host/ui_name/*.png (listed in reports/T8c.md).
+.PHONY: unit-name
+unit-name:
+	@mkdir -p build/host/ui_name
+	$(HOST_CC) $(CORE_CFLAGS) -Wno-unused-function -Wno-unused-parameter -Werror -I. -Ifirmware/src -Ifirmware/src/app \
+	    -o build/host/ui_name_test tests/host/ui_name_test.c
+	build/host/ui_name_test
+	$(HOST_CC) $(SAN_CFLAGS) -Wno-unused-function -Wno-unused-parameter -I. -Ifirmware/src -Ifirmware/src/app \
+	    -o build/host/ui_name_test_san tests/host/ui_name_test.c
+	build/host/ui_name_test_san
+
+
