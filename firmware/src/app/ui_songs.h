@@ -15,10 +15,11 @@
  *   SO_NEW     STUDIO 8  - Empty / Starter / Copy current; K1 tempo, K2 key; SEL
  *                          creates in the first free slot ("5 SONGS MAX: DELETE ONE"
  *                          when none is free).
- *   SO_MENU    STUDIO 11 - Open, Copy, Rename, Delete for one song.
- *   SO_RENAME  STUDIO 12 - T8c's name_edit_* over the song's name.
- *   SO_DELETE  STUDIO 13 - hold SEL 1.5 s; a ring names the song and its contents;
+ *   SO_MENU    STUDIO 11 - Open, Copy, Rename, Delete for one song. Delete is a single
+ *                          gesture: holding SEL on the Delete row for 1.5 s fills a
+ *                          ring (STUDIO 13) and deletes; releasing early keeps it;
  *                          HOME+REC undoes a delete.
+ *   SO_RENAME  STUDIO 12 - T8c's name_edit_* over the song's name.
  *
  * The shell (ui.c) enters with ui_songs_begin, feeds one song_event_t per frame to
  * ui_songs_input, draws with ui_songs_draw, and leaves on SONG_ACTION_CLOSE /
@@ -39,7 +40,7 @@
 #define SONGS_TOAST_MS 1600u
 
 /* screens */
-enum { SO_LIST = 0, SO_NEW, SO_MENU, SO_RENAME, SO_DELETE };
+enum { SO_LIST = 0, SO_NEW, SO_MENU, SO_RENAME };
 
 /* what ui_songs_input reports to the shell */
 enum { SONG_ACTION_NONE = 0, SONG_ACTION_CLOSE, SONG_ACTION_OPENED };
@@ -88,6 +89,16 @@ typedef struct {
      * (core/model/undo_stack.h). */
     int  (*undelete)(void *ctx);
 
+    /* The slot the next create_from / copy would use: a slot that has never held a
+     * song first, then a deleted one, or -2 when all are in use. The view shows the
+     * "5 songs max" message from it before it builds a song. */
+    int  (*first_free)(void *ctx);
+
+    /* 1 while the most recent delete can still be undone. Once its slot is reused by
+     * a create or a copy the delete can no longer be brought back, so an undo says
+     * "can't undo" (core/model/undo_stack.h's sequence check). */
+    int  (*can_undelete)(void *ctx);
+
     /* How many clips the slot's song holds, for the menu and the delete ring;
      * -1 when unknown. */
     int  (*clip_count)(void *ctx, int slot);
@@ -113,10 +124,9 @@ typedef struct {
     /* SO_RENAME */
     name_edit_t name;
 
-    /* SO_DELETE */
-    uint8_t  del_held;                 /* SEL is down and armed */
-    uint8_t  del_done;                 /* the delete fired */
-    uint8_t  del_up_seen;              /* SEL was released since entering the screen */
+    /* the menu's Delete hold (STUDIO 13) */
+    uint8_t  del_held;                 /* SEL is down on Delete: the ring is filling */
+    uint8_t  del_done;                 /* the delete succeeded this hold */
     uint32_t del_t0;
 
     /* button/key edges (the shell feeds held state) */

@@ -95,7 +95,7 @@ void ui_songs_begin(songs_ui_t *u, const songs_ops_t *ops)
     u->tmpl = 1;                       /* Starter, as the design highlights */
     u->key = (uint8_t)SONG_TMPL_DEFAULT_KEY;
     u->bpm_x10 = SONG_TMPL_BPM_DEFAULT;
-    u->del_held = u->del_done = u->del_up_seen = 0;
+    u->del_held = u->del_done = 0;
     u->del_t0 = 0;
     u->prev_btn = u->prev_keys = 0;
     u->msg[0] = 0;
@@ -124,33 +124,37 @@ static void sr_open_new(songs_ui_t *u)
 
 static void sr_create(songs_ui_t *u, int *action, uint32_t ms)
 {
+    int ns;
+    if (u->ops->first_free && u->ops->first_free(u->ops->ctx) < 0) {
+        sr_say(u, "5 SONGS MAX: DELETE ONE", ms);
+        return;
+    }
     if (u->row == 2) {                 /* Copy current */
         int cur = sr_current_slot(u);
-        int ns = (cur >= 0 && u->ops->copy) ? u->ops->copy(u->ops->ctx, cur) : -2;
-        if (ns < 0) {
-            sr_say(u, "5 SONGS MAX: DELETE ONE", ms);
+        if (cur < 0)                   /* nothing to copy: the row is inert */
             return;
-        }
-        ui_songs_refresh(u);
-        if (u->ops->open && u->ops->open(u->ops->ctx, ns) == 0)
-            *action = SONG_ACTION_OPENED;
-        return;
+        ns = u->ops->copy ? u->ops->copy(u->ops->ctx, cur) : -1;
     } else {
         song_t s;
-        int ns;
         if (u->row == 0)
-            song_template_empty(&s, u->bpm_x10);
+            song_template_empty(&s, u->bpm_x10, (int)u->key);
         else
             song_template_starter(&s, u->bpm_x10, (int)u->key);
-        ns = u->ops->create_from ? u->ops->create_from(u->ops->ctx, &s) : -2;
-        if (ns < 0) {
-            sr_say(u, "5 SONGS MAX: DELETE ONE", ms);
-            return;
-        }
-        ui_songs_refresh(u);
-        if (u->ops->open && u->ops->open(u->ops->ctx, ns) == 0)
-            *action = SONG_ACTION_OPENED;
+        ns = u->ops->create_from ? u->ops->create_from(u->ops->ctx, &s) : -1;
     }
+    if (ns == -2) {
+        sr_say(u, "5 SONGS MAX: DELETE ONE", ms);
+        return;
+    }
+    if (ns < 0) {
+        sr_say(u, "SAVE FAILED", ms);
+        return;
+    }
+    ui_songs_refresh(u);
+    if (u->ops->open && u->ops->open(u->ops->ctx, ns) == 0)
+        *action = SONG_ACTION_OPENED;
+    else
+        sr_say(u, "SAVE FAILED", ms);
 }
 
 int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
@@ -166,13 +170,17 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
         int r = name_edit_input(&u->name, ev);
         if (r == NAME_DONE) {
             char buf[SONGS_NAME];
+            int rc;
             name_edit_result(&u->name, buf);
-            if (u->ops->rename)
-                u->ops->rename(u->ops->ctx, u->slot, buf);
-            ui_songs_refresh(u);
-            u->screen = SO_MENU;
-            u->row = 2;                /* stay on Rename */
-            sr_say(u, "RENAMED", ev->ms);
+            rc = u->ops->rename ? u->ops->rename(u->ops->ctx, u->slot, buf) : -1;
+            if (rc == 0) {
+                ui_songs_refresh(u);
+                u->screen = SO_MENU;
+                u->row = 2;            /* stay on Rename */
+                sr_say(u, "RENAMED", ev->ms);
+            } else {
+                sr_say(u, "SAVE FAILED", ev->ms);   /* leave the editor open to retry */
+            }
         } else if (r == NAME_CANCELLED) {
             u->screen = SO_MENU;
             u->row = 2;
@@ -240,67 +248,72 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
             u->screen = SO_LIST;
         break;
 
-    case SO_MENU:
-        if (sel)
-            u->row = (uint8_t)sr_clamp(u->row + (sel > 0 ? 1 : -1), 0, 3);
-        if (down & (1u << B_SEL)) {
-            switch (u->row) {
-            case 0:
-                if (u->ops->open && u->ops->open(u->ops->ctx, u->slot) == 0)
-                    action = SONG_ACTION_OPENED;
-                break;
-            case 1: {
-                int ns = u->ops->copy ? u->ops->copy(u->ops->ctx, u->slot) : -2;
-                if (ns < 0) {
-                    sr_say(u, "5 SONGS MAX: DELETE ONE", ev->ms);
-                } else {
+    case SO_MENU: {
+        int held = (int)((ev->btn >> B_SEL) & 1u);
+        if (u->row == 3) {             /* Delete: hold SEL for 1.5 s */
+            if (down & (1u << B_SEL)) {
+                u->del_held = 1;
+                u->del_done = 0;
+                u->del_t0 = ev->ms;
+            }
+            if (u->del_held && !u->del_done && (ev->ms - u->del_t0) >= SONGS_DELETE_MS) {
+                int rc = u->ops->del ? u->ops->del(u->ops->ctx, u->slot) : -1;
+                u->del_held = 0;
+                if (rc == 0) {
+                    u->del_done = 1;
                     ui_songs_refresh(u);
                     u->screen = SO_LIST;
-                    u->row = (uint8_t)(1 + ns);
-                    sr_say(u, "COPIED", ev->ms);
+                    u->row = (uint8_t)sr_clamp(1 + u->slot, 0, (int)SONGS_SLOTS);
+                    sr_say(u, "DELETED", ev->ms);
+                } else {
+                    sr_say(u, "SAVE FAILED", ev->ms);   /* leave the menu unchanged */
                 }
-                break;
+            } else if (u->del_held && !held) {
+                u->del_held = 0;       /* released early: keep the song */
             }
-            case 2:
-                name_edit_begin(&u->name, u->rows[u->slot].name);
-                u->screen = SO_RENAME;
-                break;
-            default:
-                u->screen = SO_DELETE;
-                u->del_held = u->del_done = 0;
-                u->del_up_seen = (uint8_t)(((ev->btn >> B_SEL) & 1u) == 0u);
-                break;
+        } else {
+            if (sel)
+                u->row = (uint8_t)sr_clamp(u->row + (sel > 0 ? 1 : -1), 0, 3);
+            if (down & (1u << B_SEL)) {
+                switch (u->row) {
+                case 0:
+                    if (u->ops->open && u->ops->open(u->ops->ctx, u->slot) == 0)
+                        action = SONG_ACTION_OPENED;
+                    else
+                        sr_say(u, "SAVE FAILED", ev->ms);
+                    break;
+                case 1: {
+                    int ns = -1;
+                    if (u->ops->first_free && u->ops->first_free(u->ops->ctx) < 0) {
+                        sr_say(u, "5 SONGS MAX: DELETE ONE", ev->ms);
+                        break;
+                    }
+                    if (u->ops->copy)
+                        ns = u->ops->copy(u->ops->ctx, u->slot);
+                    if (ns == -2)
+                        sr_say(u, "5 SONGS MAX: DELETE ONE", ev->ms);
+                    else if (ns < 0)
+                        sr_say(u, "SAVE FAILED", ev->ms);
+                    else {
+                        ui_songs_refresh(u);
+                        u->screen = SO_LIST;
+                        u->row = (uint8_t)(1 + ns);
+                        sr_say(u, "COPIED", ev->ms);
+                    }
+                    break;
+                }
+                case 2:
+                    name_edit_begin(&u->name, u->rows[u->slot].name);
+                    u->screen = SO_RENAME;
+                    break;
+                default:
+                    break;             /* row 3 is the hold, above */
+                }
             }
-        }
-        if (down & (1u << B_HOME))
-            u->screen = SO_LIST;
-        break;
-
-    case SO_DELETE: {
-        int held = (int)((ev->btn >> B_SEL) & 1u);
-        if (!held) {
-            u->del_up_seen = 1;
-            if (u->del_held) {         /* released early: cancel back to the menu */
-                u->del_held = 0;
-                if (!u->del_done)
-                    u->screen = SO_MENU;
-            }
-        } else if (u->del_up_seen && !u->del_held) {
-            u->del_held = 1;
-            u->del_t0 = ev->ms;
-        }
-        if (u->del_held && !u->del_done && (ev->ms - u->del_t0) >= SONGS_DELETE_MS) {
-            u->del_done = 1;
-            if (u->ops->del)
-                u->ops->del(u->ops->ctx, u->slot);
-            ui_songs_refresh(u);
-            u->screen = SO_LIST;
-            u->row = (uint8_t)sr_clamp(1 + u->slot, 0, (int)SONGS_SLOTS);
-            sr_say(u, "DELETED", ev->ms);
         }
         if (down & (1u << B_HOME)) {
             u->del_held = 0;
-            u->screen = SO_MENU;
+            u->screen = SO_LIST;
         }
         break;
     }
@@ -417,21 +430,41 @@ static void sr_battery(int x, int y)
 }
 static void sr_header(const songs_ui_t *u)
 {
-    static const char *const LAYER[5] = {"SONGS", "NEW SONG", "SONGS", "NAME", "SONGS"};
+    static const char *const LAYER[4] = {"SONGS", "NEW SONG", "SONGS", "NAME"};
     int w = sr_chip(5, 4, "STUDIO");
     sr_text(5 + w + 6, sr_vc(&AF_S, 4, 16), &AF_S, LAYER[u->screen], TOK_MID);
     sr_battery(217, 7);
 }
-static void sr_row(int y, const char *name, const char *meta, int sel, int on, int dim)
+/* a dashed border, as the + New song row is drawn in the design */
+static void sr_dash_rect(int x, int y, int w, int h, uint16_t c)
 {
-    uint16_t bg = sel ? TOK_RAISE : TOK_SURF;
+    int i;
+    for (i = 0; i < w; i += 6) {
+        int n = i + 4 <= w ? 4 : 1;
+        cv_rect(x + i, SY(y), n, 1, c);
+        cv_rect(x + i, SY(y + h - 1), n, 1, c);
+    }
+    for (i = 0; i < h; i += 6) {
+        int n = i + 4 <= h ? 4 : 1;
+        cv_rect(x, SY(y + i), 1, n, c);
+        cv_rect(x + w - 1, SY(y + i), 1, n, c);
+    }
+}
+static void sr_row(int y, const char *name, const char *meta, int sel, int on, int dim, int dashed)
+{
     uint16_t nc = dim ? TOK_DIM : on ? TOK_THEME : TOK_TEXT;
     uint16_t mc = dim ? TOK_DIM : TOK_MID;
-    sr_rrect(4, y, 232, 16, 4, bg);
+    if (dashed) {
+        sr_dash_rect(4, y, 232, 16, TOK_DIM);
+        nc = dim ? TOK_DIM : TOK_THEME;
+    } else {
+        sr_rrect(4, y, 232, 16, 4, sel ? TOK_RAISE : TOK_SURF);
+    }
     if (sel)
         cv_rect(4, SY(y), 2, 16, TOK_THEME);
     sr_text(12, sr_vc(&AF_S, y, 16), &AF_S, name, nc);
-    sr_text_r(232, sr_vc(&AF_S, y, 16), &AF_S, meta, mc);
+    if (meta[0])
+        sr_text_r(232, sr_vc(&AF_S, y, 16), &AF_S, meta, mc);
 }
 static void sr_list_rows(const songs_ui_t *u, int dim, int cursor)
 {
@@ -444,42 +477,46 @@ static void sr_list_rows(const songs_ui_t *u, int dim, int cursor)
             name = "+ New song";
             meta = "template";
             sel = cursor && u->row == 0;
-        } else {
+            sr_row(y, name, meta, sel, 0, dim, 1);
+            continue;
+        }
+        {
             const song_row_t *r = &u->rows[i - 1];
             name = r->used && r->name[0] ? r->name : r->used ? "SONG" : "empty";
-            meta = !r->used ? "empty" : r->current ? "open now" : r->has_take ? "1 take" : "no take";
+            meta = !r->used ? "" : r->current ? "open now" : r->has_take ? "1 take" : "no take";
             on = r->current;
             sel = cursor && u->row == i;
         }
-        sr_row(y, name, meta, sel, on, dim);
+        sr_row(y, name, meta, sel, on, dim, 0);
     }
 }
 static void sr_meter(const songs_ui_t *u)
 {
     char t[12], *q;
-    int filled = 168 * u->nused / (int)SONGS_SLOTS;
-    sr_rrect(8, 162, 168, 6, 3, TOK_LINE);
-    if (filled)
-        sr_rrect(8, 162, filled, 6, 3, TOK_SEL);
-    sr_text(8, sr_vc(&AF_S, 154, 14), &AF_S, "STORAGE", TOK_MID);
+    int barw = 176;
+    sr_rrect(8, 160, barw, 6, 3, TOK_LINE);
+    if (u->nused)
+        sr_rrect(8, 160, barw * u->nused / (int)SONGS_SLOTS, 6, 3, TOK_SEL);
     q = sr_itoa(t, u->nused);
     q = sr_cat(q, " OF 5");
     (void)q;
-    sr_text_r(232, sr_vc(&AF_S, 154, 14), &AF_S, t, TOK_MID);
+    sr_text_r(232, sr_vc(&AF_S, 156, 14), &AF_S, t, TOK_MID);
 }
 
 static const uint16_t SR_TICK[5] = {TOK_DRUM, TOK_BASS, TOK_LEAD, TOK_CHORD, TOK_FX};
-static void sr_new_card(int y, const char *title, const char *sub, const int *bright, int sel)
+static void sr_new_card(int y, const char *title, const char *sub, const int *bright, int sel, int dim)
 {
-    uint16_t bg = sel ? TOK_SEL : TOK_SURF;
-    uint16_t tc = sel ? TOK_INK : TOK_THEME;
-    uint16_t sc = sel ? TOK_INK : TOK_MID;
+    uint16_t bg = dim ? TOK_BG : sel ? TOK_SEL : TOK_SURF;
+    uint16_t tc = dim ? TOK_DIM : sel ? TOK_INK : TOK_THEME;
+    uint16_t sc = dim ? TOK_DIM : sel ? TOK_INK : TOK_MID;
     int i;
     sr_rrect(4, y, 232, 36, 5, bg);
+    if (dim)
+        sr_frame(4, y, 232, 36, TOK_LINE);
     sr_text(10, sr_vc(&AF_M, y + 3, 18), &AF_M, title, tc);
     sr_text_r(230, sr_vc(&AF_S, y + 5, 14), &AF_S, sub, sc);
     for (i = 0; i < 5; i++)
-        cv_rect(10 + i * 45, SY(y + 26), 41, 4, bright[i] ? SR_TICK[i] : TOK_RAISE);
+        cv_rect(10 + i * 45, SY(y + 26), 41, 4, (bright[i] && !dim) ? SR_TICK[i] : TOK_RAISE);
 }
 static void sr_kv(int x, int y, const char *lbl, const char *val)
 {
@@ -492,10 +529,11 @@ static void sr_new_screen(const songs_ui_t *u)
     static const int B0[5] = {0, 0, 0, 0, 0}, B1[5] = {1, 1, 0, 0, 0}, B2[5] = {1, 1, 1, 1, 1};
     char bpm[8], *q;
     int cur = sr_current_slot(u);
-    const char *copyname = (cur >= 0 && cur < (int)SONGS_SLOTS) ? u->rows[cur].name : "NO SONG";
-    sr_new_card(26, "Empty", "5 roles, no clips", B0, u->row == 0);
-    sr_new_card(65, "Starter", "beat + bass ready", B1, u->row == 1);
-    sr_new_card(104, "Copy current", copyname, B2, u->row == 2);
+    int can_copy = (cur >= 0 && cur < (int)SONGS_SLOTS);
+    const char *copyname = can_copy ? u->rows[cur].name : "NO SONG";
+    sr_new_card(26, "Empty", "5 roles, no clips", B0, u->row == 0, 0);
+    sr_new_card(65, "Starter", "beat + bass ready", B1, u->row == 1, 0);
+    sr_new_card(104, "Copy current", copyname, B2, u->row == 2, !can_copy);
     q = sr_itoa(bpm, (int)u->bpm_x10 / 10);
     (void)q;
     sr_kv(4, 150, "K1 tempo", bpm);
@@ -545,18 +583,24 @@ static void sr_menu(const songs_ui_t *u)
 }
 static void sr_ring(int cx, int cy, int r, int pct, uint16_t track, uint16_t fill)
 {
-    int px = 0, py = -r, i;
-    for (i = 1; i <= 72; i++) {
-        int nx = (px * 4080 - py * 357) >> 12;    /* cos 5 deg, sin 5 deg in Q12 */
-        int ny = (px * 357 + py * 4080) >> 12;
-        int d = sr_isqrt(nx * nx + ny * ny);
-        if (d > 0) {
-            nx = nx * r / d;
-            ny = ny * r / d;
+    int off;
+    for (off = -2; off <= 2; off++) {      /* a 5 px stroke, as the design draws it */
+        int rr = r + off;
+        int px = 0, py = -rr, i;
+        if (rr <= 0)
+            continue;
+        for (i = 1; i <= 72; i++) {
+            int nx = (px * 4080 - py * 357) >> 12;    /* cos 5 deg, sin 5 deg in Q12 */
+            int ny = (px * 357 + py * 4080) >> 12;
+            int d = sr_isqrt(nx * nx + ny * ny);
+            if (d > 0) {
+                nx = nx * rr / d;
+                ny = ny * rr / d;
+            }
+            cv_line(cx + px, SY(cy + py), cx + nx, SY(cy + ny), (i * 100 / 72) <= pct ? fill : track);
+            px = nx;
+            py = ny;
         }
-        cv_line(cx + px, SY(cy + py), cx + nx, SY(cy + ny), (i * 100 / 72) <= pct ? fill : track);
-        px = nx;
-        py = ny;
     }
 }
 static void sr_delete(const songs_ui_t *u, uint32_t ms)
@@ -564,6 +608,7 @@ static void sr_delete(const songs_ui_t *u, uint32_t ms)
     const song_row_t *r = &u->rows[u->slot];
     char meta[24];
     int pct = 0;
+    cv_rect(0, SY(30), 240, 150, TOK_BG);   /* blank the rows behind the dialog's edges */
     sr_rrect(14, 34, 212, 140, 6, TOK_SURF);
     sr_frame(14, 34, 212, 140, TOK_LINE);
     if (u->del_done)
@@ -611,20 +656,18 @@ static void sr_scene(const songs_ui_t *u, uint32_t ms)
     case SO_MENU:
         sr_list_rows(u, 1, 0);
         sr_menu(u);
-        {
+        if (u->del_held || u->del_done) {
+            sr_delete(u, ms);
+            {
+                int x = 5;
+                x = sr_hint(x, 216, "RELEASE", "keep");
+                sr_hint(x, 216, "HOME+REC", "undo");
+            }
+        } else {
             int x = 5;
             x = sr_hint(x, 216, "SELECT", "row");
             x = sr_hint(x, 216, "SEL", "do it");
             sr_hint(x, 216, "HOME", "close");
-        }
-        break;
-    case SO_DELETE:
-        sr_list_rows(u, 1, 0);
-        sr_delete(u, ms);
-        {
-            int x = 5;
-            x = sr_hint(x, 216, "HOME", "keep");
-            sr_hint(x, 216, "HOME+REC", "undo");
         }
         break;
     default:
