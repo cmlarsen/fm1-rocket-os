@@ -154,6 +154,7 @@ static void songs_open(void);
 static void songs_close(void);
 static int  songs_op_open(void *ctx, int slot);
 static int  songs_op_delete(void *ctx, int slot);
+static void ui_bands_dirty(void);               /* force every band to redraw (songs_close) */
 int  ui_songs_up(void);                         /* the runner: 1 while the songs view is up */
 
 /* ====================================== T7a round 2: the held-note table === */
@@ -2556,12 +2557,40 @@ static int songs_mode(void) { return ui.view == V_SONGS; }
 int ui_songs_up(void) { return ui.view == V_SONGS; }
 int ui_songs_row(void) { return songs.row; }     /* the runner: the view's cursor row */
 
-/* stop the clip engine, silence everything, then load `slot` as the current song */
-static void songs_load_now(int slot)
+/* SONGS is a stopped, quiet view: entering (and every store write) silences the clip
+ * engine first. */
+static void songs_stop_now(void)
 {
     live_bridge_transport_stop();
     note_release_all();
     engine_all_off();
+}
+
+/* Stop, then wait (bounded, ~50 ms) for the audio ISR to acknowledge the stop before g_song
+ * changes under it: eng_prof_frames advances once per rendered block in the ISR, so two
+ * blocks mean the engine has run past the stop request. The host renders synchronously (no
+ * concurrent ISR), so it returns at once. 0 = the ISR did not acknowledge in time. */
+static int songs_stop_wait(void)
+{
+    songs_stop_now();
+#ifdef X0X_HOST
+    return 1;
+#else
+    {
+        uint32_t t0 = plat_ms(), f0 = eng_prof_frames;
+        while ((uint32_t)(plat_ms() - t0) < 50u)
+            if ((uint32_t)(eng_prof_frames - f0) >= 2u * 256u)
+                return 1;
+        return 0;
+    }
+#endif
+}
+
+/* stop the clip engine, silence everything, then load `slot` as the current song */
+static void songs_load_now(int slot)
+{
+    if (!songs_stop_wait())
+        return;                               /* the ISR did not settle: refuse to swap under it */
     song_io_songs_open(0, slot);
     live_bridge_sync_tempo();
     proj.set.rsv[0] = (uint8_t)slot;      /* T8i: remember the current song across a reboot */
@@ -2572,11 +2601,13 @@ static void songs_load_now(int slot)
 static int songs_op_open(void *ctx, int slot)
 {
     (void)ctx;
-    live_bridge_transport_stop();
-    note_release_all();
-    engine_all_off();
-    if (song_io_songs_current_slot(0) >= 0)
-        song_io_flush();                    /* keep a stored song; never auto-save the project seed */
+    if (!songs_stop_wait())
+        return -1;                            /* the ISR did not settle: refuse the swap */
+    if (song_io_songs_current_slot(0) >= 0) {
+        int fr = song_io_flush();             /* keep a stored song; never auto-save the project seed */
+        if (fr < 0)
+            return -1;                        /* the flush failed: keep the edits, don't open */
+    }
     if (song_io_songs_open(0, slot) != 0)
         return -1;
     live_bridge_sync_tempo();
@@ -2631,6 +2662,7 @@ static const songs_ops_t SONGS_OPS = {
 
 static void songs_open(void)
 {
+    songs_stop_now();                     /* SONGS is a stopped, quiet view */
     note_release_all();
     ui_songs_begin(&songs, &SONGS_OPS);
     set_view(V_SONGS);
@@ -2642,6 +2674,7 @@ static void songs_close(void)
     note_release_all();
     set_view(V_STUDIO);
     studio_enter();
+    ui_bands_dirty();                      /* the songs screen left every band changed: redraw them */
     say("STUDIO", 0);
 }
 
@@ -2678,7 +2711,8 @@ static void input(void)
 {
     uint32_t btn = plat_buttons(), keys = plat_keys(), ch, i;
     int e;
-    live_play_tick(btn);                                  /* T3: PLAY's short / long press */
+    if (!songs_mode())
+        live_play_tick(btn);                                  /* T3: PLAY's short / long press; inert in SONGS */
     songs_save_tick(btn);                                 /* T8i: SAVE's long press opens SONGS */
     if (songs_mode()) {                                   /* T8i: the songs view owns the frame */
         song_event_t ev;
@@ -2723,8 +2757,10 @@ static void input(void)
     }
     if (btn || keys || btn != ui.btn || keys != ui.keys)
         ui.act_t = plat_ms();                         /* held or changed: being played */
-    copy_tick(btn, keys);
-    help_tick(btn, keys);
+    if (ui.classic || !(btn & (1u << B_SAVE))) {   /* T8i: SAVE held in STUDIO: only SONGS' feedback */
+        copy_tick(btn, keys);
+        help_tick(btn, keys);
+    }
     ui.btn = btn;
     ch = keys ^ ui.keys;
     ui.keys = keys;
@@ -2840,6 +2876,15 @@ static void input(void)
 #define KNOB_H 82
 
 static uint32_t blit_hash[4];
+/* T8i: the songs view draws with cv_blit, not cv_commit, so its pixels do not update
+ * blit_hash; on the way back every band must be forced to redraw (or the footer and the
+ * knob strip keep the songs screen). */
+static void ui_bands_dirty(void)
+{
+    int i;
+    for (i = 0; i < 4; i++)
+        blit_hash[i] = 0;
+}
 static uint32_t cv_hash(void)
 {
     uint32_t i, h = 2166136261u, n = cv_w * cv_h;
