@@ -1,0 +1,41 @@
+# T3 LIVE LED states: off (empty), dim (loaded), on (playing), fast blink (queued to start)
+# and slow blink (queued to stop). The levels are the single-colour ones X0X offers: lit and
+# dim; "blinking" is the UI toggling between them each frame.
+wait 300
+# two 909 patterns, so there is a second drum clip to queue
+tapkey w0
+turn PRESET 1
+tapkey w2
+turn PRESET -1
+# enter LIVE
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+# empty (key 2) and loaded (key 0, a clip not playing)
+expect key 2 0
+expect key 0 1
+# playing: launch drum A and start the transport
+tapkey 0
+tap PLAY
+wait-bar 1
+expect key 0 2
+# queued to start: queue drum B on a fresh bar; its key blinks
+wait-bar 1
+tapkey 1
+keyblink b0
+# cancel it: the key is loaded (dim) again
+tapkey 1
+expect key 1 1
+# queued to stop: tap the playing clip; its key slow-blinks
+wait-bar 1
+tapkey 0
+keyblink w0 slow
+shot live_leds.png
+dump live_leds.json
+# leave LIVE
+press PLAY
+wait 700
+release PLAY
+expect mode 0
