@@ -23,8 +23,10 @@ turn K1 6 60
 shot t9i_live4_recording.png
 tap REC
 wait-bar 2
-# LIVE 10: the take card (EDIT in LIVE)
+# LIVE 10: the take card (LIVE SETUP -> Take)
 tap EDIT
+turn SELECT 6 80
+tap SEL
 wait 300
 shot t9i_live10_take.png
 tap EDIT

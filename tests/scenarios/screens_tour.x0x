@@ -130,3 +130,25 @@ press PLAY
 wait 700
 release PLAY
 wait 150
+
+# TLSET: seven-row setup, assignment and the external-clock header at 1:1.
+reboot
+wait 300
+press PLAY
+wait 700
+release PLAY
+tap EDIT
+wait 1600
+shot tour_live_setup.png
+tap SEL
+key 16 down
+turn PRESET 4 80
+shot tour_live_assign.png
+key 16 up
+tap HOME
+turn SELECT 5 80
+turn ALGO -1 80
+midiclock 100 25
+wait 20
+shot tour_live_ext.png
+tap EDIT

@@ -1,0 +1,95 @@
+# Every LIVE SETUP row, shared clock setting, persistence and note release.
+wait 300
+press PLAY
+wait 700
+release PLAY
+midi 90 3C 64
+wait 30
+expect midiheld 1
+press GLO
+press EDIT
+wait 50
+expect card 5
+shot tlset_setup_help.png
+release EDIT
+release GLO
+wait 50
+expect setup 0
+tap EDIT
+expect setup 1
+expect midiheld 0
+wait 1600
+shot tlset_live9_setup.png
+turn SELECT 1 80
+turn ALGO 1 80
+expect songquant 1
+turn SELECT 1 80
+turn ALGO 1 80
+expect stagelock 1
+turn SELECT 1 80
+turn ALGO 3 80
+expect livechannel 3
+midi 90 3C 64
+wait 30
+expect midiheld 0
+midi 92 3C 64
+wait 30
+expect midiheld 1
+turn ALGO 1 80
+expect midiheld 0
+turn ALGO -1 80
+turn SELECT 1 80
+turn ALGO 1 80
+expect pclaunch 1
+midi C0 00 00
+wait 30
+expect playing 0
+tap PLAY
+midi C2 00 00
+wait 800
+expect playing 1
+expect liveclip0 0
+tap PLAY
+expect playing 0
+turn SELECT 1 80
+turn ALGO 1 80
+expect clockinternal 1
+midiclock 100 25
+wait 20
+expect ext 0
+turn ALGO -1 80
+expect clockinternal 0
+wait 1600
+midiclock 100 25
+wait 20
+expect ext 1
+shot tlset_ext_setup.png
+tap EDIT
+expect setup 0
+shot tlset_ext_pads.png
+tap EDIT
+turn SELECT 6 80
+tap SEL
+expect takeopen 1
+tap HOME
+expect takeopen 0
+expect setup 1
+tap EDIT
+expect setup 0
+expect songwrites 0
+press PLAY
+wait 700
+release PLAY
+wait 5000
+expect songdirty 0
+reboot
+expect songquant 1
+expect stagelock 1
+expect livechannel 3
+expect pclaunch 1
+# A newly created clip inherits launch default; existing clips keep theirs.
+expect clipquant0 0
+cursor 0 5
+tap SEQ
+expect clipquant5 1
+tap HOME

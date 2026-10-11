@@ -55,16 +55,29 @@ static uint32_t fx_press_t, fx_last_tap;
 static uint32_t fx_key_t[6];         /* each FX key's press time */
 static uint8_t fx_key_dn[6];         /* the key is down (the effect is momentary) */
 static uint8_t fx_key_used[6];       /* the key went down in the FX layer: its release is ours */
+static uint8_t fx_owner_key[6];      /* the key that engaged each effect, plus one (0 = none) */
 
 static int fx_layer_active(void) { return fx_held || fx_layer_latch; }
 int live_fx_layer(void) { return fx_layer_active(); }
+static void live_fx_release_held(void)
+{
+    int i;
+    for (i = 0; i < 6; i++)
+        if (fx_key_dn[i]) {
+            if (!engine_perform_latched(i))
+                engine_perform_release(i);
+            fx_key_dn[i] = 0;
+        }
+}
+
 static void live_fx_reset_ui(void)
 {
     int i;
+    live_fx_release_held();
     fx_held = fx_layer_latch = 0;
     fx_press_t = fx_last_tap = 0;
     for (i = 0; i < 6; i++)
-        fx_key_dn[i] = fx_key_used[i] = 0;
+        fx_key_dn[i] = fx_key_used[i] = fx_owner_key[i] = 0;
 }
 
 /* T7a round 2: the held-note table lives in the shared key path (ui.c), so a key's note is tracked
@@ -73,6 +86,8 @@ static void live_fx_reset_ui(void)
 
 /* ---- T9i: the take gestures --------------------------------------------- */
 
+static void live_setup_close(void);
+static void live_mapped_release_all(void);
 static int live_recording(void) { return live_bridge_take_recording() || live_bridge_take_armed(); }
 static void live_len_str(char *out, uint32_t samples);
 
@@ -192,7 +207,7 @@ static void live_enter(void)
     live_fx_reset_ui();                   /* T10i: a fresh LIVE starts with no FX layer open */
     engine_perform_reset();               /* T10i: and no effect left from a previous visit */
     live_bridge_mute_all(0);              /* T10i: and no mute */
-    take_open = 0;                        /* T9i: the take card is closed on entry */
+    live_setup_close();                  /* TLSET: a fresh LIVE has no setup open */
     rec_pressed = rec_cleared = take_full_toast = 0;
     take_prev_state = (uint8_t)live_bridge_take_state();
     if (!song_io_take_pending())          /* an unsaved recording is the in-RAM take; keep it */
@@ -205,6 +220,8 @@ static void live_enter(void)
 
 static void live_leave(void)
 {
+    live_mapped_release_all();
+    live_setup_close();
     note_release_all();                   /* T7a D1/r2: leaving LIVE releases every held note */
     live_fx_reset_ui();                   /* T10i: the FX layer closes */
     /* T9i B2/S3: finalize the take at once and stop any playback first, then reset the perform FX
@@ -264,16 +281,18 @@ static void live_play_tick(uint32_t btn)
 static const char *const LV_FX_NAME[6] = {"REPEAT 1/8", "REPEAT 1/16", "TAPE STOP",
                                           "FILTER DIVE", "ECHO THROW", "FREEZE"};
 
-static void live_fx_key(int k, int down)
+static void live_fx_key(int k, int down, int owner)
 {
     if (down) {
         fx_key_t[k] = plat_ms();
         fx_key_dn[k] = 1;
         fx_key_used[k] = 1;
+        fx_owner_key[k] = (uint8_t)(owner + 1);
         if (!engine_perform_latched(k))
             engine_perform_engage(k, 0);          /* hold: momentary (a tap latches on release) */
     } else {
         fx_key_used[k] = 0;
+        fx_owner_key[k] = 0;
         if (fx_key_dn[k]) {
             uint32_t dt = plat_ms() - fx_key_t[k];
             fx_key_dn[k] = 0;
@@ -292,19 +311,43 @@ static void live_fx_mute(int role)
     say(on ? "MUTE " : "UNMUTE ", LV_ROLE_L[role]);
 }
 
+/* Mapped FX retain the originating key across layer and overlay changes. */
+static uint8_t mapped_fx[27];             /* effect + 1, zero = none */
+static void live_mapped_release_all(void)
+{
+    int k;
+    for (k = 0; k < 27; k++) {
+        if (mapped_fx[k]) {
+            int f = mapped_fx[k] - 1;
+            if (!engine_perform_latched(f)) engine_perform_release(f);
+            fx_key_dn[f] = fx_key_used[f] = fx_owner_key[f] = 0;
+            mapped_fx[k] = 0;
+        }
+    }
+}
+#include "ui_live_setup.c"
+
 static int live_handle_key(int k, int down)
 {
-    /* an FX key's release is ours even if the layer closed while it was held */
-    if (k >= 0 && k < 6 && fx_key_used[k] && !down) {
-        live_fx_key(k, 0);
+    if (!down && mapped_fx[k]) {
+        int f = mapped_fx[k] - 1, j, held = 0;
+        mapped_fx[k] = 0;
+        for (j = 0; j < 27; j++) if (mapped_fx[j] == f + 1) held = 1;
+        if (!held) live_fx_key(f, 0, k);
         return 1;
     }
+    /* an FX key's release is ours even if the layer closed while it was held */
+    if (k >= 0 && k < 6 && !down && fx_key_used[k] && fx_owner_key[k] == (uint8_t)(k + 1)) {
+        live_fx_key(k, 0, k);
+        return 1;
+    }
+    if (live_setup_key(k, down)) return 1;
     if (live_bridge_take_playing())
         return 1;                          /* T9i: LIVE input is ignored while the take plays */
     if (fx_layer_active()) {              /* T10i: FX held: keys 0-5 punch, upper keys mute */
         if (k >= 0 && k < 6) {
             if (down)
-                live_fx_key(k, 1);
+                live_fx_key(k, 1, k);
         } else if (k >= 16 && k < 16 + LIVE_NROLES) {
             if (down)
                 live_fx_mute(k - 16);
@@ -324,7 +367,24 @@ static int live_handle_key(int k, int down)
     }
     {                                     /* PADS: each key is a clip in its zone (press only) */
         int clip = live_bridge_key_clip(k);
-        int role = live_bridge_role_of(clip);
+        int role;
+        if (clip >= LIVE_ASSIGN_STOP && clip < LIVE_ASSIGN_FX) {
+            live_bridge_stop((uint8_t)(clip - LIVE_ASSIGN_STOP));
+            return 1;
+        }
+        if (clip >= LIVE_ASSIGN_FX && clip < LIVE_ASSIGN_NOTE) {
+            int f = clip - LIVE_ASSIGN_FX, j, held = 0;
+            for (j = 0; j < 27; j++) if (mapped_fx[j] == f + 1) held = 1;
+            mapped_fx[k] = (uint8_t)(f + 1);
+            if (!held) live_fx_key(f, 1, k);
+            return 1;
+        }
+        if (clip == LIVE_ASSIGN_NOTE) {
+            int note = 41 + k + 12 * live.octv;
+            note_key_down(k, live.focus, (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note));
+            return 1;
+        }
+        role = live_bridge_role_of(clip);
         if (clip < 0 || role < 0)
             return 1;
         live.focus = (uint8_t)role;        /* the focused role is the last one launched */
@@ -342,6 +402,7 @@ static int live_handle_key(int k, int down)
 
 static int live_handle_button(int b)
 {
+    if (!live_bridge_take_playing() && live_setup_button(b)) return 1;
     if (live_bridge_take_playing()) {                      /* T9i: only STOP is live during playback */
         if (b == B_PLAY || b == B_SEL) {                   /* NIT: SEL stops the take too, as the spec */
             live_bridge_take_stop_play();
@@ -373,14 +434,15 @@ static int live_handle_button(int b)
             }
             break;
         }
+        live_mapped_release_all();
+        note_release_all();
         live.layer = (uint8_t)(live.layer == LIVE_PADS ? LIVE_PLAY : LIVE_PADS);
         say(live.layer == LIVE_PADS ? "PADS" : "PLAY", 0);
         break;
-    case B_EDIT:                                           /* T9i: EDIT in LIVE opens the take card */
-        take_open = (uint8_t)!take_open;
-        if (take_open && !song_io_take_pending())
-            song_io_take_load_ram();
-        say(take_open ? "THE TAKE" : "LIVE", 0);
+    case B_EDIT:
+        live_mapped_release_all();
+        live_setup_enter();
+        say("LIVE SETUP", 0);
         break;
     case B_HOME:                                           /* close the card; LIVE has no back */
         if (take_open) {
@@ -428,14 +490,8 @@ static void live_fx_button(void)
         }
     } else if (!down && fx_held) {
         uint32_t dt = now - fx_press_t;
-        int i;
         fx_held = 0;
-        for (i = 0; i < 6; i++)                    /* a held (momentary) effect ends with the layer */
-            if (fx_key_dn[i]) {
-                if (!engine_perform_latched(i))
-                    engine_perform_release(i);
-                fx_key_dn[i] = 0;
-            }
+        live_fx_release_held();                    /* a held (momentary) effect ends with the layer */
         if (dt < LIVE_FX_TAP_MS) {                 /* a tap */
             if (now - fx_last_tap < LIVE_FX_DBL_MS) {
                 fx_layer_latch = (uint8_t)!fx_layer_latch;   /* a double tap latches the layer */
@@ -450,12 +506,13 @@ static void live_fx_button(void)
 static void live_input(void)
 {
     int i, e, pgi = cur_page();
+    if (setup_open && !live_bridge_take_playing()) live_setup_input();
     if (live_bridge_take_playing() || take_open)
         return;                            /* T9i: the take card and playback take no encoders */
-    live_fx_button();
+    if (!setup_open) live_fx_button();
     for (i = 0; i < NE; i++) {
         e = (int)enc(i);
-        if (i == EN_ALGO && e) {
+        if (i == EN_ALGO && e && !setup_open) {
             int f = live.focus + (e > 0 ? 1 : -1);
             live.focus = (uint8_t)((f + LIVE_NROLES) % LIVE_NROLES);
         } else if (i >= EN_K1 && i <= EN_K4 && e) {
@@ -502,6 +559,14 @@ static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
             continue;
         }
         clip = live_bridge_key_clip(k);
+        if (clip >= LIVE_ASSIGN_STOP && clip < LIVE_ASSIGN_COUNT) {   /* an assigned stop, FX or live note */
+            int f = clip - LIVE_ASSIGN_FX;
+            if (clip >= LIVE_ASSIGN_FX && clip < LIVE_ASSIGN_NOTE && (engine_perform_latched(f) || fx_key_dn[f]))
+                *key |= 1u << k;
+            else
+                *dim |= 1u << k;
+            continue;
+        }
         role = live_bridge_role_of(clip);
         if (role < 0 || !live_bridge_clip_used(clip))
             continue;                                      /* empty slot: off */
@@ -541,7 +606,7 @@ static void live_draw_header(void)
         cv_text(4 + w + 11, vc(&AF_S, 3, 14), &AF_S, "REC", C_BLACK);
     } else {
         cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
-                help_shift_active() ? "SHIFT" : take_open ? "TAKE" : fx_layer_active() ? "FX"
+                help_shift_active() ? "SHIFT" : take_open ? "TAKE" : setup_open ? "SETUP" : fx_layer_active() ? "FX"
                                    : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
                 (take_open || fx_layer_active()) && !help_shift_active() ? TOK_ACCENT : TOK_MID);
     }
@@ -550,7 +615,11 @@ static void live_draw_header(void)
         play_icon(x, 4, C_WHITE);
     else
         box(x + 1, 5, 8, 8, TOK_MID);
-    put_i(t, (int)(live_bridge_bpm_x10() / 10u));
+    if (midi_live_ext()) {
+        box(169, 3, 25, 14, TOK_ACCENT);
+        cv_text(172, vc(&AF_S, 3, 14), &AF_S, "EXT", TOK_INK);
+    }
+    put_i(t, (int)((midi_live_ext() ? midi_live_bpm_x10() : live_bridge_bpm_x10()) / 10u));
     cv_text(x + 14, vc(&AF_M, 1, 17), &AF_M, t, C_WHITE);
     if (live_bridge_take_recording()) {                /* T9i: the elapsed bars while recording */
         char u[10], *q = put_s(u, "+");
@@ -566,7 +635,7 @@ static void live_draw_header(void)
         put_i(q, beat + 1);
         text_r(226, vc(&AF_S, 1, 17), &AF_S, u, playing ? C_HI : C_GRAY);
     }
-    if (ui.dirty)
+    if (ui.dirty || song_io_dirty())
         dot(233, 9, 1, C_GRAY);
     cv_commit(0, 0, 0);
 }
@@ -592,6 +661,12 @@ static uint16_t live_footer(const char **a, const char **b, const char **c)
         *c = "EDIT: BACK";
         return C_DIM;
     }
+    if (setup_open) {
+        *a = assign_open ? "PRESETS: PICK" : "SELECT: ROW";
+        *b = assign_open ? "RELEASE: KEEP" : "ALGO: VALUE";
+        *c = assign_open ? 0 : "EDIT: DONE";
+        return C_DIM;
+    }
     if (fx_layer_active()) {
         *a = "TAP LATCH";
         *b = "HOME+FX RESET";
@@ -601,9 +676,9 @@ static uint16_t live_footer(const char **a, const char **b, const char **c)
         q = put_s(t, "KEYS PLAY ");
         put_s(q, LV_ROLE_L[live.focus]);
         *a = t;
-        *b = "SCL PADS";
+        *b = "SEL PADS";
     } else {
-        *a = "SCL PLAY";
+        *a = "SEL PLAY";
         *b = "HOLD PLAY EXIT";
     }
     return C_DIM;
@@ -864,6 +939,8 @@ static void live_draw(int band)
 {
     if (take_open)
         live_draw_take(band);
+    else if (setup_open)
+        live_setup_draw(band);
     else if (fx_layer_active())
         live_draw_fx(band);
     else if (live.layer == LIVE_PLAY)

@@ -36,10 +36,10 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
 },
 [HELP_CTX_LIVE] = {
     [B_FX]   = {{"punch FX on the keys", "tap latches, hold is momentary", "HOME+FX: reset all FX"}},
-    [B_SEL]  = {{"SCL toggles the layers", "off: PADS, lit: PLAY"}},
+    [B_SEL]  = {{"SEL toggles the layers", "off: PADS, lit: PLAY", "in SETUP: open the row"}},
     [B_ENV]  = {{"no action in LIVE"}},
     [B_LFO]  = {{"no action in LIVE"}},
-    [B_EDIT] = {{"LIVE setup:", "assign keys, launch default,", "the take"}},
+    [B_EDIT] = {{"EDIT: setup / EDIT again: done", "hold key + PRESETS: assign", "ALGO: change row value", "MIDI, clock, lock, take"}},
     [B_GLO]  = {{"GLO + a button: its card", "nothing else in LIVE"}},
     [B_HOME] = {{"HOME + tap a pad:", "launch it now", "hold: the cheat sheet", "HOME never exits LIVE"}},
     [B_SAVE] = {{"no action in LIVE", "the song saves when stopped"}},
@@ -209,7 +209,7 @@ int help_songs_tick(uint32_t btn, uint32_t keys)
 #define HELP_SHEET_Y0 3
 #define HELP_SHEET_H 20
 #define HELP_SHEET_STEP 22
-#define HELP_SHEET_N(ctx) ((ctx) == HELP_CTX_LIVE ? 4 : 6)
+#define HELP_SHEET_N(ctx) ((ctx) == HELP_CTX_LIVE ? (int)(sizeof SHEET_LIVE / sizeof SHEET_LIVE[0]) : (int)(sizeof SHEET_STUDIO / sizeof SHEET_STUDIO[0]))
 #define HELP_SHEET_ROWS(ctx) ((ctx) == HELP_CTX_LIVE ? SHEET_LIVE : SHEET_STUDIO)
 
 static void help_draw_sheet(int band)

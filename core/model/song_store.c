@@ -544,7 +544,7 @@ int song_validate(const song_t *s)
             return -1;                        /* the role ranges are fixed in model v1 */
     }
     for (i = 0; i < (int)NKEYS; i++)
-        if (s->key_clip[i] != CLIP_NONE && s->key_clip[i] >= NCLIPS)
+        if (!key_target_valid(s->key_clip[i]))
             return -1;
     for (i = 0; i < (int)NCLIPS; i++) {
         const clip_t *c = &s->clip[i];
@@ -679,6 +679,18 @@ static int sst_rd_get(void *ctx)
 }
 
 /* one candidate: header, payload CRC, decompress, validate; malformed is skipped */
+int song_migrate(song_t *s)
+{
+    if (s->version == 1u) {
+        int k;
+        for (k = 0; k < (int)NKEYS; k++)
+            if (s->key_clip[k] != CLIP_NONE && s->key_clip[k] >= NCLIPS)
+                return -1;                 /* v1 never had non-clip targets */
+        s->version = MODEL_VERSION;
+    }
+    return 0;
+}
+
 static int sst_try_song(const song_store_t *st, int ext, uint8_t slot, song_t *out)
 {
     uint32_t off = sst_song_ext_off((uint32_t)ext);
@@ -699,6 +711,8 @@ static int sst_try_song(const song_store_t *st, int ext, uint8_t slot, song_t *o
     src.get = sst_rd_get;
     src.ctx = &rd;
     if (lz_decompress(&src, (uint8_t *)out, sizeof(song_t)) || rd.err)
+        return -1;
+    if (song_migrate(out))
         return -1;
     return song_validate(out);
 }

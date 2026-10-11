@@ -133,6 +133,7 @@ void song_store_empty(song_t *out);
 /* Reject a song whose fields are out of range: 0 = ok, -1 = malformed. Used by
  * both save and load so nothing malformed is ever stored or handed out. */
 int song_validate(const song_t *song);
+int song_migrate(song_t *song);   /* v1 -> current in place; -1 if a v1 key target is not a clip */
 
 /* Compressed size of a song (for the slot budget); -1 if lz refuses. */
 int song_store_measure(const song_t *song);

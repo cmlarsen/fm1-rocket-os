@@ -771,6 +771,8 @@ static int expect(const char *what, const char *val)
         got = live_fx_layer();
     else if (!strncmp(what, "fxlatch", 7))          /* fxlatchI: effect I is latched */
         got = engine_perform_latched(atoi(what + 7) % PERF_NFX);
+    else if (!strncmp(what, "fxactive", 8))         /* fxactiveI: effect I is engaged (held or latched) */
+        got = engine_perform_active(atoi(what + 8) % PERF_NFX);
     else if (!strncmp(what, "fxmute", 6))           /* fxmuteR: role R is muted (the clip engine) */
         got = live_bridge_muted((uint8_t)(atoi(what + 6) % LIVE_NROLES));
     else if (!strncmp(what, "songrolemute", 12))    /* T10i: the song's stored role mute (always 0) */
@@ -894,6 +896,14 @@ static int expect(const char *what, const char *val)
         got = (int)song_writes;
     else if (!strcmp(what, "songsaves"))           /* T6i: song_io's successful saves */
         got = song_io_saves();
+    else if (!strcmp(what, "setup")) got = setup_open;
+    else if (!strcmp(what, "assign")) got = assign_open;
+    else if (!strcmp(what, "takeopen")) got = take_open;
+    else if (!strcmp(what, "songquant")) got = song_io_setup_get(SONG_SETUP_QUANT);
+    else if (!strcmp(what, "stagelock")) got = song_io_setup_get(SONG_SETUP_LOCK);
+    else if (!strcmp(what, "livechannel")) got = song_io_setup_get(SONG_SETUP_CHANNEL);
+    else if (!strcmp(what, "pclaunch")) got = song_io_setup_get(SONG_SETUP_PC);
+    else if (!strcmp(what, "clockinternal")) got = proj.set.rsv[1];
     else if (!strcmp(what, "songdirty"))           /* T6i: the current song changed since the last save */
         got = song_io_dirty();
     else if (!strcmp(what, "songfailed"))          /* T6i: the last song save failed; no retry until an edit */

@@ -1,0 +1,28 @@
+# TLSET r1: LIVE key assignments do not remap STUDIO. Key 0 is assigned to CHORDS B in LIVE; in
+# STUDIO, HOME + hold key 0 still clears DRUMS A (the keys mirror the grid).
+wait 300
+songseed
+press PLAY
+wait 700
+release PLAY
+tap EDIT
+tap SEL
+key 0 down
+turn PRESET 20 80
+key 0 up
+expect keyclip0 20
+tap EDIT
+press PLAY
+wait 700
+release PLAY
+wait 100
+expect clipused0 1
+expect clipused20 1
+press HOME
+key 0 down
+wait 1700
+key 0 up
+release HOME
+wait 50
+expect clipused0 0
+expect clipused20 1

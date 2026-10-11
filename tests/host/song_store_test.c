@@ -677,6 +677,56 @@ int main(void)
         check("live_channel 16 accepted", song_validate(&v) == 0);
     }
 
+    /* TLSET: an actual compressed v1 record made with pre-TLSET store/model code. */
+    {
+        song_t old, got;
+        FILE *f = fopen("tests/fixtures/tlset-v1-song.bin", "rb");
+        check("v1 fixture exists", f != 0);
+        memset(nor, 255, sizeof nor);
+        if (f) {
+            check("v1 fixture extent read", fread(nor + SONG_STORE_BASE, 1, 16384, f) == 16384);
+            fclose(f);
+        }
+        song_store_init(&store, &FLASH);
+        check("v1 compressed song loads and migrates", song_store_load(&store, 0, &old) == 0);
+        check("v1 mapping/options preserved", old.version == MODEL_VERSION && old.key_clip[0] == 20 &&
+              old.key_clip[26] == CLIP_NONE && old.live_channel == 3 && old.pc_launch == 1 && old.stage_lock == 1);
+        check("migrated v1 saves as v2", song_store_save(&store, 0, &old) == 0);
+        song_store_init(&store, &FLASH);
+        check("migrated v1 round trip", song_store_load(&store, 0, &got) == 0 && !memcmp(&got, &old, sizeof got));
+        old.key_clip[0] = KEY_STOP_FIRST;
+        old.key_clip[1] = KEY_FX_FIRST + 5;
+        old.key_clip[2] = KEY_LIVE_NOTE;
+        check("v2 all target kinds save", song_store_save(&store, 0, &old) == 0);
+        song_store_init(&store, &FLASH);
+        check("v2 assignments round trip", song_store_load(&store, 0, &got) == 0 && !memcmp(&got, &old, sizeof got));
+        old.key_clip[0] = KEY_TARGET_COUNT;
+        check("v2 reserved target rejected", song_validate(&old) != 0);
+        {
+            song_t v1 = got;
+            unsigned t;
+            int bad = 0, k;
+            for (k = 0; k < (int)NKEYS; k++)
+                got.key_clip[k] = (uint8_t)k;
+            v1 = got;
+            v1.version = 1u;
+            v1.key_clip[0] = 26u;
+            check("v1 clip target migrates", song_migrate(&v1) == 0 && v1.version == MODEL_VERSION);
+            for (t = NCLIPS; t < KEY_TARGET_COUNT; t++) {
+                v1 = got;
+                v1.version = 1u;
+                v1.key_clip[0] = (uint8_t)t;
+                if (song_migrate(&v1) == 0)
+                    bad++;
+            }
+            check("v1 rejects non-clip bytes 27-38", bad == 0);
+            v1 = got;
+            v1.version = 1u;
+            v1.key_clip[0] = CLIP_NONE;
+            check("v1 unassigned key migrates", song_migrate(&v1) == 0);
+        }
+    }
+
     /* power cut at every byte of a save, for a small record and the large
      * worst-case record */
     test_power_cut("a:small", &empty, &starter, 1);

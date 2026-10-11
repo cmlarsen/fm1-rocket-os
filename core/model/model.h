@@ -2,7 +2,7 @@
 #pragma once
 #include <stdint.h>
 
-#define MODEL_VERSION 1u
+#define MODEL_VERSION 2u
 
 enum { ROLE_DRUMS, ROLE_BASS, ROLE_LEAD, ROLE_CHORDS, ROLE_FX, NROLES };
 enum { ENG_909, ENG_808, ENG_303, ENG_FM6, ENG_NOISE, NENGINES };
@@ -18,6 +18,13 @@ enum { SCALE_MAJOR, SCALE_MINOR, SCALE_DORIAN, SCALE_PENTA, SCALE_CHROMATIC, NSC
 #define NCLIPS 27u
 #define NKEYS 27u
 #define CLIP_NONE 0xFFu
+
+/* TLSET v2: no struct growth; v1 maps migrate byte-for-byte. */
+#define KEY_STOP_FIRST 27u
+#define KEY_FX_FIRST 32u
+#define KEY_LIVE_NOTE 38u
+#define KEY_TARGET_COUNT 39u
+static inline int key_target_valid(unsigned v) { return v < KEY_TARGET_COUNT || v == CLIP_NONE; }
 
 #define CLIP_MAX_STEPS 64u
 #define STEPS_PER_BAR 16u
