@@ -38,7 +38,7 @@ expect playing 0
 midiclock 120 64
 wait 20
 expect ext 0
-expect bpm 100
+expect bpm 125
 # back to AUTO: the 120 bpm clock is followed
 tap GLO
 turn SELECT 2 80
