@@ -27,6 +27,15 @@ void engine_note_on(int part, int note, int vel) { (void)part; (void)note; (void
 void engine_note_off(int part, int note) { (void)part; (void)note; }
 void engine_set(int t, int v, int i, int val) { (void)t; (void)v; (void)i; (void)val; }
 void engine_all_off(void) {}
+/* T9i: the take hooks the bridge links against */
+void (*engine_tap)(uint32_t sample, uint32_t cmd);
+void engine_take_cmd(uint32_t cmd) { (void)cmd; }
+uint32_t engine_sample_now(void) { return 0; }
+const sound_t *engine_sound_mirror(void) { return 0; }
+void engine_perform_engage(int fx, int latch) { (void)fx; (void)latch; }
+void engine_perform_release(int fx) { (void)fx; }
+int engine_nvoices(int t) { (void)t; return 1; }
+int engine_nparams(int t, int v) { (void)t; (void)v; return 0; }
 
 static int fails;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); fails++; } } while (0)

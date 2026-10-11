@@ -301,11 +301,11 @@ unit-live:
 	@mkdir -p build/host
 	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 \
 	    -o build/host/live_bridge_test \
-	    tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c
+	    tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c core/seq/take.c
 	build/host/live_bridge_test
 	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 \
 	    -o build/host/live_bridge_test_san \
-	    tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c
+	    tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c core/seq/take.c
 	build/host/live_bridge_test_san
 .PHONY: unit-midi
 unit-midi:

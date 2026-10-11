@@ -51,7 +51,7 @@ run trs sh -c "$CC -O2 -w -Ifirmware/src -Ifirmware/hal -o $OUT/trs_test tests/h
 run undo sh -c "$CC -O2 -Wall -Wextra -Wno-unused-function -o $OUT/undo_test tests/host/undo_test.c && $OUT/undo_test"
 run lz sh -c "$CC $W -o $OUT/lz_test tests/host/lz_test.c && $OUT/lz_test"
 # T3: the LIVE bridge's pattern -> song mapping; clip_engine.c at the device FS (44.1 kHz)
-run live_bridge sh -c "$CC $W -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 -o $OUT/live_bridge_test tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c && $OUT/live_bridge_test"
+run live_bridge sh -c "$CC $W -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 -o $OUT/live_bridge_test tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c core/seq/take.c && $OUT/live_bridge_test"
 # T6i: song_io over a RAM song flash (its own live_bridge stubs); song_store.c is its own unit
 run song_io sh -c "$CC $W -I. -DX0X_HOST -o $OUT/song_io_test tests/host/song_io_test.c firmware/src/app/song_io.c firmware/src/app/song_templates.c core/model/song_store.c core/model/undo_stack.c && $OUT/song_io_test"
 run motion sh -c "$CC $W -o $OUT/motion_test tests/host/motion_test.c firmware/src/seq/motion.c && $OUT/motion_test"

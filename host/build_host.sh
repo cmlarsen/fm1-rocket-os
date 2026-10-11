@@ -17,7 +17,7 @@ U="firmware/src/dsp/drum909.c firmware/src/dsp/drum808.c firmware/src/dsp/bass30
    firmware/src/dsp/perform.c
    firmware/src/seq/sequencer.c firmware/src/seq/tb3po.c firmware/src/seq/pattern.c
    firmware/src/seq/motion.c firmware/src/app/engine.c
-   core/seq/clip_engine.c firmware/src/app/live_bridge.c
+   core/seq/clip_engine.c core/seq/take.c firmware/src/app/live_bridge.c
    core/model/song_store.c core/model/undo_stack.c firmware/src/app/song_io.c firmware/src/app/song_templates.c"
 # shellcheck disable=SC2086
 $CC -O2 -ffp-contract=off -std=c99 $FEAT -Wall -Wextra -Wno-unused-function -Wno-unused-parameter \

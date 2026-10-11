@@ -83,6 +83,14 @@ void engine_render(int32_t *out_lr, uint32_t n);   /* ISR: n stereo frames, 24-b
  * and the sample counter, one NULL check on the audio path. Not an ISR-safe sink on the device. */
 extern void (*engine_tap)(uint32_t sample, uint32_t cmd);
 
+/* T9i: the take hooks. `engine_take_cmd` applies one recorded command word directly to the
+ * engines (the playback sink path; ISR context, no queue). `engine_sample_now` is the audio
+ * sample clock the take recorder stamps with (the block about to be rendered). The recorder's
+ * prelude writes every current parameter value, which `engine_sound_mirror` supplies. */
+void engine_take_cmd(uint32_t cmd);
+uint32_t engine_sample_now(void);
+const sound_t *engine_sound_mirror(void);
+
 /* parameter descriptors (UI) */
 int engine_nvoices(int target);
 int engine_nparams(int target, int voice);

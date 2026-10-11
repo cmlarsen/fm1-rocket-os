@@ -69,8 +69,16 @@ void engine_all_off(void) { all_off_req = 1; }
 static uint8_t echo_base_valid, echo_base_bs, echo_base_bf, echo_base_bt;
 static uint8_t echo_applied;                 /* the throw is engaged in the engine */
 
-void engine_perform_engage(int fx, int latch) { perform_engage(&perf, fx, latch); }
-void engine_perform_release(int fx) { perform_release(&perf, fx); }
+void engine_perform_engage(int fx, int latch)
+{
+    perform_engage(&perf, fx, latch);
+    live_bridge_take_fx(fx, latch ? 2 : 1);              /* T9i: record the punch FX (recording only) */
+}
+void engine_perform_release(int fx)
+{
+    perform_release(&perf, fx);
+    live_bridge_take_fx(fx, 0);
+}
 void engine_perform_reset(void) { perform_reset(&perf); }
 void engine_perform_echo_throw(int on) { perform_echo_throw(&perf, on); }
 int engine_perform_latched(int fx) { return perform_latched(&perf, fx); }
@@ -555,36 +563,52 @@ static void midi_in(uint32_t pkt)
 }
 
 /* ---------------------------------------------------------------- render --- */
-static void drain(void)
+/* Apply one command word directly to the engines. Shared by the command-queue drain and
+ * T9i's take playback sink (engine_take_cmd), which replays recorded commands in the ISR. */
+static void apply_raw(uint32_t c)
+{
+    uint32_t type = c >> 28, a = (c >> 20) & 0xFFu, b = (c >> 12) & 0xFFu, v = c & 0xFFFu;
+    if (type < 8u)
+        apply_param((int)type, (int)a, (int)b, (int)v);
+    else if (type == C_DRUM)
+        s_drum(0, (int)a, (int)b, (float)v / 4095.0f);
+    else if (type == C_BON && a < NBASS)
+        bass303_note_on(&b303[a], (int)b, (int)(v & 1u), (int)((v >> 1) & 1u));
+    else if (type == C_BON && a == PART_FM6)        /* T5i: c = velocity, b = note (clamped) */
+        eng_fm6_note_on((int)(b > 127u ? 127u : b), (int)v);
+    else if (type == C_BON && a == PART_NOISE)
+        eng_noise_note_on((int)(b > 127u ? 127u : b), (int)v);
+    else if (type == C_BOFF && a < NBASS)
+        bass303_note_off(&b303[a]);
+    else if (type == C_BOFF && a == PART_FM6)
+        eng_fm6_note_off((int)(b > 127u ? 127u : b));
+    else if (type == C_BOFF && a == PART_NOISE)
+        eng_noise_note_off((int)(b > 127u ? 127u : b));
+}
+
+/* T9i: the take playback sink's engine half; it never touches the queue (ISR only). */
+void engine_take_cmd(uint32_t c) { apply_raw(c); }
+
+static void drain(uint32_t base)
 {
     uint32_t r = cq_r, pkt;
     int guard = 64;
     while (r != cq_w) {
-        uint32_t c = cq[r % CQ], type = c >> 28, a = (c >> 20) & 0xFFu, b = (c >> 12) & 0xFFu, v = c & 0xFFFu;
+        uint32_t c = cq[r % CQ];
         r++;
         if (engine_tap)                                 /* the command, at this sample (T2a) */
-            engine_tap(eng_prof_frames, c);
-        if (type < 8u)
-            apply_param((int)type, (int)a, (int)b, (int)v);
-        else if (type == C_DRUM)
-            s_drum(0, (int)a, (int)b, (float)v / 4095.0f);
-        else if (type == C_BON && a < NBASS)
-            bass303_note_on(&b303[a], (int)b, (int)(v & 1u), (int)((v >> 1) & 1u));
-        else if (type == C_BON && a == PART_FM6)        /* T5i: c = velocity, b = note (clamped) */
-            eng_fm6_note_on((int)(b > 127u ? 127u : b), (int)v);
-        else if (type == C_BON && a == PART_NOISE)
-            eng_noise_note_on((int)(b > 127u ? 127u : b), (int)v);
-        else if (type == C_BOFF && a < NBASS)
-            bass303_note_off(&b303[a]);
-        else if (type == C_BOFF && a == PART_FM6)
-            eng_fm6_note_off((int)(b > 127u ? 127u : b));
-        else if (type == C_BOFF && a == PART_NOISE)
-            eng_noise_note_off((int)(b > 127u ? 127u : b));
+            engine_tap(eng_prof_frames, c);             /* (kept at the block's end: the T2a tap) */
+        live_bridge_take_feed(base, c);                 /* T9i: block-start sample (a no-op unless recording) */
+        apply_raw(c);
     }
     cq_r = r;
     while (guard-- && plat_midi_in(&pkt))
         midi_in(pkt);
 }
+
+/* T9i: the audio sample clock and the parameter mirror the take recorder uses. */
+uint32_t engine_sample_now(void) { return eng_prof_frames; }
+const sound_t *engine_sound_mirror(void) { return mot_base_snd; }
 
 static float part_peak[ENG_NPARTS];
 __attribute__((noinline)) static void meter(int p, const float *x, float g, uint32_t n)
@@ -988,7 +1012,7 @@ void engine_render(int32_t *out_lr, uint32_t n)
         all_off_now();
     {
         PROF_T(pt);
-        drain();
+        drain(eng_prof_frames - n);
         if (live_bridge_active()) {
             /* T3: LIVE owns the transport. The clip engine's events are applied directly, at
              * their sample offsets (live_sink below); X0X's sequencer does not advance. */
@@ -1001,6 +1025,10 @@ void engine_render(int32_t *out_lr, uint32_t n)
         }
         PROF_ADD(PR_SEQ, pt);
     }
+    /* T9i: the take pump (post ring, arm/stop, playback) at the block's first frame, before the
+     * clip engine renders, so a replayed launch is consumed in the same window. */
+    if (live_bridge_active())
+        live_bridge_take_block(eng_prof_frames - n, n);
     if (live_bridge_active() && live_bridge_transport_playing())
         live_bridge_grid(&perf_g8, &perf_g16);        /* T10i: the grid at the block's first frame */
     if (live_bridge_active()) {
