@@ -10,7 +10,8 @@ before.
 **Result:** an idle fast path in `perform.c` skips the whole per-sample chain (filter, crossfade, output
 write, per-sample loop branches) and pays only for the history write. On the host (device-like scalar
 build) idle `perform_process` fell **1.50 → 0.61 ns/sample**, a **2.5×** cut, and is now within ~25 % of
-the raw history-write floor. The device stress numbers come from the coordinator.
+the raw history-write floor. On the device the punch FX idle cost fell from about **4 % to about 0.9 %**
+of the block, and **stress 2 passes RC1 again** (67.3 % mean).
 
 ## What changed
 
@@ -84,12 +85,27 @@ below are host estimates, not device measurements.
 | **Move the history write to core 1** | most of the ~0.5 ns/sample off core 0 | a per-block handoff of the audio block to core 1 plus a core-0 fallback, all wait-free ("interrupts never wait"); core 1 is ~9 % busy so it has room, but the handoff and the fallback add risk and code. |
 | **Do nothing more** | — | the idle path is now within ~20 % of the raw write floor; this was the goal of step 2. |
 
-The decision waits on the coordinator's device measurement (below); the half-rate option is only worth
-its sound change if the device idle cost is still over 1 %.
+The decision was the coordinator's, on the device measurement: the fast path alone brought idle FX under
+1 % (see [Device numbers](#device-numbers)), so neither option is taken — no sound change, no core-1
+handoff. They are recorded here as the fallbacks that were assessed and rejected.
 
 ## Device numbers
 
-*(filled from the coordinator's `rc_probe.py` run on `build/debug/x0x.fwsc` — see the message trail)*
+`build/debug/x0x.fwsc` (X0X_DEBUG=1, commit `fefc525`), measured by the coordinator with
+`tools/rc_probe.py` on the device. RC1 criteria at stress 2 are mean < 70, max < 85, 0 xruns, guard never.
+
+| Stress | Mean | Max | Peak | Xruns | Guard | Before T10perf |
+|---|---:|---:|---:|---:|---|---|
+| **2** (LIVE, FX idle) | **67.3** | **70** | **79** | **0** | **never** | 70.3 / 73 / 82 |
+| 3 (LIVE + all six punch FX) | 74.7 | 77 | 86 | 0 | never | 74.8 / 77 / 86 |
+
+**Stress 2 passes RC1 again** (it was 0.3 % over the 70 % mean line). The punch FX idle cost fell from
+about **4 %** of the block to about **0.9 %** (70.3 → 67.3 mean against the 66.4 % post-T5perf baseline):
+the goal of ≤ 1 % with no effect engaged, met on the device. **Stress 3 is unchanged** (74.7 vs 74.8), as
+expected — the effects are engaged there, so the idle path does not apply, and the fast path leaves the
+engaged path's cost alone.
+
+Per the coordinator's call, the fast path is accepted **as-is**: no half-rate history, no core-1 offload.
 
 ## Verification
 
