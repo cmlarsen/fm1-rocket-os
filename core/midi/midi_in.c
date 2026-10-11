@@ -14,16 +14,24 @@
  * in Q10 samples per beat, with 600*fs as the numerator when it turns into bpm_x10
  * (bpm = 60*fs/beat, so bpm_x10 = 600*fs/beat). A jitter-free beat is exact; the average kills
  * the jitter. When the window jumps by more than 1/64 of the estimate the tempo really changed,
- * so the filter snaps to the new window and a step is adopted within one beat. Every division
- * here is 32-bit; the window (24 ticks) caps a beat at fs/4 * 24 samples, so no product leaves
- * 32 bits.
+ * so the filter snaps to the new window and a step is adopted within one beat.
+ *
+ * Dropped ticks. An interval over 1.5 expected ticks is a missed tick, not a tempo: it is held
+ * and neither it nor the following interval enters the window, so a dropped F8 cannot inflate
+ * the sum. Two such intervals in a row are a real tempo change (a step is sustained, a drop is
+ * not), so the window is rebuilt from the new interval. An interval of a beat or more, or one
+ * slower than 20 BPM (a tick over fs/8), resyncs the window.
+ *
+ * Every product here stays in 32 bits: an accepted interval is at most fs/8, so d<<10 * 24 and
+ * sum<<10 both fit, and every divide is 32-bit.
  */
 #include "midi_in.h"
 
 #define MIDI_QSHIFT      10u   /* Q10 fixed point for est_fp (samples per beat) */
 #define MIDI_SLOW_DEN     8u   /* one-pole: est_fp += (window - est_fp) / 8 */
 #define MIDI_DETECT_DEN  64u   /* a jump over est_fp/64 is a tempo change */
-#define MIDI_GAP_DIV      4u   /* one interval over fs/4 is a gap, not a tempo */
+#define MIDI_GAP_NUM     16u   /* d*MIDI_GAP_NUM > beat means d > 1.5 expected ticks */
+#define MIDI_FLOOR_DIV    8u   /* a tick over fs/8 is under 20 BPM: resync */
 
 static uint16_t bpm_from(const midi_in_t *m)
 {
@@ -42,21 +50,51 @@ static uint16_t bpm_from(const midi_in_t *m)
 
 static void clock_tick(midi_in_t *m, uint32_t sample)
 {
-    uint32_t d, dfp;
+    uint32_t d, beat, dfp;
 
     m->clock_ok = 1u;
     if (!m->have_tick) {                            /* first F8: just anchor */
         m->have_tick = 1u;
         m->last_tick = sample;
+        m->gap = 0u;
         return;
     }
     d = sample - m->last_tick;
     m->last_tick = sample;
-    if (d == 0u || d > m->fs / MIDI_GAP_DIV) {      /* duplicate or a long gap: resync */
+    if (d == 0u)                                    /* a duplicate */
+        return;
+    if (d > m->fs / MIDI_FLOOR_DIV) {               /* under 20 BPM, or a long gap: resync */
         m->ring_i = 0u;
         m->ring_n = 0u;
         m->sum = 0u;
+        m->gap = 0u;
         return;
+    }
+
+    if (m->est_fp != 0u) {
+        beat = m->est_fp >> MIDI_QSHIFT;            /* samples per beat */
+        if (d > beat) {                             /* a beat or more: the clock stopped */
+            m->ring_i = 0u;
+            m->ring_n = 0u;
+            m->sum = 0u;
+            m->gap = 0u;
+            return;
+        }
+        if (d * MIDI_GAP_NUM > beat) {              /* over 1.5 ticks: a dropped tick */
+            if (m->gap) {                           /* two in a row: a real tempo change */
+                m->ring_i = 0u;
+                m->ring_n = 0u;
+                m->sum = 0u;
+                m->est_fp = (d << MIDI_QSHIFT) * MIDI_WINDOW;   /* reseed from this tick */
+                m->gap = 0u;                        /* fall through and add it */
+            } else {
+                m->gap = 1u;                        /* hold it: it and the next do not enter */
+                return;
+            }
+        } else if (m->gap) {                        /* the interval after an isolated gap */
+            m->gap = 0u;
+            return;
+        }
     }
 
     if (m->ring_n < MIDI_WINDOW) {                  /* fill the one-beat window */
@@ -163,8 +201,12 @@ void midi_in_byte(midi_in_t *m, uint8_t b, uint32_t sample)
             m->need = m->got = 0u;
             return;
         }
-        if (b == 0xF7u) {                           /* EOX (or a stray end) */
+        if (b == 0xF7u) {                           /* EOX: it cancels running status too */
             m->sys = 0u;
+            m->st = 0u;
+            m->syst = 0u;
+            m->got = 0u;
+            m->need = 0u;
             return;
         }
         m->sys = 0u;                                /* any other status byte ends SysEx */
@@ -241,11 +283,14 @@ void midi_in_packet(midi_in_t *m, uint32_t pkt, uint32_t sample)
 
 void midi_in_tick(midi_in_t *m, uint32_t sample)
 {
-    uint32_t beat;
-    if (!m->have_tick || !m->clock_ok || m->est_fp == 0u)
+    uint32_t timeout;
+    if (!m->have_tick || !m->clock_ok)
         return;
-    beat = m->est_fp >> MIDI_QSHIFT;
-    if ((int32_t)(sample - m->last_tick) > (int32_t)beat) {
+    if (m->est_fp == 0u)
+        timeout = m->fs;                            /* no tempo yet: a fixed one second */
+    else
+        timeout = m->est_fp >> MIDI_QSHIFT;         /* one beat at the estimate */
+    if ((int32_t)(sample - m->last_tick) > (int32_t)timeout) {
         m->clock_ok = 0u;
         if (m->sink.clock_lost)
             m->sink.clock_lost(m->sink.ctx);

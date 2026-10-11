@@ -69,6 +69,7 @@ typedef struct {
     /* clock follow */
     uint8_t  have_tick;      /* at least one F8 seen */
     uint8_t  clock_ok;       /* following the clock (cleared by clock_lost) */
+    uint8_t  gap;            /* the last tick was longer than 1.5 expected ticks */
     uint8_t  ring_i;         /* next slot in the tick ring */
     uint8_t  ring_n;         /* slots filled, capped at MIDI_WINDOW */
     uint32_t ring[MIDI_WINDOW];  /* the last MIDI_WINDOW tick intervals, in samples */
@@ -81,7 +82,10 @@ typedef struct {
 #ifndef MIDI_FS
 #define MIDI_FS 44100u   /* X0X's sample counter rate; override or midi_in_set_fs() */
 #endif
-#define MIDI_BPM_MIN 200u    /* 20.0 BPM: below the clock is treated as a gap */
+/* A tick interval at 20.0 BPM is fs/8. Anything slower, or an interval of a beat or more, is
+ * read as a stopped / restarted clock and resyncs the window; MIDI_BPM_MIN is the floor that
+ * bpm_x10 reports. Real MIDI clock lives far above that. */
+#define MIDI_BPM_MIN 200u    /* 20.0 BPM floor on the reported tempo */
 #define MIDI_BPM_MAX 3000u   /* 300.0 BPM */
 
 void midi_in_init(midi_in_t *m, const midi_cfg_t *cfg, const midi_sink_t *sink);
@@ -97,7 +101,8 @@ void midi_in_byte(midi_in_t *m, uint8_t b, uint32_t sample);
 void midi_in_packet(midi_in_t *m, uint32_t pkt, uint32_t sample);
 
 /* Call from the main loop with the current sample value; fires clock_lost once when ticks have
- * been silent for longer than one beat at the last tempo. */
+ * been silent for longer than one beat at the last tempo (or one second if no tempo was ever
+ * established). Call it in the same context that feeds bytes, so the timestamps line up. */
 void midi_in_tick(midi_in_t *m, uint32_t sample);
 
 uint16_t midi_in_bpm_x10(const midi_in_t *m);   /* 0 until a tempo is known */
