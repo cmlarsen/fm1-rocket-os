@@ -164,3 +164,13 @@ unit-clip:
 unit-engines:
 	@sh tests/host/run_fm6.sh
 	@sh tests/host/run_noise.sh
+
+.PHONY: unit-take
+unit-take:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/take_test \
+	    tests/host/take_test.c core/seq/take.c core/seq/clip_engine.c
+	build/host/take_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/take_test_san \
+	    tests/host/take_test.c core/seq/take.c core/seq/clip_engine.c
+	build/host/take_test_san

@@ -1,0 +1,12 @@
+# case bar_boundaries
+armed start=96000 state=1
+prestart nevents=1 state=1
+stopping start=96000 stop_at=192000 state=2
+before stop nevents=3 state=2
+stopped nevents=4 length=96000 state=0 full=0
+log 0 0xf0000000 mark start
+log 0 0xc0c00002 launch clip=12 queue role=2
+log 14000 0xd0401000 mute role=4 on=1
+log 96000 0xf0100000 mark end
+cancelled has=0 state=0 nevents=0
+on_boundary start=96000 nevents=2 state=2
