@@ -1,0 +1,17 @@
+# case launch_while_stopped
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+launch 12
+run 6000
+play
+run 7000
+
+# events:
+0 clip_queued lead 0 0 12
+0 playing bass 0 0 0
+0 clip_started lead 0 0 12
+0 note_on lead 60 100 12
+6000 note_off lead 60 0 0
+
+# events=5

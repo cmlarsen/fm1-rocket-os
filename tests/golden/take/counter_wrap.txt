@@ -1,0 +1,10 @@
+# case counter_wrap
+start=4294963200 nevents=6 length=0x1100
+log 0 0xf0000000 mark start
+log 0 0xc0000000 launch clip=0 queue role=0
+log 240 0xc0100000 launch clip=1 queue role=0
+log 4112 0xd0201000 mute role=2 on=1
+log 4160 0xe0202000 fx id=2 latch
+log 4352 0xf0100000 mark end
+replay_events=6
+# ok=1

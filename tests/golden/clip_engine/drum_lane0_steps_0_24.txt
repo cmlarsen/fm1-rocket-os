@@ -1,0 +1,17 @@
+# case drum_lane0_steps_0_24
+# script:
+clip 0 drum 32
+hit 0 0 0
+hit 0 0 24
+play
+launch 0 0
+runto 156000
+
+# events:
+0 clip_queued drums 0 0 0
+0 playing bass 0 0 0
+0 clip_started drums 0 0 0
+0 drum drums 0 0 0
+144000 drum drums 0 0 0
+
+# events=5

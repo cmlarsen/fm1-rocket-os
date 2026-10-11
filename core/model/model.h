@@ -27,7 +27,7 @@ enum { Q_BAR, Q_BEAT, Q_END, NQUANT };
 #define MOTION_NONE 0xFFu
 #define PARAM_NONE 0xFFFFu
 
-#define SONG_SLOTS 8u
+#define SONG_SLOTS 5u
 #define SONG_NAME_LEN 12u
 #define TAKE_MAX_EVENTS 2048u
 

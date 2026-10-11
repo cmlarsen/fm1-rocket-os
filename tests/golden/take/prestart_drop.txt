@@ -1,0 +1,8 @@
+# case prestart_drop
+nevents=5 length=15
+log 0 0xf0000000 mark start
+log 0 0xd0001000 mute role=0 on=1
+log 10 0xe0101000 fx id=1 on
+log 15 0xe0201000 fx id=2 on
+log 15 0xf0100000 mark end
+# ok=1

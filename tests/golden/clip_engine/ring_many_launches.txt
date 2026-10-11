@@ -1,0 +1,79 @@
+# case ring_many_launches
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+clip 13 melodic 4
+note 13 0 62 100 1
+clip 14 melodic 4
+note 14 0 64 100 1
+play
+launch 12 0
+stress 40 3000 12 13
+burst 40 12 14 30000
+
+# events:
+0 clip_queued lead 0 0 12
+0 clip_cancelled lead 0 0 12
+0 playing bass 0 0 0
+3000 clip_queued lead 0 0 13
+6000 clip_queued lead 0 0 12
+9000 clip_queued lead 0 0 13
+12000 clip_queued lead 0 0 12
+15000 clip_queued lead 0 0 13
+18000 clip_queued lead 0 0 12
+21000 clip_queued lead 0 0 13
+24000 clip_queued lead 0 0 12
+27000 clip_queued lead 0 0 13
+30000 clip_queued lead 0 0 12
+33000 clip_queued lead 0 0 13
+36000 clip_queued lead 0 0 12
+39000 clip_queued lead 0 0 13
+42000 clip_queued lead 0 0 12
+45000 clip_queued lead 0 0 13
+48000 clip_queued lead 0 0 12
+51000 clip_queued lead 0 0 13
+54000 clip_queued lead 0 0 12
+57000 clip_queued lead 0 0 13
+60000 clip_queued lead 0 0 12
+63000 clip_queued lead 0 0 13
+66000 clip_queued lead 0 0 12
+69000 clip_queued lead 0 0 13
+72000 clip_queued lead 0 0 12
+75000 clip_queued lead 0 0 13
+78000 clip_queued lead 0 0 12
+81000 clip_queued lead 0 0 13
+84000 clip_queued lead 0 0 12
+87000 clip_queued lead 0 0 13
+90000 clip_queued lead 0 0 12
+93000 clip_queued lead 0 0 13
+96000 clip_queued lead 0 0 12
+96000 clip_started lead 0 0 12
+96000 note_on lead 60 100 12
+99000 clip_queued lead 0 0 13
+102000 clip_queued lead 0 0 12
+102000 note_off lead 60 0 0
+105000 clip_queued lead 0 0 13
+108000 clip_queued lead 0 0 12
+111000 clip_queued lead 0 0 13
+114000 clip_queued lead 0 0 12
+117000 clip_queued lead 0 0 13
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 clip_queued lead 0 0 14
+120000 clip_queued lead 0 0 12
+120000 note_on lead 60 100 12
+126000 note_off lead 60 0 0
+144000 note_on lead 60 100 12
+
+# events=63

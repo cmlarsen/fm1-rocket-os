@@ -1,0 +1,20 @@
+# case tempo_change_midclip
+# script:
+clip 12 melodic 8
+note 12 0 60 100 1
+note 12 4 64 100 1
+play
+launch 12 0
+run 13000
+bpm 600
+runto 40000
+
+# events:
+0 clip_queued lead 0 0 12
+0 playing bass 0 0 0
+0 clip_started lead 0 0 12
+0 note_on lead 60 100 12
+6000 note_off lead 60 0 0
+35000 note_on lead 64 100 12
+
+# events=6

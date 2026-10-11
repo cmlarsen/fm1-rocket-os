@@ -75,3 +75,19 @@ These are first-pass estimates to validate in [M0](../product/roadmap.md).
 - **Then change:** replace the per-track single pattern with a per-role clip pool. Add the launch queue, LIVE mode and the session recorder. Put new product code in new files, so we can still merge platform fixes from upstream Felucca.
 - **Port from other GPL forks where they fit,** with attribution: X0X `plat.h`/host runner/song record, Melodee bank queueing, FM1 Move clip states.
 - **Never use:** JieLi's proprietary SDK or RTOS libraries (GPL incompatibility), GrooveOS code, or fm1-polyseq (no licence).
+
+## RAM plan (v1, 2026-10-11)
+Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,052 B are used, and the build requires 8,192 B spare. `.data+.bss` is 95,044 of 98,304 B.
+
+| Change or new user | Pool bytes |
+|---|---|
+| X0X delay line `dly_buf` cut from 2.0 s to **1.0 s** (44,100 int16) | **+88,200** freed |
+| Punch FX history (repeat, tape stop, freeze), mono int16 | −32,768 |
+| Echo throw | 0: it drives X0X's fxbus delay (send, feedback, synced time) instead of its own line |
+| `song_t` (the live song) | −14,352 |
+| `take_t` | −16,436 |
+| Undo ring | −12,240 |
+| FM6 + NOISE state, moved to the pool if `.bss` is tight | about −3,000 |
+| **Left after the 8 KiB spare** | **about 18 KB** |
+
+Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new large buffer goes in the pool through X0X's pool mechanism. Any task that adds more than 1 KB of RAM must update this table.

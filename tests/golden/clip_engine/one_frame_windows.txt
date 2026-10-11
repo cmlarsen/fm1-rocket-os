@@ -1,0 +1,24 @@
+# case one_frame_windows
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+play
+launch 12 0
+ones 96000
+probe end
+
+# events:
+0 clip_queued lead 0 0 12
+0 playing bass 0 0 0
+0 clip_started lead 0 0 12
+0 note_on lead 60 100 12
+6000 note_off lead 60 0 0
+24000 note_on lead 60 100 12
+30000 note_off lead 60 0 0
+48000 note_on lead 60 100 12
+54000 note_off lead 60 0 0
+72000 note_on lead 60 100 12
+78000 note_off lead 60 0 0
+end step=15 sample=90000 bar=0 beat=3 step16=15
+
+# events=11
