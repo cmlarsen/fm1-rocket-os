@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO rename, name entry</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="NAME" state="stop" bpm="124" pos="1.1" hint-size="240px,24px"></dc-import></div>
+<div class="card" style="position: absolute; left: 4px; right: 4px; top: 30px; height: 76px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px">
+<span class="s cap" style="color: var(--mid); font-size: 10px; font-weight: 600; letter-spacing: 0.5px">rename song · 10 of 12</span>
+<div style="display: flex; align-items: center">
+<span class="l" style="font-size: 26px; letter-spacing: 0.5px">SUNDAY DU</span><span class="l blink" style="font-size: 26px; color: var(--accent); background: var(--raise); border-radius: 3px; padding: 0 1px">B</span><span class="blink" style="width: 2px; height: 26px; margin-left: 2px; background: var(--accent)"></span>
+</div>
+</div>
+<div style="position: absolute; left: 4px; right: 4px; top: 112px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px">
+<div class="card" style="height: 44px; padding: 5px 7px"><div class="s" style="color: var(--mid)">white keys</div><div class="m" style="font-size: 14px">type ABC</div></div>
+<div class="card" style="height: 44px; padding: 5px 7px"><div class="s" style="color: var(--mid)">tap again</div><div class="m" style="font-size: 14px">next letter</div></div>
+<div class="card" style="height: 44px; padding: 5px 7px"><div class="s" style="color: var(--mid)">black keys</div><div class="m" style="font-size: 14px">← space → del</div></div>
+<div class="card" style="height: 44px; padding: 5px 7px"><div class="s" style="color: var(--mid)">K3</div><div class="m" style="font-size: 14px">random name</div></div>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">OCT+</span>save</div>
+<div class="hint"><span class="kc">OCT−</span>cancel</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="fdddddddddddddddddddddddd.d" labels="AB,←,CD,SPC,EF,→,GH,IJK,DEL,LM,123,NO,PQ,←,RS,SPC,TU,→,VW,XYZ,DEL,123,123,456,789,,0-." zones="custom" zoneText="NAME ENTRY · FROM FELUCCA (ui_name.c), PHONE-STYLE MULTI-TAP" zoneColor="var(--theme)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO clip editor, motion page</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="BASS B" state="play" bpm="124" pos="9.4" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 27px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px">
+<div class="chip" style="height: 20px; background: var(--surf); color: var(--mid)">1 NOTES</div>
+<div class="chip" style="height: 20px; background: var(--theme); color: var(--ink)">2 MOTION</div>
+<div class="chip" style="height: 20px; background: var(--surf); color: var(--mid)">3 SETTINGS</div>
+</div>
+<div style="position: absolute; left: 4px; right: 4px; top: 52px; display: flex; flex-direction: column; gap: 4px">
+<sc-for list="{{lanes}}" as="l" hint-placeholder-count="3">
+<div class="card" style="height: 44px; position: relative; background: {{l.bg}}">
+<span class="s cap" style="position: absolute; left: 7px; top: 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.4px; color: {{l.lc}}">{{l.name}}</span>
+<span class="s" style="position: absolute; right: 7px; top: 3px; color: var(--mid)">{{l.knob}}</span>
+<svg width="220" height="24" viewBox="0 0 220 24" style="position: absolute; left: 6px; bottom: 4px" role="img" aria-label="{{l.name}} motion over two bars">
+<line x1="110" y1="0" x2="110" y2="24" stroke="var(--raise)" stroke-width="1"></line>
+<path d="{{l.d}}" fill="none" stroke="{{l.stroke}}" stroke-width="1.6" stroke-linejoin="round"></path>
+</svg>
+</div>
+</sc-for>
+<div class="list-row" style="border: 1px dashed var(--dim); height: 30px"><span class="s" style="color: var(--mid)">+ turn a knob while REC to add a lane</span></div>
+</div>
+<div style="position: absolute; left: 0; top: 52px; width: 1px; height: 0"></div>
+<div class="foot">
+<div class="hint"><span class="kc">HOME</span>+ knob: clear lane</div>
+<div class="hint"><span class="kc">SEQ</span>page 3</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="custom" zoneText="KEYS PLAY BASS · REC OVERDUBS KNOB MOVES" zoneColor="var(--bass)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lanes = [
+      { name: 'Filter', knob: 'K1', d: 'M0 20 C30 20 40 4 70 5 S110 18 140 16 S190 3 220 6', sel: true },
+      { name: 'Drive', knob: 'K4', d: 'M0 14 L55 14 L60 6 L110 6 L115 14 L165 14 L170 6 L220 6', sel: false },
+      { name: 'Space', knob: 'K2', d: 'M0 18 C60 18 80 10 110 10 S180 18 220 18', sel: false }
+    ].map((l) => ({
+      ...l,
+      bg: l.sel ? 'var(--raise)' : 'var(--surf)',
+      lc: l.sel ? 'var(--text)' : 'var(--mid)',
+      stroke: l.sel ? 'var(--accent)' : 'var(--bass)'
+    }));
+    return { lanes };
+  }
+}
+</script>
+</body>
+</html>

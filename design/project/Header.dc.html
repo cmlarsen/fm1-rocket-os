@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Header strip</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 240px; height: 24px; position: relative; background: var(--bg); color: var(--text); font-family: 'Inter Tight', system-ui, sans-serif">
+<div style="position: absolute; left: 5px; top: 5px; display: flex; align-items: center; gap: 4px">
+<span class="chip cap" style="height: 14px; padding: 0 4px; font-size: 10px; letter-spacing: 0.5px; background: {{modeBg}}; color: var(--ink)">{{mode}}</span>
+<span class="s cap" style="color: var(--mid); font-size: 11px; font-weight: 600; letter-spacing: 0.4px">{{layer}}</span>
+</div>
+<div style="position: absolute; left: 80px; width: 80px; top: 3px; display: flex; align-items: center; justify-content: center; gap: 4px">
+<sc-if value="{{isPlay}}" hint-placeholder-val="{{true}}">
+<svg width="9" height="10" viewBox="0 0 9 10" aria-hidden="true"><path d="M1 1 L8 5 L1 9 Z" fill="var(--theme)"></path></svg>
+</sc-if>
+<sc-if value="{{isStop}}" hint-placeholder-val="{{false}}">
+<svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true"><rect x="1" y="1" width="7" height="7" rx="1" fill="var(--mid)"></rect></svg>
+</sc-if>
+<sc-if value="{{isRec}}" hint-placeholder-val="{{false}}">
+<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="var(--rec)"></circle></svg>
+</sc-if>
+<span class="m num">{{bpm}}</span>
+</div>
+<div style="position: absolute; right: 5px; top: 5px; display: flex; align-items: center; gap: 5px">
+<sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
+<span style="width: 5px; height: 5px; border-radius: 3px; background: var(--accent)" aria-label="unsaved changes"></span>
+</sc-if>
+<span class="s num" style="color: var(--mid)">{{pos}}</span>
+<svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true"><rect x="0.5" y="0.5" width="15" height="9" rx="2" fill="none" stroke="var(--mid)"></rect><rect x="16" y="3" width="1.5" height="4" fill="var(--mid)"></rect><rect x="2" y="2" width="9" height="6" rx="1" fill="var(--theme)"></rect></svg>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"text","default":"LIVE"},"layer":{"editor":"text","default":"PADS"},"state":{"editor":"enum","options":["stop","play","rec"],"default":"play"},"bpm":{"editor":"text","default":"124"},"pos":{"editor":"text","default":"17.3"},"dirty":{"editor":"boolean","default":false},"$preview":{"width":240,"height":24}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const state = this.props.state ?? 'play';
+    const mode = this.props.mode ?? 'LIVE';
+    return {
+      mode,
+      layer: this.props.layer ?? 'PADS',
+      bpm: this.props.bpm ?? '124',
+      pos: this.props.pos ?? '17.3',
+      dirty: this.props.dirty ?? false,
+      isPlay: state === 'play',
+      isStop: state === 'stop',
+      isRec: state === 'rec',
+      modeBg: state === 'rec' ? 'var(--rec)' : mode === 'LIVE' ? 'var(--theme)' : 'var(--key)'
+    };
+  }
+}
+</script>
+</body>
+</html>

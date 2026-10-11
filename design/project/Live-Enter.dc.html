@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Entering LIVE by holding PLAY</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SONG" state="play" bpm="124" pos="9.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 74px; opacity: 0.25"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|p,l,.,.,.|l,p,l,.,.,.,.|l,l,.,.,.|l,.,." focus="1" progress="30" hint-size="240px,140px"></dc-import></div>
+<div style="position: absolute; left: 60px; top: 46px; width: 120px; height: 120px; display: flex; align-items: center; justify-content: center">
+<svg width="120" height="120" viewBox="0 0 120 120" style="position: absolute; left: 0; top: 0" role="img" aria-label="hold progress, about two thirds">
+<circle cx="60" cy="60" r="52" fill="var(--bg)" stroke="var(--line)" stroke-width="6"></circle>
+<circle cx="60" cy="60" r="52" fill="none" stroke="var(--theme)" stroke-width="6" stroke-linecap="round" stroke-dasharray="220 327" transform="rotate(-90 60 60)"></circle>
+</svg>
+<div style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px">
+<span class="l" style="color: var(--theme)">LIVE</span>
+<span class="s" style="color: var(--mid)">keep holding</span>
+</div>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">PLAY</span>held</div>
+<div class="hint">release: cancel</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="custom" zoneText="KEYS PLAY BASS (STUDIO)" zoneColor="var(--bass)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

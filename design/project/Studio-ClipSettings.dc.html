@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO clip settings</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="BASS B" state="play" bpm="124" pos="9.4" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 24px"><dc-import name="Knobs" spec="LENGTH|2 bars|25|;MODE|Loop|0|hot;LAUNCH|Bar|50|;SWING|50%|0|" hint-size="240px,48px"></dc-import></div>
+<div style="position: absolute; left: 6px; top: 78px" class="s cap"><span style="color: var(--mid); font-size: 10px; font-weight: 600; letter-spacing: 0.5px">mode · K2</span></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 93px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px">
+<div class="cell" style="height: 46px; flex-direction: column; gap: 3px; background: var(--bass); color: var(--ink)">
+<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><path d="M4 8 a6 6 0 0 1 6 -6 h3 a6 6 0 0 1 0 12 h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M9 11 l-3 3 l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" transform="translate(0 -3)"></path></svg>
+<span>Loop</span>
+</div>
+<div class="cell" style="height: 46px; flex-direction: column; gap: 3px; background: var(--surf); color: var(--text)">
+<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><path d="M2 8 h14 M12 4 l4 4 l-4 4 M19 2 v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+<span>Once</span>
+</div>
+
+</div>
+<div style="position: absolute; left: 6px; top: 146px" class="s cap"><span style="color: var(--mid); font-size: 10px; font-weight: 600; letter-spacing: 0.5px">launch on · K3</span></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 161px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px">
+<div class="chip" style="height: 24px; background: var(--surf); color: var(--text)">beat</div>
+<div class="chip" style="height: 24px; background: var(--theme); color: var(--ink)">bar</div>
+<div class="chip" style="height: 24px; background: var(--surf); color: var(--text)">end of clip</div>
+</div>
+<div style="position: absolute; left: 6px; top: 192px" class="s"><span style="color: var(--mid)">loops until stopped or replaced</span></div>
+<div class="foot">
+<div class="hint">song default: bar</div>
+<div class="hint"><span class="kc">SEQ</span>page 1</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="custom" zoneText="KEYS PLAY BASS" zoneColor="var(--bass)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

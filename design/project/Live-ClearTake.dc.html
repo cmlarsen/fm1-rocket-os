@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LIVE clear take, hold to confirm</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="TAKE" state="play" bpm="124" pos="44.1" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 74px; opacity: 0.25"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|l,p,.,.,.|l,l,l,.,.,.,.|p,l,.,.,.|l,.,." focus="3" progress="80" hint-size="240px,140px"></dc-import></div>
+<div style="position: absolute; left: 50px; top: 38px; width: 140px; height: 140px; display: flex; align-items: center; justify-content: center">
+<svg width="140" height="140" viewBox="0 0 140 140" style="position: absolute; left: 0; top: 0" role="img" aria-label="clear progress, about half">
+<circle cx="70" cy="70" r="62" fill="var(--bg)" stroke="var(--line)" stroke-width="6"></circle>
+<circle cx="70" cy="70" r="62" fill="none" stroke="var(--rec)" stroke-width="6" stroke-linecap="round" stroke-dasharray="195 390" transform="rotate(-90 70 70)"></circle>
+</svg>
+<div style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px">
+<span class="s cap" style="color: var(--rec); font-weight: 600">clear</span>
+<span class="m">This song's take</span>
+<span class="s num" style="color: var(--mid)">2:14 long</span>
+</div>
+</div>
+<div style="position: absolute; left: 0; right: 0; top: 188px; text-align: center" class="s"><span style="color: var(--mid)">clips stay · music keeps playing</span></div>
+<div class="foot">
+<div class="hint">release: keep</div>
+<div class="hint"><span class="kc">HOME</span>+<span class="kc">REC</span>undo</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="pdd....dp...ddd....pd...d.." labels="A,B,C,D,E,F,G,A,B,C,D,E,A,B,C,D,E,F,G,A,B,C,D,E,A,B,C" zones="roles" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

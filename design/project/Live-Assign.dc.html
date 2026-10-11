@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LIVE quick assign</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="SETUP" state="play" bpm="124" pos="25.1" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 74px; opacity: 0.35"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|l,p,.,.,.|l,p,l,.,a,.,.|l,l,.,.,.|l,.,." focus="2" progress="50" hint-size="240px,140px"></dc-import></div>
+<div class="dlg" style="top: 30px; height: 180px; padding: 8px 6px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px 6px">
+<span class="m">Key A4 plays</span>
+<span class="s" style="color: var(--mid)">LEAD slot E</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="list-row s"><span>New clip in LEAD</span><span style="color: var(--mid)">empty</span></div>
+<div class="list-row s on"><span style="font-weight: 600">CHORDS · clip B</span><span>copy</span></div>
+<div class="list-row s"><span>Stop LEAD</span><span style="color: var(--mid)">role</span></div>
+<div class="list-row s"><span>Punch: TAPE STOP</span><span style="color: var(--mid)">fx</span></div>
+<div class="list-row s"><span>Live note</span><span style="color: var(--mid)">play</span></div>
+</div>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">PRESETS</span>choose</div>
+<div class="hint">release: keep</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="pdd....dp...dpd.o..dd...d.." labels="A,B,C,D,E,F,G,A,B,C,D,E,A,B,C,D,E,F,G,A,B,C,D,E,A,B,C" zones="roles" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

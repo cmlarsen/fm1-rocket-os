@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Role and clip grid</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 240px; height: 140px; position: relative; background: var(--bg); color: var(--text); font-family: 'Inter Tight', system-ui, sans-serif">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<div style="position: absolute; left: 2px; width: 236px; top: {{r.y}}px; height: 26px; border-radius: 5px; background: {{r.bg}}">
+<div style="position: absolute; left: 4px; top: 6px; display: flex; align-items: center; gap: 3px">
+<svg width="5" height="8" viewBox="0 0 5 8" aria-hidden="true" style="opacity: {{r.focusOp}}"><path d="M0 0 L5 4 L0 8 Z" fill="var(--theme)"></path></svg>
+<span class="cap" style="font-size: 11px; font-weight: 600; line-height: 14px; letter-spacing: 0.4px; color: {{r.color}}">{{r.label}}</span>
+</div>
+<sc-for list="{{r.cells}}" as="c" hint-placeholder-count="5">
+<div class="{{c.cls}}" style="position: absolute; top: 1px; left: {{c.x}}px; width: 24px; height: 24px; background: {{c.bg}}; color: {{c.fg}}; border: {{c.border}}">
+{{c.letter}}
+<sc-if value="{{c.bar}}" hint-placeholder-val="{{false}}">
+<div class="bar"><div style="width: {{c.prog}}%"></div></div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"grid":{"editor":"text","default":"p,l,l,.,.,.,.|p,q,.,.,.|l,p,l,.,.,.,.|l,l,.,.,.|l,.,."},"focus":{"editor":"int","default":1,"min":-1,"max":4},"progress":{"editor":"range","default":60,"min":0,"max":100},"$preview":{"width":240,"height":140}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const roles = [
+      { label: 'DRUM', c: 'var(--drum)', t: 'var(--drum-t)' },
+      { label: 'BASS', c: 'var(--bass)', t: 'var(--bass-t)' },
+      { label: 'LEAD', c: 'var(--lead)', t: 'var(--lead-t)' },
+      { label: 'CHRD', c: 'var(--chord)', t: 'var(--chord-t)' },
+      { label: 'FX', c: 'var(--fx)', t: 'var(--fx-t)' }
+    ];
+    const grid = (this.props.grid ?? 'p,l,l,.,.,.,.|p,q,.,.,.|l,p,l,.,.,.,.|l,l,.,.,.|l,.,.').split('|');
+    const focus = this.props.focus ?? 1;
+    const prog = this.props.progress ?? 60;
+    const letters = 'ABCDEFG';
+    const rows = roles.map((ro, i) => {
+      const codes = (grid[i] ?? '').split(',');
+      const cells = codes.map((code, j) => {
+        const base = { x: 48 + j * 26, letter: letters[j], cls: 'cell', bar: false, prog, border: 'none', bg: ro.t, fg: ro.c };
+        if (code === 'p') return { ...base, bg: ro.c, fg: 'var(--ink)', bar: true };
+        if (code === 's') return { ...base, bg: ro.c, fg: 'var(--ink)', bar: true, cls: 'cell slow' };
+        if (code === 'q') return { ...base, cls: 'cell blink', border: '1.5px solid ' + ro.c };
+        if (code === 'l') return base;
+        if (code === 'r') return { ...base, bg: 'var(--rec)', fg: 'var(--ink)', cls: 'cell pulse' };
+        if (code === 'a') return { ...base, bg: 'var(--bg)', fg: 'var(--accent)', border: '2px solid var(--accent)', letter: '+' };
+        if (code === 'x') return { ...base, bg: 'var(--raise)', fg: 'var(--mid)' };
+        if (code === 'c') return { ...base, border: '2px solid var(--accent)' };
+        if (code === 'C') return { ...base, bg: ro.c, fg: 'var(--ink)', bar: true, border: '2px solid var(--accent)' };
+        if (code === 'e') return { ...base, cls: 'cell', bg: 'transparent', fg: 'var(--accent)', border: '2px solid var(--accent)', letter: '+' };
+        return { ...base, cls: 'cell empty', bg: 'transparent', fg: 'var(--dim)', letter: '' };
+      });
+      return {
+        y: 1 + i * 28, label: ro.label, color: ro.c, cells,
+        bg: i === focus ? 'var(--surf)' : 'transparent',
+        focusOp: i === focus ? 1 : 0
+      };
+    });
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

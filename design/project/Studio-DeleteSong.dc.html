@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO delete song, hold to confirm</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SONGS" state="stop" bpm="124" pos="1.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 28px; display: flex; flex-direction: column; gap: 2px; opacity: 0.25">
+<div class="list-row"><span class="m" style="font-size: 14px">Night Drive</span></div>
+<div class="list-row on"><span class="m" style="font-size: 14px">Sunday Dub</span></div>
+<div class="list-row"><span class="m" style="font-size: 14px">Acid Test</span></div>
+</div>
+<div class="dlg" style="top: 40px; height: 140px; display: flex; align-items: center; gap: 12px; padding: 0 14px">
+<div style="position: relative; width: 64px; height: 64px; flex: none">
+<svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="delete progress, about half">
+<circle cx="32" cy="32" r="27" fill="none" stroke="var(--line)" stroke-width="5"></circle>
+<circle cx="32" cy="32" r="27" fill="none" stroke="var(--rec)" stroke-width="5" stroke-linecap="round" stroke-dasharray="85 170" transform="rotate(-90 32 32)"></circle>
+</svg>
+<span class="s" style="position: absolute; left: 0; right: 0; top: 25px; text-align: center; color: var(--mid)">SEL</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<span class="s cap" style="color: var(--rec); font-weight: 600">delete song</span>
+<span class="m">Sunday Dub</span>
+<span class="s" style="color: var(--mid)">17 clips · 3 takes</span>
+</div>
+</div>
+<div style="position: absolute; left: 0; right: 0; top: 188px; text-align: center" class="s"><span style="color: var(--mid)">undo brings it back until the next delete</span></div>
+<div class="foot">
+<div class="hint">release: keep</div>
+<div class="hint"><span class="kc">HOME</span>+<span class="kc">REC</span>undo</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="none" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

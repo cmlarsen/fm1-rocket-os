@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO empty slot</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SONG" state="play" bpm="124" pos="11.2" dirty="{{true}}" hint-size="240px,24px"></dc-import></div>
+<div class="card" style="position: absolute; left: 3px; right: 3px; top: 27px; height: 44px; padding: 5px 7px; display: flex; flex-direction: column">
+<span class="m"><span style="color: var(--lead)">LEAD D</span> is empty</span>
+<span class="s" style="color: var(--mid)">play it in, or step it in</span>
+</div>
+<div style="position: absolute; left: 0; top: 74px"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|p,l,.,.,.|l,p,l,e,.,.,.|l,l,.,.,.|l,.,." focus="2" progress="70" hint-size="240px,140px"></dc-import></div>
+<div class="foot">
+<div class="hint"><span class="kc rec">REC</span>record</div>
+<div class="hint"><span class="kc">SEQ</span>steps</div>
+<div class="hint">hold a clip: copy</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="custom" zoneText="KEYS PLAY LEAD · REC STARTS ON THE NEXT BAR" zoneColor="var(--lead)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

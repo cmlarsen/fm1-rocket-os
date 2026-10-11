@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STUDIO songs list</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SONGS" state="stop" bpm="124" pos="1.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 28px; display: flex; flex-direction: column; gap: 2px">
+<div class="list-row" style="border: 1px dashed var(--dim)"><span class="m" style="font-size: 14px; color: var(--theme)">+ New song</span><span class="s" style="color: var(--mid)">template</span></div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<div class="{{r.cls}}">
+<span class="m" style="font-size: 14px">{{r.name}}</span>
+<span class="s" style="color: {{r.mc}}">{{r.meta}}</span>
+</div>
+</sc-for>
+</div>
+<div style="position: absolute; left: 8px; right: 8px; top: 196px; display: flex; align-items: center; gap: 6px">
+<div style="flex: 1; height: 4px; border-radius: 2px; background: var(--line); position: relative"><div style="position: absolute; left: 0; top: 0; bottom: 0; width: 42%; border-radius: 2px; background: var(--sel)"></div></div>
+<span class="s" style="color: var(--mid)">5 of 12</span>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">SEL</span>open</div>
+<div class="hint"><span class="kc">EDIT</span>copy · rename · delete</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="none" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const data = [
+      ['Night Drive', 'open now'], ['Sunday Dub', '3 takes'], ['Acid Test', '1 take'],
+      ['Warmup Loops', 'no takes'], ['Untitled 5', 'empty']
+    ];
+    const rows = data.map(([name, meta], i) => ({
+      name, meta,
+      cls: i === 0 ? 'list-row on' : 'list-row',
+      mc: i === 0 ? 'var(--ink)' : 'var(--mid)'
+    }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

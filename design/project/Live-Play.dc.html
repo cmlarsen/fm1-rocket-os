@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LIVE play layer</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="PLAY" state="play" bpm="124" pos="18.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 24px"><dc-import name="Knobs" spec="FILTER|OFF|50|bi;SPACE|24%|24|;ECHO|18%|18|;DRIVE|12%|12|" hint-size="240px,48px"></dc-import></div>
+<div style="position: absolute; left: 8px; top: 80px; right: 8px; display: flex; flex-direction: column; gap: 1px">
+<div style="display: flex; align-items: baseline; justify-content: space-between">
+<span class="l" style="color: var(--lead)">LEAD</span>
+<span class="s" style="color: var(--mid)">ALGO: role</span>
+</div>
+<span class="m" style="color: var(--text)">FM6 · Glass Bell</span>
+<span class="s" style="color: var(--mid)">C minor · octave 4</span>
+</div>
+<div style="position: absolute; left: 4px; right: 4px; top: 160px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px">
+<div class="cell" style="height: 30px; flex-direction: column; background: var(--drum-t); color: var(--drum)"><span style="font-size: 10px">DRUM</span><span>A</span></div>
+<div class="cell" style="height: 30px; flex-direction: column; background: var(--bass-t); color: var(--bass)"><span style="font-size: 10px">BASS</span><span>B</span></div>
+<div class="cell" style="height: 30px; flex-direction: column; background: var(--lead); color: var(--ink)"><span style="font-size: 10px">LEAD</span><span>B</span></div>
+<div class="cell" style="height: 30px; flex-direction: column; background: var(--raise); color: var(--mid)"><span style="font-size: 10px">CHRD</span><span>–</span></div>
+<div class="cell" style="height: 30px; flex-direction: column; background: var(--raise); color: var(--mid)"><span style="font-size: 10px">FX</span><span>–</span></div>
+</div>
+<div class="foot">
+<div class="hint">keys play LEAD</div>
+<div class="hint"><span class="kc">SCL</span>pads</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds=".......d......o....d......." labels=",,,,,,,C,,,,,,,G,,,,,C,,,,,,," zones="custom" zoneText="PLAY · LEAD · C MINOR" zoneColor="var(--lead)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

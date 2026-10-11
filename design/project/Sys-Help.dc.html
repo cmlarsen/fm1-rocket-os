@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Help card on long-press</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="LIVE" layer="PADS" state="play" bpm="124" pos="30.1" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 0; top: 74px; opacity: 0.25"><dc-import name="PadGrid" grid="p,l,l,.,.,.,.|l,p,.,.,.|l,p,l,.,.,.,.|l,l,.,.,.|l,.,." focus="1" progress="50" hint-size="240px,140px"></dc-import></div>
+<div class="dlg" style="top: 30px; height: 180px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: center; gap: 6px"><span class="kc rec" style="height: 18px; font-size: 12px; padding: 0 5px">REC</span><span class="m">in LIVE</span></div>
+<div style="display: flex; flex-direction: column; gap: 5px">
+<div style="display: flex; gap: 8px"><span class="s" style="color: var(--mid); width: 48px; flex: none">tap</span><span class="s">record this session as a take, from the next bar</span></div>
+<div style="display: flex; gap: 8px"><span class="s" style="color: var(--mid); width: 48px; flex: none">tap again</span><span class="s">stop; it replaces this song's take (undo brings the old one back)</span></div>
+<div style="display: flex; gap: 8px"><span class="s" style="color: var(--mid); width: 48px; flex: none">hold 1.5 s</span><span class="s">clear the take (undo brings it back)</span></div>
+</div>
+<span class="s" style="color: var(--dim); margin-top: auto">the music never stops</span>
+</div>
+<div class="foot">
+<div class="hint"><span class="kc">GLO</span>+ any button: its card</div>
+<div class="hint">release: close</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="pdd....dp...dpd....dd...d.." labels="A,B,C,D,E,F,G,A,B,C,D,E,A,B,C,D,E,F,G,A,B,C,D,E,A,B,C" zones="roles" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HOME held cheat sheet</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="board">
+<div class="x2">
+<div class="scr">
+<div style="position: absolute; left: 0; top: 0"><dc-import name="Header" mode="STUDIO" layer="SHIFT" state="play" bpm="124" pos="12.2" hint-size="240px,24px"></dc-import></div>
+<div style="position: absolute; left: 4px; right: 4px; top: 28px; display: flex; flex-direction: column; gap: 3px">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<div class="card" style="height: 21px; display: flex; align-items: center; justify-content: space-between; padding: 0 6px">
+<span style="display: flex; align-items: center; gap: 3px"><span class="kc">{{r.key}}</span><span class="s" style="color: var(--mid)">{{r.plus}}</span></span>
+<span class="s" style="color: var(--text)">{{r.does}}</span>
+</div>
+</sc-for>
+</div>
+<div class="foot">
+<div class="hint">holding HOME</div>
+<div class="hint">tap HOME: back</div>
+</div>
+</div>
+</div>
+<dc-import name="Keys" leds="..........................." zones="custom" zoneText="HOME HELD · TOUCH A PAD TO LAUNCH IT NOW" zoneColor="var(--theme)" hint-size="480px,140px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":480,"height":632}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const rows = [
+      ['REC', 'tap', 'undo'],
+      ['PLAY', 'tap', 'redo'],
+      ['PAD', 'tap', 'launch now'],
+      ['PAD', 'hold', 'clear clip'],
+      ['K1–K4', 'touch', 'clear knob lane'],
+      ['FX', 'tap', 'reset all FX']
+    ].map(([key, plus, does]) => ({ key, plus, does }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

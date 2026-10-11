@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>K1-K4 knob cards</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./fm1.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 240px; height: 48px; position: relative; background: var(--bg); color: var(--text); font-family: 'Inter Tight', system-ui, sans-serif">
+<sc-for list="{{cards}}" as="c" hint-placeholder-count="4">
+<div class="card" style="position: absolute; top: 2px; left: {{c.x}}px; width: 57px; height: 44px; padding: 4px 5px 0">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<span class="s cap" style="color: var(--mid); font-size: 10px; font-weight: 600; letter-spacing: 0.4px">{{c.label}}</span>
+<sc-if value="{{c.rec}}" hint-placeholder-val="{{false}}">
+<span style="width: 5px; height: 5px; border-radius: 3px; background: var(--rec)" aria-label="recorded"></span>
+</sc-if>
+</div>
+<div class="m num" style="color: {{c.color}}; margin-top: 1px">{{c.value}}</div>
+<div class="gauge"><div style="left: {{c.g0}}%; width: {{c.gw}}%; background: {{c.color}}"></div></div>
+</div>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"spec":{"editor":"text","default":"FILTER|OFF|50|bi;SPACE|24%|24|;ECHO|0%|0|;DRIVE|12%|12|"},"$preview":{"width":240,"height":48}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const spec = this.props.spec ?? 'FILTER|OFF|50|bi;SPACE|24%|24|;ECHO|0%|0|;DRIVE|12%|12|';
+    const cards = spec.split(';').slice(0, 4).map((s, i) => {
+      const [label, value, pct, flags] = s.split('|');
+      const p = Math.max(0, Math.min(100, Number(pct) || 0));
+      const f = flags || '';
+      const bi = f.indexOf('bi') >= 0;
+      const g0 = bi ? Math.min(50, p) : 0;
+      const gw = bi ? Math.max(Math.abs(p - 50), 2) : p;
+      return {
+        x: 3 + 59 * i, label, value, g0, gw,
+        rec: f.indexOf('rec') >= 0,
+        color: f.indexOf('hot') >= 0 ? 'var(--accent)' : 'var(--theme)'
+      };
+    });
+    return { cards };
+  }
+}
+</script>
+</body>
+</html>
