@@ -99,6 +99,14 @@ void plat_midi_out(uint32_t pkt) { midi_out_event(pkt); }
 int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? st_load(obj, dst, max) : -1; }
 int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
 
+/* the FM6 patch sector (T5i): read in place through the XIP window, as the user samples are */
+const uint8_t *plat_fm6_vbank(uint32_t *len)
+{
+    if (len)
+        *len = PLAT_FM6_VBANK_LEN;
+    return flash_ok ? fm1_xip_ptr(PLAT_FM6_VBANK_OFF) : 0;
+}
+
 int plat_slot_zones(int k) { return (k >= 0 && k < SMP_USER_SLOTS) ? usr_nz[k] : 0; }
 
 const uint8_t *plat_slot(int k, int z, uint32_t *nsamples, uint32_t *rate, char name[9])

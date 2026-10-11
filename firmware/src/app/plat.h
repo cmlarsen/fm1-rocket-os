@@ -43,6 +43,13 @@ void plat_midi_out(uint32_t pkt);      /* queue one (audio ISR or main loop) */
 int plat_store_load(uint32_t obj, void *dst, uint32_t max);   /* bytes loaded, < 0 = none / bad */
 int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
 #define PLAT_STORE_MAX 3840u           /* bytes per object */
+
+/* T5i: the FM6 patch sector, read in place from flash (32 packed 128-byte voices). X0X never writes
+ * it, so it may be erased or hold leftovers; the engine validates it and falls back to its ROM voices.
+ * Returns NULL (and 0) when there is no flash bank. */
+#define PLAT_FM6_VBANK_OFF 0x9F000u
+#define PLAT_FM6_VBANK_LEN 4096u
+const uint8_t *plat_fm6_vbank(uint32_t *len);
 enum { OBJ_SET, OBJ_SOUND, OBJ_PAT0, OBJ_PAT1, OBJ_PANEL, OBJ_SONG, OBJ_MOTION, OBJ_NOBJ };
 /* flash: OBJ_SET 0xFC000; SOUND / PAT0 / PAT1 / SONG 0x97000.. (2 sectors each); OBJ_PANEL 0xDC000,
  * OBJ_MOTION 0xDE000 (all inside Felucca's data area, 0x97000..0xDFFFF) */

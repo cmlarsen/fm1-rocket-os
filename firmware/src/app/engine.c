@@ -8,6 +8,8 @@
 #include "../dsp/fxbus.h"
 #include "../dsp/master.h"
 #include "../dsp/fastmath.h"
+#include "../dsp/eng_fm6.h"
+#include "../dsp/eng_noise.h"
 
 #define POOL X0X_POOL
 
@@ -33,6 +35,10 @@ static master_t mst;
 #define DLY_LEN 88200
 static int16_t dly_buf[DLY_LEN] POOL;
 static motion_t mot;
+/* T5i: the FM6 patch sector, read once at boot into the RAM bank the SLOT loader reads; and the
+ * engine-only parts' mono block (int32 Q15) that the adapters render into */
+static fm6_vbank_t fm6_bank POOL;
+static int32_t part_i32[256] POOL;
 static const sound_t *mot_base_snd;    /* the knobs' own values (the project's mirror) */
 static uint8_t mot_playing;
 static volatile uint8_t mot_on = 1;
@@ -88,11 +94,19 @@ static void guard_apply(void)
 /* mixer: per part Level, Rev send, Dly send (a drum machine's add to its voices' own sends) */
 static const x0x_param_t MIX_P[MX_NPARAMS] = {{"LEVEL", 127, 100, 0}, {"REV", 127, 0, 0}, {"DLY", 127, 0, 0},
                                                {"PAN", 127, 64, 0}};
-static const char *const PART_NAMES[NPARTS] = {"909", "808", "303 A", "303 B"};
-static float mix_level[NPARTS], mix_rev[NPARTS], mix_dly[NPARTS];
+/* T5i: the engine-only parts' parameters (T_RSV): voice 0 = FM6, voice 1 = NOISE. FM6's signed macros
+ * are a pot offset (pot = macro - lo, 0..hi-lo) so they fit X0X's 0..max pots; SLOT is the raw SLOT. */
+static const x0x_param_t FM6_P[E_FM6_NEDIT] = {
+    {"ALG", 32, 0, 0}, {"FB", 14, 7, 0}, {"MLVL", 127, 64, 0}, {"MRAT", 32, 16, 0},
+    {"MEG", 127, 64, 0}, {"VMOD", 14, 7, 0}, {"DTUN", 127, 0, 0}, {"SLOT", ENG_FM6_OWN + FM6_NBANK, 0, 0}};
+static const x0x_param_t NZ_P[E_NZ_NEDIT] = {
+    {"MODE", 3, 0, 0}, {"COLR", 127, 64, 0}, {"FREQ", 127, 70, 0}, {"RES", 127, 100, 0},
+    {"TRK", 127, 127, 0}, {"DENS", 127, 0, 0}, {"DRFT", 127, 70, 0}, {"CRSH", 127, 0, 0}};
+static const char *const PART_NAMES[ENG_NPARTS] = {"909", "808", "303 A", "303 B", "FM6", "NOISE"};
+static float mix_level[ENG_NPARTS], mix_rev[ENG_NPARTS], mix_dly[ENG_NPARTS];
 /* pan: a balance law. Centre is full level on both sides (a centred mix is the mono one exactly);
  * turning toward a side fades the other out along a quarter cosine, the near side stays at 1 */
-static float mix_pl[NPARTS] = {1, 1, 1, 1}, mix_pr[NPARTS] = {1, 1, 1, 1};
+static float mix_pl[ENG_NPARTS] = {1, 1, 1, 1, 1, 1}, mix_pr[ENG_NPARTS] = {1, 1, 1, 1, 1, 1};
 
 /* ------------------------------------------------------- command queue --- */
 /* uint32 commands, single producer (main loop) / single consumer (audio ISR):
@@ -122,7 +136,8 @@ int engine_nvoices(int t)
     case T_909: return DR_NUM + 1;
     case T_808: return D8_NUM + 1;
     case T_303: return NBASS;
-    case T_MIX: return NPARTS;
+    case T_RSV: return 2;                                /* T5i: FM6, NOISE */
+    case T_MIX: return ENG_NPARTS;
     default: return 1;
     }
 }
@@ -133,6 +148,7 @@ int engine_nparams(int t, int v)
     case T_909: return drum909_nparams(v);
     case T_808: return drum808_nparams(v);
     case T_303: return bass303_nparams();
+    case T_RSV: return v == 0 ? E_FM6_NEDIT : v == 1 ? E_NZ_NEDIT : 0;
     case T_FX: return fxbus_nparams();
     case T_MIX: return MX_NPARAMS;                       /* every part: Level, Rev send, Dly send */
     case T_MST: return master_nparams();
@@ -146,6 +162,10 @@ const x0x_param_t *engine_param(int t, int v, int i)
     case T_909: return drum909_param(v, i);
     case T_808: return drum808_param(v, i);
     case T_303: return bass303_param(i);
+    case T_RSV:
+        if (v == 0) return i >= 0 && i < E_FM6_NEDIT ? &FM6_P[i] : 0;
+        if (v == 1) return i >= 0 && i < E_NZ_NEDIT ? &NZ_P[i] : 0;
+        return 0;
     case T_FX: return fxbus_param(i);
     case T_MIX: return (i >= 0 && i < MX_NPARAMS) ? &MIX_P[i] : 0;
     case T_MST: return master_param(i);
@@ -162,7 +182,8 @@ const char *engine_voice_name(int t, int v)
     case T_909: return (v >= 0 && v <= DR_NUM) ? N909[v] : "";
     case T_808: return (v >= 0 && v <= D8_NUM) ? N808[v] : "";
     case T_303: return v ? "303 B" : "303 A";
-    case T_MIX: return (v >= 0 && v < NPARTS) ? PART_NAMES[v] : "";
+    case T_RSV: return v == 0 ? "FM6" : v == 1 ? "NOISE" : "";
+    case T_MIX: return (v >= 0 && v < ENG_NPARTS) ? PART_NAMES[v] : "";
     case T_FX: return "FX";
     case T_MST: return "MASTER";
     default: return "";
@@ -175,9 +196,21 @@ static void apply_param(int t, int v, int i, int val)    /* ISR */
     case T_909: drum909_set(&d909, v, i, val); break;
     case T_808: drum808_set(&d808, v, i, val); break;
     case T_303: if (v >= 0 && v < NBASS) bass303_set(&b303[v], i, val); break;
+    case T_RSV:                                        /* T5i: the engine-only parts */
+        if (v == 0 && i >= 0 && i < E_FM6_NEDIT) {
+            if (i == E_FM6_SLOT)
+                eng_fm6_load_preset(val);              /* a preset, with the ROM fallback */
+            else {
+                int lo, hi;
+                eng_fm6_param_range(i, &lo, &hi);
+                eng_fm6_set_param(i, val + lo);        /* the pot is the macro offset */
+            }
+        } else if (v == 1 && i >= 0 && i < E_NZ_NEDIT)
+            eng_noise_set_param(i, val);
+        break;
     case T_FX: fxbus_set(&fx, i, val); break;
     case T_MIX:
-        if (v < 0 || v >= NPARTS)
+        if (v < 0 || v >= ENG_NPARTS)
             break;
         if (i == MX_LEVEL)
             mix_level[v] = (float)val * (float)val / (100.0f * 100.0f);     /* 100 = unity, square law */
@@ -287,6 +320,19 @@ void engine_bass_on(int part, int note, int accent, int slide)
     cq_put(C_BON, (uint32_t)part, (uint32_t)note, (uint32_t)((accent ? 1 : 0) | (slide ? 2 : 0)));
 }
 void engine_bass_off(int part) { cq_put(C_BOFF, (uint32_t)part, 0, 0); }
+
+/* T5i: the engine-only parts' notes. C_BON's c field carries velocity 0..127 for them (the 303s keep
+ * accent|slide there); C_BOFF's b carries the note. No new command type. */
+void engine_note_on(int part, int note, int vel)
+{
+    if (vel < 0)
+        vel = 0;
+    if (vel > 127)
+        vel = 127;
+    cq_put(C_BON, (uint32_t)part, (uint32_t)note, (uint32_t)vel);
+}
+void engine_note_off(int part, int note) { cq_put(C_BOFF, (uint32_t)part, (uint32_t)note, 0); }
+void engine_fm6_preset(int n) { engine_set(T_RSV, 0, E_FM6_SLOT, n); }
 
 /* ------------------------------------------------------- sequencer sink --- */
 /* probability: each part's (and drum track's) chance on the step playing now, set by its T_PROB lane
@@ -438,15 +484,23 @@ static void drain(void)
             s_drum(0, (int)a, (int)b, (float)v / 4095.0f);
         else if (type == C_BON && a < NBASS)
             bass303_note_on(&b303[a], (int)b, (int)(v & 1u), (int)((v >> 1) & 1u));
+        else if (type == C_BON && a == PART_FM6)        /* T5i: c = velocity */
+            eng_fm6_note_on((int)b, (int)v);
+        else if (type == C_BON && a == PART_NOISE)
+            eng_noise_note_on((int)b, (int)v);
         else if (type == C_BOFF && a < NBASS)
             bass303_note_off(&b303[a]);
+        else if (type == C_BOFF && a == PART_FM6)       /* T5i: b = note */
+            eng_fm6_note_off((int)b);
+        else if (type == C_BOFF && a == PART_NOISE)
+            eng_noise_note_off((int)b);
     }
     cq_r = r;
     while (guard-- && plat_midi_in(&pkt))
         midi_in(pkt);
 }
 
-static float part_peak[NPARTS];
+static float part_peak[ENG_NPARTS];
 __attribute__((noinline)) static void meter(int p, const float *x, float g, uint32_t n)
 {
     uint32_t i;
@@ -491,9 +545,7 @@ __attribute__((noinline)) static void add_glide(float *dst, const float *src, gl
 }
 /* each part's gains: dry left and right, its reverb and delay sends, and (drums) the voices' own sends */
 enum { GL_L, GL_R, GL_REV, GL_DLY, GL_VREV, GL_VDLY, GL_N };
-static glide_t mix_glide[NPARTS][GL_N] = {
-    {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}, {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}},
-    {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}, {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}};
+static glide_t mix_glide[ENG_NPARTS][GL_N];                 /* cur = -1 at engine_init (no fade-in) */
 static void mix_targets(int p, float g)                     /* g: the part level */
 {
     glide_set(&mix_glide[p][GL_L], g * mix_pl[p]);
@@ -557,6 +609,39 @@ __attribute__((noinline)) static void kit_sends(int b, const float *m, uint32_t 
     add_glide(rev, m, &mix_glide[b][GL_REV], n);
     add_glide(dly, m, &mix_glide[b][GL_DLY], n);
     meter(b, m, mix_level[b], n);
+}
+
+/* T5i: mix one engine-only part from its adapter's mono int32 Q15 block, at its mix strip (mono is
+ * free here: the 909's kit send is long done). */
+__attribute__((noinline)) static void t5i_part_mix(int p, const int32_t *i32, uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++)
+        mono[i] = (float)i32[i] * (1.0f / 32768.0f);
+    mix_targets(p, mix_level[p]);
+    add_glide(dry_l, mono, &mix_glide[p][GL_L], n);
+    add_glide(dry_r, mono, &mix_glide[p][GL_R], n);
+    add_glide(rev, mono, &mix_glide[p][GL_REV], n);
+    add_glide(dly, mono, &mix_glide[p][GL_DLY], n);
+    meter(p, mono, mix_level[p], n);
+}
+/* FM6 then NOISE, on core 0 (never core 1). Skipped while idle, so a project without them is
+ * bit-identical; the adapters' own state carries a released voice's tail. */
+static void t5i_render(uint32_t n)
+{
+    uint32_t i;
+    if (eng_fm6_voices_active()) {
+        for (i = 0; i < n; i++)
+            part_i32[i] = 0;
+        eng_fm6_render(part_i32, n);
+        t5i_part_mix(PART_FM6, part_i32, n);
+    }
+    if (eng_noise_voices_active()) {
+        for (i = 0; i < n; i++)
+            part_i32[i] = 0;
+        eng_noise_render(part_i32, n);
+        t5i_part_mix(PART_NOISE, part_i32, n);
+    }
 }
 
 /* one stretch: the 909 (into the mix, in place) and the 303s here while the second core renders the
@@ -632,6 +717,7 @@ static void render_sub(float *out_l, float *out_r, uint32_t n)
         add_glide(dly, bb[b], &mix_glide[p][GL_DLY], n);
         meter(p, bb[b], mix_level[p], n);
     }
+    t5i_render(n);                                        /* T5i: FM6 and NOISE, core 0 */
     {
         PROF_T(pf);
         fxbus_process_st(&fx, dry_l, dry_r, rev, dly, out_l, out_r, (int)n);
@@ -690,9 +776,9 @@ void engine_render(int32_t *out_lr, uint32_t n)
         if (i & 1u)
             eng_scope[eng_scope_w++ & (SCOPE_N - 1u)] = (int16_t)((out_l[i] + out_r[i]) * 16383.5f);
     }
-    for (p = 0; p < NPARTS; p++) {                      /* meters: peak hold, ~300 ms decay at the UI */
+    for (p = 0; p < ENG_NPARTS; p++) {                  /* meters: peak hold, ~300 ms decay at the UI */
         uint32_t q = (uint32_t)(fm_minf(part_peak[p], 1.0f) * 32767.0f);
-        if (q > eng_peak[p])
+        if (p < NPARTS && q > eng_peak[p])              /* T5i parts have no UI meter */
             eng_peak[p] = (uint16_t)q;
         part_peak[p] = 0.0f;
     }
@@ -701,15 +787,32 @@ void engine_render(int32_t *out_lr, uint32_t n)
 float engine_gr_db(void) { return mst.gr_view; }
 void engine_master_format(int i, char *buf) { master_format(&mst, i, buf); }
 
+/* T5i: read the FM6 patch sector (a ROM read, never a write) and hand the validated bank to the
+ * adapter; no bank, or an erased / corrupt sector, leaves it unset so the SLOT loader uses the ROM
+ * voices. Called once, from the main loop before the audio ISR runs. */
+static void fm6_bank_boot(void)
+{
+    const uint8_t *img;
+    uint32_t len = 0;
+    img = plat_fm6_vbank(&len);
+    if (img && fm6_vbank_import(&fm6_bank, img, len))
+        eng_fm6_set_vbank(&fm6_bank);
+    else
+        eng_fm6_set_vbank(0);
+}
+
 void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t *base)
 {
-    int p;
+    int p, k;
     for (p = 0; p < NPARTS * NDRUM; p++)
         prob[p / NDRUM][p % NDRUM] = 100;             /* every step plays, until a lane says */
     drum909_init(&d909);
     drum808_init(&d808);
     bass303_init(&b303[0]);
     bass303_init(&b303[1]);
+    eng_fm6_init();                                   /* T5i */
+    eng_noise_init();
+    fm6_bank_boot();
     fxbus_init(&fx, dly_buf, DLY_LEN);
     master_init(&mst);
     seq_init(&seq, patterns);
@@ -718,8 +821,10 @@ void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t
     mot.base = mot_base;
     mot.apply = mot_apply;
     mot_base_snd = base;
-    for (p = 0; p < NPARTS; p++) {
+    for (p = 0; p < ENG_NPARTS; p++) {
         mix_level[p] = 1.0f;
         mix_rev[p] = mix_dly[p] = 0.0f;
+        for (k = 0; k < GL_N; k++)                    /* never used: takes its target at once */
+            mix_glide[p][k].cur = -1.0f;
     }
 }

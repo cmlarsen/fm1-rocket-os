@@ -14,6 +14,8 @@
  *   spin ENC N                   N detents at once (1 ms), exactly N (no knob acceleration)
  *   master N                     MASTER pot 0..4096
  *   param T V I VALUE            a sound pot (engine.h target, voice, index), as its knob would
+ *   note PART NOTE VEL           a T5i engine-only part (4 = FM6, 5 = NOISE): note on with VEL 0..127;
+ *                                VEL 0 is a note off. Through the C_BON / C_BOFF command path.
  *   slot K NAME A.wav [B.wav..]  user sample slot K (0..2): one loop (zone) per WAV, encoded here
  *   slotimg K F.hdr F.bin       slot K from tools/fm1_sample_upload.py's image (the device format)
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
@@ -151,6 +153,8 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
     store_writes++;
     return 0;
 }
+/* the FM6 patch sector: the simulator has no such sector (T5i), so the engine uses its ROM voices */
+const uint8_t *plat_fm6_vbank(uint32_t *len) { if (len) *len = 0; return 0; }
 
 /* sample slots, two ways in:
  *  - slotimg: a slot image exactly as tools/fm1_sample_upload.py writes it, read by the firmware's own
@@ -273,8 +277,18 @@ static void host_engine_tap(uint32_t sample, uint32_t cmd)
         return;
     switch (type) {
     case 8:  fprintf(events_log, "%u drum %u %u %u\n", sample, a, b, v); break;
-    case 9:  fprintf(events_log, "%u bon %u %u %u %u\n", sample, a, b, v & 1u, (v >> 1) & 1u); break;
-    case 10: fprintf(events_log, "%u boff %u\n", sample, a); break;
+    case 9:
+        if (a == PART_FM6 || a == PART_NOISE)              /* T5i: c = velocity */
+            fprintf(events_log, "%u bon %u %u vel%u\n", sample, a, b, v);
+        else
+            fprintf(events_log, "%u bon %u %u %u %u\n", sample, a, b, v & 1u, (v >> 1) & 1u);
+        break;
+    case 10:
+        if (a == PART_FM6 || a == PART_NOISE)              /* T5i: b = note */
+            fprintf(events_log, "%u boff %u %u\n", sample, a, b);
+        else
+            fprintf(events_log, "%u boff %u\n", sample, a);
+        break;
     default: fprintf(events_log, "%u param %u %u %u %u\n", sample, type, a, b, v); break;
     }
 }
@@ -972,6 +986,17 @@ int main(int argc, char **argv)
             }
             proj.sound.v[t][v][i] = (uint8_t)val;
             engine_set(t, v, i, val);
+            run_ms(1);
+        } else if (!strcmp(cmd, "note")) {              /* note PART NOTE VEL: a T5i engine part, VEL 0 = off */
+            int part = atoi(a), nt = atoi(b), vel = atoi(c);
+            if ((part != PART_FM6 && part != PART_NOISE) || nt < 0 || nt > 127 || vel < 0 || vel > 127) {
+                printf("line %d: bad note %s %s %s\n", lineno, a, b, c);
+                return 2;
+            }
+            if (vel)
+                engine_note_on(part, nt, vel);
+            else
+                engine_note_off(part, nt);
             run_ms(1);
         } else if (!strcmp(cmd, "master"))
             master = (uint32_t)atoi(a);
