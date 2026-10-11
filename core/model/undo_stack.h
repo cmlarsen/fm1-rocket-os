@@ -3,14 +3,12 @@
  *
  * A fixed RAM ring of entries, no heap. Clip edits (clear, copy over, a record
  * pass) store the old clip_t and swap it with the song's clip on undo/redo, so
- * one entry serves both directions. Take and delete entries only name the slot:
- * the recoverable bytes live in the store (the previous take extent, or the
- * untouched song data of a deleted slot) and the store is asked to swap or
- * toggle them. A new edit clears the redo tail.
+ * one entry serves both directions. Take and delete entries only name the slot
+ * plus the sequence number of the record they expect to restore: the
+ * recoverable bytes live in the store, and the store re-commits them as new
+ * records so the undo survives a reboot. A new edit clears the redo tail.
  *
- * The ring holds UNDO_STACK_DEPTH entries of a fixed 4 + clip_t bytes. clip_t
- * dominates, so the depth is 12 KiB / (4 + 528) ~= 23; the ring, with its head
- * and cursor, is 12,240 B. */
+ * Depth is set by 12 KiB / (4 + max(clip_t, u32)) = 12 KiB / (4 + 528) ~= 23. */
 #pragma once
 #include <stdint.h>
 #include "model.h"
@@ -25,6 +23,9 @@ enum {
     UNDO_DELETE_SONG       /* deleted a song */
 };
 
+/* return values of undo_stack_undo / _redo */
+enum { UNDO_CANNOT = -1, UNDO_EMPTY = 0, UNDO_DONE = 1 };
+
 #define UNDO_STACK_DEPTH 23u
 
 typedef struct {
@@ -32,7 +33,10 @@ typedef struct {
     uint8_t index;         /* clip index, or slot for take/delete */
     uint8_t aux;           /* source clip for a copy */
     uint8_t pad;
-    clip_t clip;           /* the old clip; after an undo it holds the new one */
+    union {
+        clip_t clip;       /* the old clip; after an undo it holds the new one */
+        uint32_t seq;      /* expected record sequence number for take/delete */
+    } u;
 } undo_entry_t;
 
 typedef struct {
@@ -42,15 +46,26 @@ typedef struct {
     uint8_t pad[2];
 } undo_stack_t;
 
+/* The RAM a take undo/redo loads the previous take into and re-commits from. The
+ * caller owns it (the recorder already keeps one); it never overlaps the store. */
+typedef struct {
+    take_hdr_t *hdr;
+    take_event_t *ev;
+    uint32_t max_events;
+} undo_take_scratch_t;
+
 void undo_stack_init(undo_stack_t *u);
 void undo_stack_push_clear(undo_stack_t *u, uint8_t clip, const clip_t *old);
 void undo_stack_push_record(undo_stack_t *u, uint8_t clip, const clip_t *old);
 void undo_stack_push_copy(undo_stack_t *u, uint8_t dst, uint8_t src, const clip_t *old_dst);
-void undo_stack_push_take(undo_stack_t *u, uint8_t slot);
-void undo_stack_push_delete(undo_stack_t *u, uint8_t slot);
+/* Call after the store edit being undone: the take/delete entry records the
+ * sequence number of the record it will restore. A new take entry for a slot
+ * invalidates older take entries for that slot, so only the newest is undoable. */
+void undo_stack_push_take(undo_stack_t *u, const song_store_t *store, uint8_t slot);
+void undo_stack_push_delete(undo_stack_t *u, const song_store_t *store, uint8_t slot);
 
-int undo_stack_undo(undo_stack_t *u, song_t *song, song_store_t *store);   /* 1 = undone */
-int undo_stack_redo(undo_stack_t *u, song_t *song, song_store_t *store);   /* 1 = redone */
+int undo_stack_undo(undo_stack_t *u, song_t *song, song_store_t *store, const undo_take_scratch_t *ts);
+int undo_stack_redo(undo_stack_t *u, song_t *song, song_store_t *store, const undo_take_scratch_t *ts);
 
 uint8_t undo_stack_undo_type(const undo_stack_t *u);   /* type of the next undo, or UNDO_NONE */
 uint8_t undo_stack_redo_type(const undo_stack_t *u);
