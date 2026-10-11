@@ -105,6 +105,10 @@ static int ed_smp_end(uint32_t k, const uint8_t *a, uint32_t na)
  * outside them gets no reply (a stray read of a gated block could fault). */
 enum { ED_PEEK = 40, ED_POKE, ED_CLOCK };
 #include "fm1_debug.h"
+/* RC1p: the debug-only stress / stats commands (rc_debug.c). Same code the host runner's
+ * `stress` / `stats` commands use. */
+#include "rc_debug.h"
+#include "rc_debug.c"
 static uint32_t ed_u35(const uint8_t *a)
 {
     return (uint32_t)a[0] | (uint32_t)a[1] << 7 | (uint32_t)a[2] << 14 | (uint32_t)a[3] << 21 | (uint32_t)a[4] << 28;
@@ -217,6 +221,30 @@ static void ed_handle(const uint8_t *f, uint32_t n)
     case ED_CLOCK:
         if (!ed_debug(cmd, a, na))
             return;
+        break;
+    case RC_ED_STRESS: {                              /* RC1p: n [cap] -> n, ok */
+        uint32_t n, cap;
+        int rc;
+        if (na < 10u)
+            return;
+        n = ed_u35(a);
+        cap = ed_u35(a + 5);
+        rc = rc_stress((int)n, (int)cap);
+        ed_w35(n);
+        ed_w35(rc == 0 ? 1u : 0u);
+        break;
+    }
+    case RC_ED_STATS: {                               /* RC1p: count, then every field */
+        uint32_t s[RC_ST_N];
+        int k, cnt = rc_stats(s, RC_ST_N);
+        ed_w35((uint32_t)cnt);
+        for (k = 0; k < cnt; k++)
+            ed_w35(s[k]);
+        break;
+    }
+    case RC_ED_STATS_RESET:
+        rc_stats_reset();
+        ed_b(1);
         break;
 #endif
     case ED_SMP_READ: {                              /* X0X: slot, offset (3 x 7 bits, from the slot's start,

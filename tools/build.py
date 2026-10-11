@@ -217,6 +217,10 @@ def build_app():
         v = os.environ.get(flag)    # unset: the default in firmware/src/x0x.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
+    # RC1p: the debug build's FM6 array is 8 so the stress command can raise the voice cap to 6/8
+    # without an eng_fm6.c change. A release build keeps eng_fm6.h's 4 (see the probe docs).
+    if os.environ.get("X0X_DEBUG") == "1":
+        flags.append("-DENG_FM6_VOICES=8")
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DX0X_VERSION="{VERSION}"')
