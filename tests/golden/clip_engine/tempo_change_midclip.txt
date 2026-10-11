@@ -15,6 +15,6 @@ runto 40000
 0 clip_started lead 0 0 12
 0 note_on lead 60 100 12
 6000 note_off lead 60 0 0
-36000 note_on lead 64 100 12
+35000 note_on lead 64 100 12
 
 # events=6

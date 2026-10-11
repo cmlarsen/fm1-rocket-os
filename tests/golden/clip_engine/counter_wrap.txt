@@ -1,0 +1,24 @@
+# case counter_wrap
+# script:
+clip 0 drum 4
+hit 0 0 0
+play
+runto 4294900000
+launch 0 0
+run 200000
+probe wrap
+
+# events:
+0 playing bass 0 0 0
+4294900000 clip_queued drums 0 0 0
+4294944000 clip_started drums 0 0 0
+4294944000 drum drums 0 0 0
+704 drum drums 0 0 0
+24704 drum drums 0 0 0
+48704 drum drums 0 0 0
+72704 drum drums 0 0 0
+96704 drum drums 0 0 0
+120704 drum drums 0 0 0
+wrap step=715849 sample=126704 bar=196 beat=2 step16=9
+
+# events=10

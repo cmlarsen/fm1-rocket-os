@@ -26,6 +26,7 @@ static song_t song;
 static uint32_t win_base;
 static uint32_t hbase;
 static int hplay;
+static int force_ones;      /* render every `run` as single-sample windows */
 
 typedef struct { uint32_t sample; uint8_t kind, role, a, b, c; } rec_t;
 static rec_t recs[MAX_EV];
@@ -178,6 +179,7 @@ static int tok(char *line, char **t, int max)
 }
 
 static int atoi_tok(char **t, int i) { return t[i] ? atoi(t[i]) : 0; }
+static uint32_t utok(char **t, int i) { return t[i] ? (uint32_t)strtoul(t[i], 0, 0) : 0u; }
 
 static void run_script(const char *script)
 {
@@ -198,15 +200,30 @@ static void run_script(const char *script)
             if (!strcmp(t[0], "bpm"))        song.bpm_x10 = (uint16_t)atoi_tok(t, 1);
             else if (!strcmp(t[0], "swing")) song.swing = (uint8_t)atoi_tok(t, 1);
             else if (!strcmp(t[0], "play"))  clip_engine_start(&eng);
-            else if (!strcmp(t[0], "stop"))  clip_engine_stop(&eng);
-            else if (!strcmp(t[0], "run"))   render_n((uint32_t)atoi_tok(t, 1));
-            else if (!strcmp(t[0], "runto")) render_to((uint32_t)atoi_tok(t, 1));
+            else if (!strcmp(t[0], "stop"))  clip_engine_transport_stop(&eng);
+            else if (!strcmp(t[0], "run")) {
+                uint32_t n = utok(t, 1), i;
+                if (force_ones) {
+                    for (i = 0; i < n; i++)
+                        render_n(1u);
+                } else {
+                    render_n(n);
+                }
+            }
+            else if (!strcmp(t[0], "runto")) render_to(utok(t, 1));
+            else if (!strcmp(t[0], "ones")) {
+                uint32_t n = utok(t, 1), i;
+                for (i = 0; i < n; i++)
+                    render_n(1u);
+            }
+            else if (!strcmp(t[0], "queuebpm")) clip_engine_queue_bpm(&eng, (uint16_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "launch")) {
                 if (n >= 3) clip_engine_launch_quant(&eng, (uint8_t)atoi_tok(t, 1), (uint8_t)atoi_tok(t, 2));
                 else        clip_engine_launch(&eng, (uint8_t)atoi_tok(t, 1));
             }
             else if (!strcmp(t[0], "launchnow")) clip_engine_launch_now(&eng, (uint8_t)atoi_tok(t, 1));
-            else if (!strcmp(t[0], "stoprole"))  clip_engine_stop_role(&eng, (uint8_t)atoi_tok(t, 1));
+            else if (!strcmp(t[0], "stoprole"))  clip_engine_stop(&eng, (uint8_t)atoi_tok(t, 1));
+            else if (!strcmp(t[0], "unused"))    song.clip[atoi_tok(t, 1)].used = 0;
             else if (!strcmp(t[0], "clip")) {
                 int idx = atoi_tok(t, 1), len = atoi_tok(t, 3);
                 if (!strcmp(t[2], "drum")) clip_drum(idx, len);
@@ -355,6 +372,52 @@ static void drift_check(void)
     }
 }
 
+/* ---- one-sample windows must produce the same events as one big block ---- */
+static void window_check(void)
+{
+    static const char *s =
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "clip 0 drum 4\n"
+        "hit 0 0 0\n"
+        "play\n"
+        "launch 0 0\n"
+        "launch 12 0\n"
+        "run 60000\n";
+    static rec_t a[MAX_EV];
+    int an, i;
+
+    song_defaults(); clip_engine_init(&eng, &song);
+    memset(recs, 0, sizeof recs); nrec = 0;
+    hbase = 0; hplay = 0; win_base = 0; outn = 0; force_ones = 0;
+    run_script(s);
+    an = nrec;
+    memcpy(a, recs, sizeof(rec_t) * (size_t)nrec);
+
+    song_defaults(); clip_engine_init(&eng, &song);
+    memset(recs, 0, sizeof recs); nrec = 0;
+    hbase = 0; hplay = 0; win_base = 0; outn = 0; force_ones = 1;
+    run_script(s);
+    force_ones = 0;
+
+    if (an != nrec) {
+        printf("  FAIL window: %d events in blocks, %d at 1 sample\n", an, nrec);
+        case_fail = 1;
+        return;
+    }
+    for (i = 0; i < an; i++) {
+        if (a[i].sample != recs[i].sample || a[i].kind != recs[i].kind ||
+            a[i].role != recs[i].role || a[i].a != recs[i].a || a[i].b != recs[i].b ||
+            a[i].c != recs[i].c) {
+            printf("  FAIL window: event %d differs (block %u vs 1-sample %u)\n",
+                   i, a[i].sample, recs[i].sample);
+            case_fail = 1;
+            return;
+        }
+    }
+    printf("  ok   window (1-sample == block, %d events)\n", an);
+}
+
 int main(void)
 {
     printf("clip_engine test\n");
@@ -421,12 +484,32 @@ int main(void)
 
     run_case("stop_role",
         "clip 12 melodic 4\n"
-        "note 12 0 60 100 4\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 12000\n"
+        "stoprole 2\n"                 /* the clip's quantize is Q_BAR: stop at the next bar */
+        "runto 102000\n");
+
+    run_case("stop_role_qbeat",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "quant 12 beat\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 12000\n"
+        "stoprole 2\n"                 /* Q_BEAT: stop at the next beat */
+        "runto 30000\n");
+
+    run_case("stop_then_cancel",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
         "play\n"
         "launch 12 0\n"
         "run 12000\n"
         "stoprole 2\n"
-        "runto 30000\n");
+        "stoprole 2\n"                 /* cancels the queued stop */
+        "runto 102000\n");
 
     run_case("launch_while_stopped",
         "clip 12 melodic 4\n"
@@ -444,6 +527,17 @@ int main(void)
         "play\n"
         "run 7000\n"
         "launchnow 13\n"
+        "runto 20000\n");
+
+    run_case("launch_now_no_cancel",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "clip 13 melodic 4\n"
+        "note 13 0 62 100 1\n"
+        "play\n"
+        "run 6000\n"
+        "launch 13 0\n"                 /* queued to the next bar */
+        "launchnow 13\n"                /* HOME + pad: launches now, does not cancel */
         "runto 20000\n");
 
     run_case("once_clip",
@@ -555,6 +649,68 @@ int main(void)
         "launch 24 0\n"
         "runto 30000\n");
 
+    run_case("drum_lane0_steps_0_24",
+        "clip 0 drum 32\n"
+        "hit 0 0 0\n"
+        "hit 0 0 24\n"
+        "play\n"
+        "launch 0 0\n"
+        "runto 156000\n");
+
+    run_case("melodic_shortened",
+        "clip 12 melodic 2\n"
+        "note 12 0 60 100 1\n"
+        "note 12 4 64 100 1\n"          /* past the clip's length: must not fire */
+        "play\n"
+        "launch 12 0\n"
+        "runto 40000\n");
+
+    run_case("unused_clip_ignored",
+        "clip 12 melodic 2\n"
+        "note 12 0 60 100 1\n"
+        "unused 12\n"
+        "play\n"
+        "launch 12\n"
+        "run 20000\n");
+
+    run_case("ring_tempo",
+        "clip 12 melodic 8\n"
+        "note 12 0 60 100 1\n"
+        "note 12 4 64 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 6000\n"
+        "queuebpm 600\n"                /* through the ring: it must survive later blocks */
+        "run 30000\n"
+        "run 30000\n");
+
+    run_case("tempo_jump_midstep",
+        "bpm 600\n"
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 3000\n"
+        "queuebpm 3000\n"               /* 60 -> 300 BPM mid-step: no step fires twice */
+        "run 30000\n");
+
+    run_case("counter_wrap",
+        "clip 0 drum 4\n"
+        "hit 0 0 0\n"
+        "play\n"
+        "runto 4294900000\n"            /* just below 2^32 */
+        "launch 0 0\n"
+        "run 200000\n"                  /* crosses the sample-counter wrap */
+        "probe wrap\n");
+
+    run_case("one_frame_windows",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "ones 96000\n"                  /* a whole bar at one sample per render */
+        "probe end\n");
+
     run_case("queries",
         "clip 12 melodic 4\n"
         "note 12 0 60 100 1\n"
@@ -572,6 +728,7 @@ int main(void)
         "query\n");
 
     drift_check();
+    window_check();
 
     if (case_fail) {
         printf("clip_engine: FAIL\n");
