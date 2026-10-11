@@ -51,7 +51,7 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 
 - **PLAY tap** always starts or stops the transport.
 - **HOME never exits LIVE.** A HOME tap closes overlays. A HOME hold shows the cheat sheet.
-- Playing clips carry on across mode changes.
+- Playing clips carry on across the SCL layer change inside LIVE. **Leaving LIVE stops the clip engine and releases its notes**, and hands the transport back to X0X's sequencer (T3). Entering LIVE takes the transport: X0X's sequencer stops and the clip engine starts stopped.
 
 ## LIVE mode
 
