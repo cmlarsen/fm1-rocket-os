@@ -62,6 +62,7 @@ if [ -f build/x0x.fwsc ]; then
         $CC -o $OUT/ldr_test tests/ldr_test.c && $OUT/ldr_test $OUT/old.fwsc build/x0x.fwsc"
     fi
     run installer python3 tests/install_test.py
+    run check-loader python3 tests/check_loader_test.py build/x0x.fwsc
 else
     echo "  skip update-path tests (no build/x0x.fwsc: run ./build.sh)"
 fi
