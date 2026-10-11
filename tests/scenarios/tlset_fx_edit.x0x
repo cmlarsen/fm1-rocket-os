@@ -1,0 +1,25 @@
+# TLSET r1: a momentary FX held in the FX layer must end when EDIT opens SETUP, even though the
+# key and FX releases arrive while SETUP is open.
+wait 300
+songseed
+press PLAY
+wait 700
+release PLAY
+tap PLAY
+wait 200
+press FX
+wait 30
+key 2 down
+wait 500
+expect fxactive2 1
+tap EDIT
+expect setup 1
+expect fxactive2 0
+key 2 up
+release FX
+wait 100
+tap EDIT
+expect setup 0
+wait 500
+expect fxlatch2 0
+expect fxactive2 0

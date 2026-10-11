@@ -2,7 +2,8 @@
 /* TLSET: include-style LIVE list, using X0X's existing canvas and main-loop paths. */
 static uint8_t setup_open, setup_row, assign_open;
 static int8_t assign_key = -1;
-static uint8_t assign_target;
+static uint8_t assign_target, assign_start;
+#define ASSIGN_STATES (LIVE_ASSIGN_COUNT + 1)
 
 static void live_setup_close(void)
 {
@@ -32,19 +33,19 @@ static int live_setup_button(int b)
     if (b == B_EDIT) {
         live_setup_close();
     } else if (b == B_HOME) {
-        live_mapped_release_all();
-    note_release_all();
+            live_mapped_release_all();
+        note_release_all();
         if (take_open) take_open = 0;
         else if (assign_open) { assign_open = 0; assign_key = -1; }
         else live_setup_close();
     } else if (b == B_SEL && !take_open) {
         if (setup_row == 0) {
             live_mapped_release_all();
-    note_release_all();
+            note_release_all();
             assign_open = 1;
         } else if (setup_row == 6) {
             live_mapped_release_all();
-    note_release_all();
+            note_release_all();
             take_open = 1;
             if (!song_io_take_pending()) song_io_take_load_ram();
         }
@@ -84,7 +85,7 @@ static void live_setup_input(void)
         e = (int)enc(EN_PRESET);
         if (assign_key >= 0 && e) {
             int v = (int)assign_target + e;
-            assign_target = (uint8_t)((v % LIVE_ASSIGN_COUNT + LIVE_ASSIGN_COUNT) % LIVE_ASSIGN_COUNT);
+            assign_target = (uint8_t)((v % ASSIGN_STATES + ASSIGN_STATES) % ASSIGN_STATES);
         }
         return;
     }
@@ -105,8 +106,9 @@ static void live_setup_input(void)
             int setting = setup_row - 1;
             int max = setting == SONG_SETUP_CHANNEL ? 16 : setting == SONG_SETUP_QUANT ? 2 : 1;
             int v = song_io_setup_get(setting) + e;
+            v = v < 0 ? 0 : v > max ? max : v;
             if (setting == SONG_SETUP_CHANNEL && v != song_io_setup_get(setting)) note_release_all();
-            song_io_setup_set(setting, v < 0 ? 0 : v > max ? max : v);
+            song_io_setup_set(setting, v);
         }
     }
 }
@@ -123,13 +125,14 @@ static void live_assign_label(int target, char *out)
         put_s(put_s(out, "Stop "), LV_ROLE_L[target - LIVE_ASSIGN_STOP]);
     } else if (target < LIVE_ASSIGN_NOTE) {
         put_s(out, LV_FX_NAME[target - LIVE_ASSIGN_FX]);
-    } else put_s(out, "Live note");
+    } else if (target < LIVE_ASSIGN_COUNT) put_s(out, "Live note");
+    else put_s(out, "None");
 }
 
 static void live_key_name(int k, char *out)
 {
     static const char *const names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    int note = 53 + k;
+    int note = 41 + k;
     put_i(put_s(out, names[note % 12]), note / 12 - 1);
 }
 
@@ -140,16 +143,19 @@ static int live_setup_key(int k, int down)
     if (down && assign_key < 0) {
         assign_key = (int8_t)k;
         assign_target = (uint8_t)live_bridge_key_clip(k);
-        if (assign_target >= LIVE_ASSIGN_COUNT) assign_target = 0;
+        if (assign_target >= LIVE_ASSIGN_COUNT) assign_target = LIVE_ASSIGN_COUNT;
+        assign_start = assign_target;
     } else if (!down && k == assign_key) {
-        char key[8], target[24], msg[40], *p;
-        song_io_set_key_clip(k, assign_target);
-        live_key_name(k, key);
-        live_assign_label(assign_target, target);
-        p = put_s(msg, key);
-        p = put_s(p, " -> ");
-        put_s(p, target);
-        say(msg, 0);
+        if (assign_target != assign_start) {
+            char key[8], target[24], msg[40], *p;
+            song_io_set_key_clip(k, assign_target == LIVE_ASSIGN_COUNT ? LIVE_ASSIGN_NONE : assign_target);
+            live_key_name(k, key);
+            live_assign_label(assign_target, target);
+            p = put_s(msg, key);
+            p = put_s(p, " -> ");
+            put_s(p, target);
+            say(msg, 0);
+        }
         assign_key = -1;
     }
     return 1;
@@ -170,7 +176,7 @@ static void live_setup_draw(int band)
         cv_text(10, vc(&AF_M, 4 - band * BAND_H, 18), &AF_M, title, TOK_TEXT);
         for (i = 0; i < 5; i++) {
             char label[24];
-            int target = ((int)assign_target + i - 2 + LIVE_ASSIGN_COUNT) % LIVE_ASSIGN_COUNT;
+            int target = ((int)assign_target + i - 2 + ASSIGN_STATES) % ASSIGN_STATES;
             int y = 28 + i * 21 - band * BAND_H;
             if (y >= BAND_H || y + 20 <= 0) continue;
             box(4, y, 232, 19, i == 2 ? TOK_THEME : TOK_SURF);
@@ -181,11 +187,11 @@ static void live_setup_draw(int band)
     }
     for (i = 0; i < 7; i++) {
         char value[20];
-        int y = 2 + i * 19 - band * BAND_H;
-        if (y >= BAND_H || y + 18 <= 0) continue;
+        int y = 2 + i * 18 - band * BAND_H;
+        if (y >= BAND_H || y + 17 <= 0) continue;
         live_setup_value(i, value);
-        box(4, y, 232, 18, i == setup_row ? TOK_THEME : TOK_SURF);
-        cv_text(8, vc(&AF_S, y, 18), &AF_S, names[i], i == setup_row ? TOK_INK : TOK_TEXT);
-        text_r(232, vc(&AF_S, y, 18), &AF_S, value, i == setup_row ? TOK_INK : TOK_MID);
+        box(4, y, 232, 17, i == setup_row ? TOK_THEME : TOK_SURF);
+        cv_text(8, vc(&AF_S, y, 17), &AF_S, names[i], i == setup_row ? TOK_INK : TOK_TEXT);
+        text_r(232, vc(&AF_S, y, 17), &AF_S, value, i == setup_row ? TOK_INK : TOK_MID);
     }
 }

@@ -1,0 +1,36 @@
+# TLSET r1: the assign cycle includes None, and a hold that changes nothing assigns nothing and
+# leaves the song clean.
+wait 300
+songseed
+wait 6000
+expect songdirty 0
+press PLAY
+wait 700
+release PLAY
+tap EDIT
+tap SEL
+expect songdirty 0
+key 5 down
+wait 100
+key 5 up
+expect keyclip5 5
+expect songdirty 0
+key 5 down
+turn PRESET 34 80
+key 5 up
+expect keyclip5 255
+expect songdirty 1
+key 6 down
+turn PRESET 1 80
+turn PRESET -1 80
+key 6 up
+expect keyclip6 6
+key 5 down
+wait 100
+key 5 up
+expect keyclip5 255
+key 5 down
+turn PRESET 1 80
+key 5 up
+expect keyclip5 0
+tap EDIT

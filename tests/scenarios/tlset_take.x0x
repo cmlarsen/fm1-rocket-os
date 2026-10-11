@@ -1,0 +1,53 @@
+# TLSET r1: assigned keys (stop BASS, FX 0) record into the take; the take log is pinned (takedump)
+# and the replay matches the recording event for event (eventscmp).
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap EDIT
+tap SEL
+key 20 down
+turn PRESET 8 80
+key 20 up
+expect keyclip20 28
+key 21 down
+turn PRESET 11 80
+key 21 up
+expect keyclip21 32
+tap EDIT
+expect setup 0
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+eventsnotes rec_notes.txt
+tapkey 7
+wait-bar 1
+tapkey 21
+wait-bar 1
+tapkey 21
+tapkey 20
+wait-bar 2
+waitbarabs 7
+eventsstop
+tap REC
+wait-bar 2
+expect takehas 1
+takedump take_rec.txt
+tap PLAY
+wait 400
+eventsnotes play_notes.txt
+takeplay
+waitbarabs 7
+eventsstop
+eventscmp rec_notes.txt play_notes.txt
+tap PLAY
+wait 300

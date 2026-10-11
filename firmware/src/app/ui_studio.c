@@ -150,6 +150,8 @@ static void st_finish_clear(void)
     st.clear_clip = 0xFF;
 }
 
+static int st_key_clip(int k) { return k >= 0 && k < (int)LIVE_NCLIPS ? k : -1; }
+
 static int st_clear_locked(void)
 {
     if (!song_io_setup_get(SONG_SETUP_LOCK) || !live_bridge_transport_playing())
@@ -175,13 +177,18 @@ void studio_tick(void)
     /* SEL held on the cursor: a clear after a 250 ms hold (T7a D4: a tap is only a launch), like
      * HOME + a pad; the ring runs 1.5 s from the press. */
     if ((ui.view == V_STUDIO) && (ui.btn & (1u << B_SEL)) && !(ui.btn & (1u << B_HOME)) &&
+        !(ui.btn_used & (1u << B_SEL)) &&
         st.clear_clip == 0xFF && (now - ui.down_t[B_SEL]) >= 250u) {
         int c = st_cursor_clip();
-        if (c >= 0 && live_bridge_clip_used(c) && !st_clear_locked()) {
-            st.clear_clip = (uint8_t)c;
-            st.clear_sel = 1;
-            st.clear_key = 0xFF;
-            st.clear_t0 = ui.down_t[B_SEL];
+        if (c >= 0 && live_bridge_clip_used(c)) {
+            if (st_clear_locked()) {
+                ui.btn_used |= 1u << B_SEL;              /* refused: the release is not a launch */
+            } else {
+                st.clear_clip = (uint8_t)c;
+                st.clear_sel = 1;
+                st.clear_key = 0xFF;
+                st.clear_t0 = ui.down_t[B_SEL];
+            }
         }
     }
     if (st.clear_clip != 0xFF) {
@@ -228,7 +235,7 @@ static void studio_redo(void)
 /* a key down/up on the song home */
 static void studio_handle_key(int k, int down)
 {
-    int clip = live_bridge_key_clip(k);
+    int clip = st_key_clip(k);
     int role = clip >= 0 ? live_bridge_role_of(clip) : -1;
     int used = clip >= 0 && live_bridge_clip_used(clip);
     if (!down) {
@@ -737,7 +744,7 @@ static void studio_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
     int cursor = studio_cursor_clip();
     (void)btn;
     for (k = 0; k < NKEYS; k++) {
-        int clip = live_bridge_key_clip(k);
+        int clip = st_key_clip(k);
         int role = clip >= 0 ? live_bridge_role_of(clip) : -1;
         int used, playing, q, qstart, qstop;
         if (clip < 0 || role < 0)

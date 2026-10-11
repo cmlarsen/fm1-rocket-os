@@ -55,16 +55,29 @@ static uint32_t fx_press_t, fx_last_tap;
 static uint32_t fx_key_t[6];         /* each FX key's press time */
 static uint8_t fx_key_dn[6];         /* the key is down (the effect is momentary) */
 static uint8_t fx_key_used[6];       /* the key went down in the FX layer: its release is ours */
+static uint8_t fx_owner_key[6];      /* the key that engaged each effect, plus one (0 = none) */
 
 static int fx_layer_active(void) { return fx_held || fx_layer_latch; }
 int live_fx_layer(void) { return fx_layer_active(); }
+static void live_fx_release_held(void)
+{
+    int i;
+    for (i = 0; i < 6; i++)
+        if (fx_key_dn[i]) {
+            if (!engine_perform_latched(i))
+                engine_perform_release(i);
+            fx_key_dn[i] = 0;
+        }
+}
+
 static void live_fx_reset_ui(void)
 {
     int i;
+    live_fx_release_held();
     fx_held = fx_layer_latch = 0;
     fx_press_t = fx_last_tap = 0;
     for (i = 0; i < 6; i++)
-        fx_key_dn[i] = fx_key_used[i] = 0;
+        fx_key_dn[i] = fx_key_used[i] = fx_owner_key[i] = 0;
 }
 
 /* T7a round 2: the held-note table lives in the shared key path (ui.c), so a key's note is tracked
@@ -268,16 +281,18 @@ static void live_play_tick(uint32_t btn)
 static const char *const LV_FX_NAME[6] = {"REPEAT 1/8", "REPEAT 1/16", "TAPE STOP",
                                           "FILTER DIVE", "ECHO THROW", "FREEZE"};
 
-static void live_fx_key(int k, int down)
+static void live_fx_key(int k, int down, int owner)
 {
     if (down) {
         fx_key_t[k] = plat_ms();
         fx_key_dn[k] = 1;
         fx_key_used[k] = 1;
+        fx_owner_key[k] = (uint8_t)(owner + 1);
         if (!engine_perform_latched(k))
             engine_perform_engage(k, 0);          /* hold: momentary (a tap latches on release) */
     } else {
         fx_key_used[k] = 0;
+        fx_owner_key[k] = 0;
         if (fx_key_dn[k]) {
             uint32_t dt = plat_ms() - fx_key_t[k];
             fx_key_dn[k] = 0;
@@ -305,7 +320,7 @@ static void live_mapped_release_all(void)
         if (mapped_fx[k]) {
             int f = mapped_fx[k] - 1;
             if (!engine_perform_latched(f)) engine_perform_release(f);
-            fx_key_dn[f] = fx_key_used[f] = 0;
+            fx_key_dn[f] = fx_key_used[f] = fx_owner_key[f] = 0;
             mapped_fx[k] = 0;
         }
     }
@@ -318,21 +333,21 @@ static int live_handle_key(int k, int down)
         int f = mapped_fx[k] - 1, j, held = 0;
         mapped_fx[k] = 0;
         for (j = 0; j < 27; j++) if (mapped_fx[j] == f + 1) held = 1;
-        if (!held) live_fx_key(f, 0);
+        if (!held) live_fx_key(f, 0, k);
+        return 1;
+    }
+    /* an FX key's release is ours even if the layer closed while it was held */
+    if (k >= 0 && k < 6 && !down && fx_key_used[k] && fx_owner_key[k] == (uint8_t)(k + 1)) {
+        live_fx_key(k, 0, k);
         return 1;
     }
     if (live_setup_key(k, down)) return 1;
-    /* an FX key's release is ours even if the layer closed while it was held */
-    if (k >= 0 && k < 6 && fx_key_used[k] && !down) {
-        live_fx_key(k, 0);
-        return 1;
-    }
     if (live_bridge_take_playing())
         return 1;                          /* T9i: LIVE input is ignored while the take plays */
     if (fx_layer_active()) {              /* T10i: FX held: keys 0-5 punch, upper keys mute */
         if (k >= 0 && k < 6) {
             if (down)
-                live_fx_key(k, 1);
+                live_fx_key(k, 1, k);
         } else if (k >= 16 && k < 16 + LIVE_NROLES) {
             if (down)
                 live_fx_mute(k - 16);
@@ -361,7 +376,7 @@ static int live_handle_key(int k, int down)
             int f = clip - LIVE_ASSIGN_FX, j, held = 0;
             for (j = 0; j < 27; j++) if (mapped_fx[j] == f + 1) held = 1;
             mapped_fx[k] = (uint8_t)(f + 1);
-            if (!held) live_fx_key(f, 1);
+            if (!held) live_fx_key(f, 1, k);
             return 1;
         }
         if (clip == LIVE_ASSIGN_NOTE) {
@@ -475,14 +490,8 @@ static void live_fx_button(void)
         }
     } else if (!down && fx_held) {
         uint32_t dt = now - fx_press_t;
-        int i;
         fx_held = 0;
-        for (i = 0; i < 6; i++)                    /* a held (momentary) effect ends with the layer */
-            if (fx_key_dn[i]) {
-                if (!engine_perform_latched(i))
-                    engine_perform_release(i);
-                fx_key_dn[i] = 0;
-            }
+        live_fx_release_held();                    /* a held (momentary) effect ends with the layer */
         if (dt < LIVE_FX_TAP_MS) {                 /* a tap */
             if (now - fx_last_tap < LIVE_FX_DBL_MS) {
                 fx_layer_latch = (uint8_t)!fx_layer_latch;   /* a double tap latches the layer */
@@ -550,6 +559,14 @@ static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
             continue;
         }
         clip = live_bridge_key_clip(k);
+        if (clip >= LIVE_ASSIGN_STOP && clip < LIVE_ASSIGN_COUNT) {   /* an assigned stop, FX or live note */
+            int f = clip - LIVE_ASSIGN_FX;
+            if (clip >= LIVE_ASSIGN_FX && clip < LIVE_ASSIGN_NOTE && (engine_perform_latched(f) || fx_key_dn[f]))
+                *key |= 1u << k;
+            else
+                *dim |= 1u << k;
+            continue;
+        }
         role = live_bridge_role_of(clip);
         if (role < 0 || !live_bridge_clip_used(clip))
             continue;                                      /* empty slot: off */

@@ -42,7 +42,7 @@ void song_io_set_key_clip(int key, int clip);
 
 /* LIVE SETUP: model-free song settings; edits use the normal autosave gate. */
 enum { SONG_SETUP_QUANT, SONG_SETUP_LOCK, SONG_SETUP_CHANNEL, SONG_SETUP_PC };
-enum { LIVE_ASSIGN_STOP = 27, LIVE_ASSIGN_FX = 32, LIVE_ASSIGN_NOTE = 38, LIVE_ASSIGN_COUNT = 39 };
+enum { LIVE_ASSIGN_STOP = 27, LIVE_ASSIGN_FX = 32, LIVE_ASSIGN_NOTE = 38, LIVE_ASSIGN_COUNT = 39, LIVE_ASSIGN_NONE = 255 };
 int song_io_setup_get(int setting);
 void song_io_setup_set(int setting, int value);
 

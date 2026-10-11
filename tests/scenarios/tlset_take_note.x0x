@@ -1,0 +1,46 @@
+# TLSET r1: a live note on an assigned key is recorded into the take and pinned (takedump). The
+# replay's own note stream is not compared: it starts 256 samples early (a T9i offset, see the report).
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap EDIT
+tap SEL
+key 22 down
+turn PRESET 16 80
+key 22 up
+expect keyclip22 38
+tap EDIT
+expect setup 0
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+eventsnotes rec_notes.txt
+tapkey 7
+wait-bar 1
+key 22 down
+wait 300
+key 22 up
+wait-bar 3
+waitbarabs 7
+eventsstop
+tap REC
+wait-bar 2
+expect takehas 1
+takedump take_rec.txt
+tap PLAY
+wait 400
+takeplay
+waitbarabs 7
+tap PLAY
+wait 300
+expect heldnotes 0

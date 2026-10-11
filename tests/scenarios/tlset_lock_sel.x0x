@@ -1,0 +1,31 @@
+# TLSET r1: with stage lock on and the transport playing, a SEL hold on the cursor clip is a refused
+# clear, and its release must not launch the clip either.
+wait 300
+tap SEQ
+tap HOME
+tapkey w1
+tap HOME
+press PLAY
+wait 700
+release PLAY
+wait 100
+tap EDIT
+turn SELECT 2 80
+turn ALGO 1 80
+expect stagelock 1
+tap EDIT
+press PLAY
+wait 700
+release PLAY
+wait 100
+cursor 0 1
+tap PLAY
+wait-bar 1
+expect clipused1 1
+expect liveclip0 2
+press SEL
+wait 1700
+release SEL
+wait-bar 2
+expect clipused1 1
+expect liveclip0 2

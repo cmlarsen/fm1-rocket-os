@@ -1,0 +1,25 @@
+# TLSET r1: an assigned FX is ended only by the key that engaged it. Key 10 holds REPEAT 1/8 (FX 0);
+# tapping the unrelated clip key 0 meanwhile must not latch FX 0.
+wait 300
+songseed
+press PLAY
+wait 700
+release PLAY
+tap EDIT
+tap SEL
+key 10 down
+turn PRESET 22 80
+key 10 up
+expect keyclip10 32
+tap EDIT
+expect setup 0
+expect fxlatch0 0
+key 10 down
+wait 20
+tapkey 0
+wait 400
+expect fxactive0 1
+key 10 up
+wait 50
+expect fxlatch0 0
+expect fxactive0 0

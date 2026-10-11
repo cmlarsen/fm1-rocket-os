@@ -39,7 +39,7 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
     [B_SEL]  = {{"SEL toggles the layers", "off: PADS, lit: PLAY", "in SETUP: open the row"}},
     [B_ENV]  = {{"no action in LIVE"}},
     [B_LFO]  = {{"no action in LIVE"}},
-    [B_EDIT] = {{"LIVE SETUP; EDIT: done", "hold key + PRESETS: assign", "ALGO: change row value", "MIDI, clock, lock, take"}},
+    [B_EDIT] = {{"EDIT: setup / EDIT again: done", "hold key + PRESETS: assign", "ALGO: change row value", "MIDI, clock, lock, take"}},
     [B_GLO]  = {{"GLO + a button: its card", "nothing else in LIVE"}},
     [B_HOME] = {{"HOME + tap a pad:", "launch it now", "hold: the cheat sheet", "HOME never exits LIVE"}},
     [B_SAVE] = {{"no action in LIVE", "the song saves when stopped"}},
@@ -83,8 +83,7 @@ static const help_row_t SHEET_LIVE[] = {
     {"REC",  "tap", "undo"},
     {"PLAY", "tap", "redo"},
     {"PAD",  "tap", "launch now"},
-    {"FX",   "tap", "reset all FX"},
-    {"EDIT", "tap", "LIVE SETUP"}
+    {"FX",   "tap", "reset all FX"}
 };
 
 static const help_card_t *help_card_for(int ctx, int b)
