@@ -6,6 +6,14 @@
 #include "eng_int.h"
 #include "eng_mem.h"
 
+/* T5i: on the device the voices' state lives in the shared .pool (the RAM plan); the host tests keep
+ * it as an ordinary object (no .pool section on macOS). */
+#if defined(X0X_HOST) || defined(__APPLE__)
+#define NZ_POOL
+#else
+#define NZ_POOL __attribute__((section(".pool")))
+#endif
+
 enum { NZ_ANLG, NZ_DUST, NZ_LFSR, NZ_META };
 enum { P_E0, P_E1, P_E2, P_E3, P_E4, P_E5, P_E6, P_E7 };
 
@@ -235,12 +243,16 @@ typedef struct {
 } eng_noise_voice_t;
 
 static int16_t nz_p[8];
-static eng_noise_voice_t nz_v[ENG_NOISE_VOICES];
+static int16_t nz_p_eff[8];                          /* T5i: with the guard on, DENS is zeroed here */
+static uint8_t nz_guard;
+static eng_noise_voice_t nz_v[ENG_NOISE_VOICES] NZ_POOL;   /* T5i: the pool (the RAM plan) */
 static uint32_t nz_age;
 static int32_t nz_tail[CTL];
 static uint32_t nz_tail_n;
 static int32_t nz_atk, nz_dec, nz_sus, nz_rel;   /* per CTL block, Q15 */
 static int nz_sus_lvl;
+
+void eng_noise_set_guard(int on) { nz_guard = (uint8_t)(on != 0); }
 
 static int32_t env_step(int ms)
 {
@@ -339,6 +351,12 @@ void eng_noise_render(int32_t *out, uint32_t n)
 {
     uint32_t done = 0;
     int vi, i;
+    const int16_t *pp = nz_p;
+    if (nz_guard) {                                   /* T5i: the guard skips the impulse density */
+        eng_memcpy(nz_p_eff, nz_p, sizeof nz_p_eff);
+        nz_p_eff[E_NZ_DENS] = 0;
+        pp = nz_p_eff;
+    }
     while (done < n) {
         uint32_t take;
         if (!nz_tail_n) {
@@ -365,7 +383,7 @@ void eng_noise_render(int32_t *out, uint32_t n)
                 m.amp1 = amp1;
                 m.cutoff = 0;
                 m.shape = 64 << 8;
-                eng_noise_dsp(nz_p, &v->st, nz_tail, CTL, &m);
+                eng_noise_dsp(pp, &v->st, nz_tail, CTL, &m);
                 v->amp0 = amp1;
             }
             nz_tail_n = CTL;

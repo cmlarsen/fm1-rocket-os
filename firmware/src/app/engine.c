@@ -48,14 +48,16 @@ static volatile uint8_t mot_release_req;
 void engine_motion_reset(void) { mot_release_req = 1; }   /* lanes changed under it (undo): knobs back */
 
 /* overload guard: past the CPU (a block over 92%, or 85% on average) the two 303s drop their
- * oversampling (~12% of the CPU: a little aliasing on bright notes) and the 808's voices end at
- * -50 dB instead of -90 (~2%); after 3 s back under 65% both return. The platform reports each
- * block's load after rendering it (engine_load, same context as engine_render); the change is
- * made at the start of the next block. Off during the PERF test, which measures the full cost. */
+ * oversampling (~12% of the CPU: a little aliasing on bright notes), the 808's voices end at
+ * -50 dB instead of -90 (~2%), T5i caps FM6 polyphony at 2 (releasing the oldest) and skips the NOISE
+ * impulse density; after 3 s back under 65% all return. The platform reports each block's load after
+ * rendering it (engine_load, same context as engine_render); the change is made at the start of the
+ * next block. Off during the PERF test, which measures the full cost. */
 #define GUARD_ON_LAST 92u
 #define GUARD_ON_AVG 85u
 #define GUARD_OFF 65u
 #define GUARD_CALM_FRAMES (3u * 44100u)
+#define GUARD_FM6_VOICES 2u
 extern float drum808_quiet;
 static uint8_t guard_on, guard_applied, guard_enabled = 1;
 static uint32_t guard_avg_q8, guard_calm;
@@ -83,12 +85,15 @@ void engine_load(uint32_t pct, uint32_t frames)
 static void guard_apply(void)
 {
     int k;
-    if (guard_on == guard_applied)
-        return;
-    guard_applied = guard_on;
-    for (k = 0; k < NBASS; k++)
-        bass303_set_lite(&b303[k], guard_on);
-    drum808_quiet = guard_on ? 3.2e-3f : 3.2e-5f;
+    if (guard_on != guard_applied) {
+        guard_applied = guard_on;
+        for (k = 0; k < NBASS; k++)
+            bass303_set_lite(&b303[k], guard_on);
+        drum808_quiet = guard_on ? 3.2e-3f : 3.2e-5f;
+        eng_noise_set_guard(guard_on);                /* T5i: skip the NOISE impulse density */
+    }
+    if (guard_on)                                     /* T5i: cap FM6 polyphony, releasing the oldest */
+        eng_fm6_limit_voices(GUARD_FM6_VOICES);
 }
 
 /* mixer: per part Level, Rev send, Dly send (a drum machine's add to its voices' own sends) */
@@ -322,17 +327,32 @@ void engine_bass_on(int part, int note, int accent, int slide)
 void engine_bass_off(int part) { cq_put(C_BOFF, (uint32_t)part, 0, 0); }
 
 /* T5i: the engine-only parts' notes. C_BON's c field carries velocity 0..127 for them (the 303s keep
- * accent|slide there); C_BOFF's b carries the note. No new command type. */
+ * accent|slide there); C_BOFF's b carries the note. No new command type. The note is clamped to
+ * 0..127 here, so an out-of-range note can never leave a voice stuck (its note-off would miss it). */
+static int note_clamp(int note) { return note < 0 ? 0 : note > 127 ? 127 : note; }
 void engine_note_on(int part, int note, int vel)
 {
     if (vel < 0)
         vel = 0;
     if (vel > 127)
         vel = 127;
-    cq_put(C_BON, (uint32_t)part, (uint32_t)note, (uint32_t)vel);
+    cq_put(C_BON, (uint32_t)part, (uint32_t)note_clamp(note), (uint32_t)vel);
 }
-void engine_note_off(int part, int note) { cq_put(C_BOFF, (uint32_t)part, (uint32_t)note, 0); }
+void engine_note_off(int part, int note) { cq_put(C_BOFF, (uint32_t)part, (uint32_t)note_clamp(note), 0); }
 void engine_fm6_preset(int n) { engine_set(T_RSV, 0, E_FM6_SLOT, n); }
+
+/* T5i: the all-notes-off. Main loop -> the ISR (like the other flags), so T3's live_bridge_exit and a
+ * panic handler can call it. The one-shot drums need nothing. */
+static volatile uint8_t all_off_req;
+static void all_off_now(void)                          /* ISR */
+{
+    int b;
+    for (b = 0; b < NBASS; b++)
+        bass303_all_off(&b303[b]);
+    eng_fm6_all_off();
+    eng_noise_all_off();
+}
+void engine_all_off(void) { all_off_req = 1; }
 
 /* ------------------------------------------------------- sequencer sink --- */
 /* probability: each part's (and drum track's) chance on the step playing now, set by its T_PROB lane
@@ -484,16 +504,16 @@ static void drain(void)
             s_drum(0, (int)a, (int)b, (float)v / 4095.0f);
         else if (type == C_BON && a < NBASS)
             bass303_note_on(&b303[a], (int)b, (int)(v & 1u), (int)((v >> 1) & 1u));
-        else if (type == C_BON && a == PART_FM6)        /* T5i: c = velocity */
-            eng_fm6_note_on((int)b, (int)v);
+        else if (type == C_BON && a == PART_FM6)        /* T5i: c = velocity, b = note (clamped) */
+            eng_fm6_note_on((int)(b > 127u ? 127u : b), (int)v);
         else if (type == C_BON && a == PART_NOISE)
-            eng_noise_note_on((int)b, (int)v);
+            eng_noise_note_on((int)(b > 127u ? 127u : b), (int)v);
         else if (type == C_BOFF && a < NBASS)
             bass303_note_off(&b303[a]);
-        else if (type == C_BOFF && a == PART_FM6)       /* T5i: b = note */
-            eng_fm6_note_off((int)b);
+        else if (type == C_BOFF && a == PART_FM6)
+            eng_fm6_note_off((int)(b > 127u ? 127u : b));
         else if (type == C_BOFF && a == PART_NOISE)
-            eng_noise_note_off((int)b);
+            eng_noise_note_off((int)(b > 127u ? 127u : b));
     }
     cq_r = r;
     while (guard-- && plat_midi_in(&pkt))
@@ -626,21 +646,26 @@ __attribute__((noinline)) static void t5i_part_mix(int p, const int32_t *i32, ui
     meter(p, mono, mix_level[p], n);
 }
 /* FM6 then NOISE, on core 0 (never core 1). Skipped while idle, so a project without them is
- * bit-identical; the adapters' own state carries a released voice's tail. */
+ * bit-identical; the adapters' own state carries a released voice's tail. Timed into their own PERF
+ * buckets (PR_FM6, PR_NOISE). */
 static void t5i_render(uint32_t n)
 {
     uint32_t i;
     if (eng_fm6_voices_active()) {
+        PROF_T(pf6);
         for (i = 0; i < n; i++)
             part_i32[i] = 0;
         eng_fm6_render(part_i32, n);
         t5i_part_mix(PART_FM6, part_i32, n);
+        PROF_ADD(PR_FM6, pf6);
     }
     if (eng_noise_voices_active()) {
+        PROF_T(pnz);
         for (i = 0; i < n; i++)
             part_i32[i] = 0;
         eng_noise_render(part_i32, n);
         t5i_part_mix(PART_NOISE, part_i32, n);
+        PROF_ADD(PR_NOISE, pnz);
     }
 }
 
@@ -743,6 +768,10 @@ void engine_render(int32_t *out_lr, uint32_t n)
     {
         PROF_T(pt);
         drain();
+        if (all_off_req) {                              /* T5i: engine_all_off (main loop -> ISR) */
+            all_off_req = 0;
+            all_off_now();
+        }
         if (mot_on)
             motion_tick(&mot, n);
         fxbus_set_bpm(&fx, seq_tempo(&seq));
@@ -759,8 +788,10 @@ void engine_render(int32_t *out_lr, uint32_t n)
         }
         done += k;
     }
-    if (mot_playing && !seq.playing)                     /* stopped: every knob back to its own value */
+    if (mot_playing && !seq.playing) {                  /* stopped: every knob back, every note off */
         motion_release(&mot);
+        all_off_now();                                  /* T5i: transport stop releases FM6/NOISE/303s */
+    }
     mot_playing = seq.playing;
     {
         PROF_T(pt);

@@ -30,11 +30,11 @@ static uint8_t fm6_patch[FP_SIZE + 1u];                        /* the own patch 
 static uint8_t fm6_slot;                                       /* the SLOT value last loaded */
 static int16_t fm6_prm[E_FM6_NEDIT];                           /* the macros: ALG FB MLVL MRAT MEG VMOD DTUN */
 static eng_fm6_voice_t fm6_voice[ENG_FM6_VOICES] FM6_POOL;      /* the voices: the pool (the RAM plan) */
-static fm6_lfo_t fm6_lfo;
+static fm6_lfo_t fm6_lfo FM6_POOL;                             /* the LFO state: the pool (item 6) */
 static int32_t fm6_lfo_v, fm6_lfo_d;
 static uint32_t fm6_age;
 static const fm6_vbank_t *fm6_bank;                            /* the B slots' bank (0 = none) */
-static int32_t fm6_tail[FM6_N];                                /* a rendered block not yet handed out */
+static int32_t fm6_tail[FM6_N] FM6_POOL;                       /* a rendered block not yet handed out */
 static uint32_t fm6_tail_n;
 
 static struct {                                                /* the patch through the macros */
@@ -224,11 +224,41 @@ void eng_fm6_all_off(void)
         }
 }
 
+/* the guard's shed: release the oldest held voices until at most max remain (a released voice fades
+ * out through its own release; it is not cut) */
+void eng_fm6_limit_voices(int max)
+{
+    int i, n = 0;
+    fm6_sync();
+    for (i = 0; i < ENG_FM6_VOICES; i++)
+        n += fm6_voice[i].live && fm6_voice[i].down;
+    while (n > max) {
+        int best = -1;
+        for (i = 0; i < ENG_FM6_VOICES; i++)
+            if (fm6_voice[i].live && fm6_voice[i].down &&
+                (best < 0 || fm6_voice[i].age < fm6_voice[best].age))
+                best = i;
+        if (best < 0)
+            break;
+        fm6_note_key(&fm6_voice[best].n, fm6_eff.p, 0);
+        fm6_voice[best].down = 0;
+        n--;
+    }
+}
+
 int eng_fm6_voices_active(void)
 {
     int i, n = 0;
     for (i = 0; i < ENG_FM6_VOICES; i++)
         n += fm6_voice[i].live;
+    return n;
+}
+
+int eng_fm6_voices_held(void)
+{
+    int i, n = 0;
+    for (i = 0; i < ENG_FM6_VOICES; i++)
+        n += fm6_voice[i].live && fm6_voice[i].down;
     return n;
 }
 

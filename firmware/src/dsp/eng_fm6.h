@@ -26,9 +26,9 @@
 #include "fm6_vbank.h"
 
 #ifndef ENG_FM6_VOICES
-#define ENG_FM6_VOICES 8             /* polyphony: T5i tunes this for CPU. The host estimate at 8 is far
-                                      * under 60 % of the block (see reports/T5i.md); the RAM plan's pool
-                                      * headroom and RC1's device measurement are the real checks. */
+#define ENG_FM6_VOICES 4             /* polyphony: T5i tunes this for CPU. The review capped the default
+                                      * at 4 (8 is about 103 % of a 240 MHz block at the perf doc's
+                                      * 2:1 device cycle ratio, 6 ~94 %, 4 ~85 %); RC1 may raise it. */
 #endif
 
 #define ENG_FM6_OWN 8                /* SLOT: the track's own patch (F1..F8 come before it) */
@@ -61,5 +61,9 @@ int eng_fm6_param(int i);
 void eng_fm6_note_on(int note, int vel);
 void eng_fm6_note_off(int note);
 void eng_fm6_all_off(void);
+/* T5i: the overload guard's shed: release the oldest live voices until at most max remain (they fade
+ * out, they are not cut). Deterministic; no heap. */
+void eng_fm6_limit_voices(int max);
 void eng_fm6_render(int32_t *out, uint32_t n);   /* adds n mono int32 samples, Q15 */
 int eng_fm6_voices_active(void);
+int eng_fm6_voices_held(void);                   /* T5i: live AND still held (not released) */

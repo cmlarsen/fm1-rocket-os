@@ -35,6 +35,8 @@ void eng_noise_dsp(const int16_t *p8, eng_noise_state_t *v, int32_t *out, uint32
 void eng_noise_init(void);
 void eng_noise_set_param(int i, int value);
 int eng_noise_param(int i);
+/* T5i: the overload guard's shed; while on, the impulse density is skipped (its parameter is kept) */
+void eng_noise_set_guard(int on);
 void eng_noise_param_range(int i, int *lo, int *hi);
 void eng_noise_set_env(int atk_ms, int dec_ms, int sus_pct, int rel_ms);
 void eng_noise_note_on(int note, int vel);
