@@ -9,7 +9,7 @@ expect view 1
 wait 1400
 shot studio_classic_footer.png
 tap GLO
-turn SELECT 18
+turn SELECT 19
 wait 100
 tap SEL
 expect classic 0
