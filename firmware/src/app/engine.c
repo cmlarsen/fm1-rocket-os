@@ -530,8 +530,11 @@ static void drain(void)
             eng_noise_note_off((int)(b > 127u ? 127u : b));
     }
     cq_r = r;
-    while (guard-- && plat_midi_in(&pkt))
-        midi_in(pkt);
+    if (!live_bridge_active())                          /* T11i: in STUDIO/LIVE the main loop's
+                                                         * midi_live_poll() owns the ring; Classic
+                                                         * keeps X0X's own per-part MIDI-in here */
+        while (guard-- && plat_midi_in(&pkt))
+            midi_in(pkt);
 }
 
 static float part_peak[ENG_NPARTS];

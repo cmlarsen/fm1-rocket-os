@@ -392,6 +392,16 @@ void live_bridge_transport_stop(void) { clip_engine_transport_stop(&g_eng); }
 int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 
 void live_bridge_launch(uint8_t clip) { g_stop_q[clip_role(clip) % NROLES] = 0; clip_engine_launch(&g_eng, clip); }
+
+/* T11i: Program Change launches a clip at the song's PC quantize (not the clip's own). Kept in its
+ * own block so T11i's one hook is easy to find and to rebase. */
+void live_bridge_launch_quant(uint8_t clip, uint8_t quant)
+{
+    if (clip >= NCLIPS)
+        return;
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch_quant(&g_eng, clip, quant);
+}
 void live_bridge_launch_now(uint8_t clip) { g_stop_q[clip_role(clip) % NROLES] = 0; clip_engine_launch_now(&g_eng, clip); }
 void live_bridge_stop(uint8_t role)
 {

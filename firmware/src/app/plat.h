@@ -36,7 +36,8 @@ void plat_keys_dim(uint32_t keys);     /* these keys light dim (a second level; 
 void plat_play_red(int red);           /* PLAY lights green; red (its other LED) while recording (before plat_leds) */
 
 /* USB MIDI, 4-byte USB-MIDI event packets (cable 0) */
-int plat_midi_in(uint32_t *pkt);       /* 1 = got one (called from the audio ISR) */
+int plat_midi_in(uint32_t *pkt);       /* 1 = got one (engine.c's classic MIDI-in, audio ISR;
+                                        * or T11i's midi_live_poll, main loop) */
 void plat_midi_out(uint32_t pkt);      /* queue one (audio ISR or main loop) */
 
 /* persistent storage (Felucca storage.c objects: A/B sectors, CRC, torn-write safe) */

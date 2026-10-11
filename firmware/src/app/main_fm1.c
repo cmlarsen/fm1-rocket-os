@@ -314,6 +314,7 @@ static void fm1_main(void)
     engine_init(proj.pat, &proj.arr.song, proj.arr.lane, &proj.sound);
     if (project_load() != 0)
         project_defaults();                         /* nothing saved yet (or another format) */
+    midi_live_set_clock(proj.set.rsv[1]);           /* T11i: the GLOBAL clock source (0 = AUTO) */
     engine_apply_sound(&proj.sound);
     seq.bpm = (float)proj.set.bpm_x10 / 10.0f;
     seq.accent_q7 = proj.set.accent_q7;
@@ -344,6 +345,7 @@ static void fm1_main(void)
     for (;;) {
         fm1_wdt_feed();
         usb_retry(fm1_ms);
+        midi_live_poll(eng_prof_frames);            /* T11i: the TRS/USB ring -> the app (main loop) */
         if (fm1_ms > 30000u && bootguard.pending) {     /* a crash or hang in the first 30 s counts */
             bootguard.pending = 0;
             bootguard.failed = 0;
