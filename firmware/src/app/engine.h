@@ -57,6 +57,11 @@ extern volatile uint32_t eng_scope_w;
 void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t *base);
 void engine_render(int32_t *out_lr, uint32_t n);   /* ISR: n stereo frames, 24-bit in int32 */
 
+/* Event tap (T2a): NULL by default. Set by the host runner's `events` command (and, later, the
+ * device take recorder); called from the command queue's drain path with the raw command word
+ * and the sample counter, one NULL check on the audio path. Not an ISR-safe sink on the device. */
+extern void (*engine_tap)(uint32_t sample, uint32_t cmd);
+
 /* parameter descriptors (UI) */
 int engine_nvoices(int target);
 int engine_nparams(int target, int voice);
