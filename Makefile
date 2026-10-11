@@ -148,7 +148,7 @@ clean-remote:
 
 HOST_CC ?= cc
 CORE_CFLAGS = -std=c99 -O2 -ffp-contract=off -Wall -Wextra -Wdouble-promotion
-SAN_CFLAGS = -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra
+SAN_CFLAGS = -std=c99 -O1 -g -ffp-contract=off -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra
 
 .PHONY: unit-clip
 unit-clip:
@@ -201,7 +201,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-engines unit-store unit-take unit-midi
+unit-core: unit-clip unit-engines unit-store unit-take unit-midi unit-fx
 .PHONY: unit-midi
 unit-midi:
 	@mkdir -p build/host
@@ -211,4 +211,14 @@ unit-midi:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/midi_in_test_san \
 	    tests/host/midi_in_test.c core/midi/midi_in.c
 	build/host/midi_in_test_san
+
+.PHONY: unit-fx
+unit-fx:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Wno-double-promotion -Werror -I. -Ifirmware/src/dsp \
+	    -o build/host/perform_test tests/host/perform_test.c firmware/src/dsp/perform.c
+	build/host/perform_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src/dsp \
+	    -o build/host/perform_test_san tests/host/perform_test.c firmware/src/dsp/perform.c
+	build/host/perform_test_san
 

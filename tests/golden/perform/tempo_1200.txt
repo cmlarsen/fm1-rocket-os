@@ -1,0 +1,2 @@
+# repeat 1/8 @ 1200 bpm
+period=11025 grid=33075 capped=0

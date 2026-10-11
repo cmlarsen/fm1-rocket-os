@@ -1,0 +1,2 @@
+# echo throw controller: base/held/release targets
+send=10 fdbk=30 time=4 held_send=100 held_fdbk=75 held_time=5

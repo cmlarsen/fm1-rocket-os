@@ -1,0 +1,3 @@
+# repeat 1/8 @ 1200 bpm (click-free input)
+period=11025 grid=44100 aligned=1
+in_step=0.0314 engage_step=0.0315 release_step=0.0275
