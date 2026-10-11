@@ -33,7 +33,7 @@ Read [docs/README.md](docs/README.md) first. It indexes everything. Keep the doc
   - Keep USB rescue and "return to stock" working.
   - Agents never flash hardware, except under the owner's unattended-flashing rule in [build-plan.md](docs/engineering/build-plan.md#overnight-run-2026-10-10): the X0X 1.0.5 loader only, over USB with `tools/fm1_install.py`.
   - Flash writes stall XIP and glitch audio, so save only while stopped and idle.
-- **Determinism.** The audio sample counter is the only clock, and there are no wall-clock reads in `core/`. Host and WASM output must be bit-identical. The device is checked by its event stream.
+- **Determinism.** The audio sample counter is the only clock, and there are no wall-clock reads in `core/`. Repeated host runs must be bit-identical. WASM matches the native host within 1 LSB (X0X's float DSP); `make parity` enforces that tolerance. The device is checked by its event stream.
 - **Build host.** `deltron.local` (x86-64 Ubuntu, ssh as `caleb`) runs `make fw`, `make check` and `make emu-binary` through `FW_HOST`. The Mac runs the host and WASM tiers.
 - **Keep X0X's layout.** Don't move or rename inherited files. New code goes in new files.
 

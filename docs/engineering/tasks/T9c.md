@@ -30,3 +30,7 @@ Compile the new files for the device on deltron and report the code and RAM size
 - Small commits with the attribution lines from `CLAUDE.md`'s instructions.
 - `reports/T9c.md` describes the API, what T9i must wire (the engine tap, the prelude callback, storage through `song_store` take functions), and the test list.
 - `worker_done` with `--outcome`, `--files-modified`, `--report-path reports/T9c.md`.
+
+## Notes for T9i (from the T2a review)
+- `engine_tap` stamps each drained command with the sample at the **end** of the block (`eng_prof_frames` is advanced before `drain()`). Pass `eng_prof_frames - n` instead, so events carry the block-start sample where they take effect.
+- Cue and mute changes don't go through the engine command queue. Record launches and mutes from the clip engine's events (`TAKE_LAUNCH`, `TAKE_MUTE`), not from the tap.
