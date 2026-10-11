@@ -102,6 +102,9 @@ enum { C_PARAM_T0 = 0, C_DRUM = 8, C_BON, C_BOFF, C_NOP };
 static uint32_t cq[CQ];
 static volatile uint32_t cq_w, cq_r;
 
+/* T2a event tap: see engine.h. The host runner sets it for `events`; T9 will set it on the device */
+void (*engine_tap)(uint32_t sample, uint32_t cmd);
+
 static void cq_put(uint32_t type, uint32_t a, uint32_t b, uint32_t c)
 {
     uint32_t w = cq_w;
@@ -427,6 +430,8 @@ static void drain(void)
     while (r != cq_w) {
         uint32_t c = cq[r % CQ], type = c >> 28, a = (c >> 20) & 0xFFu, b = (c >> 12) & 0xFFu, v = c & 0xFFFu;
         r++;
+        if (engine_tap)                                 /* the command, at this sample (T2a) */
+            engine_tap(eng_prof_frames, c);
         if (type < 8u)
             apply_param((int)type, (int)a, (int)b, (int)v);
         else if (type == C_DRUM)
