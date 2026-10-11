@@ -20,7 +20,9 @@
  *   alloff                       the panic all-notes-off (engine_all_off)
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
  *   midicfg CHANNEL PC           T11i: the current song's live channel (0 = omni) and PC launch
- *   midiclock BPM N              T11i: N 24-ppqn F8 ticks at BPM, sample-accurate (the clock test)
+ *   midiclock BPM N              T11i: N 24-ppqn F8 ticks at BPM, into the ring with their stamps
+ *   stall MS                     T11i: MS ms of a stalled main loop (audio runs, no MIDI poll)
+ *   midiflood N                  T11i: N note-ons, N CCs and a note-off, to overflow the input ring
  *   midifuzz SEED N              T11i: N random MIDI messages, then the panic on all 16 channels;
  *                                stops, waits out the release tail and expects no held note / voice
  *   wav FILE | wavstop           start / stop recording the output
@@ -114,15 +116,43 @@ void plat_play_red(int red) { (void)red; }
 void plat_keys_dim(uint32_t k) { dim_keys = k; }      /* dim keys: "o" in the leds print */      /* the device's PLAY colour: green, red while recording */
 
 #define MQ 256
-static uint32_t min_q[MQ], mi_w, mi_r;
+static uint32_t host_sample;             /* frames rendered since boot: the only clock (defined below) */
+static uint32_t min_q[MQ], min_ts[MQ], mi_w, mi_r;
+static uint8_t host_midi_overflow;
+static int host_stall;                   /* T11i: `stall MS`: the main loop is busy (no MIDI poll) */
 static FILE *midi_log;
-int plat_midi_in(uint32_t *pkt)
+
+static int host_midi_push(uint32_t pkt, uint32_t ts)
+{
+    uint32_t fill = mi_w - mi_r;
+    int note_on = ((pkt >> 8) & 0xF0) == 0x90 && ((pkt >> 24) & 0x7F);
+    if (fill >= MQ || (fill >= MQ - 16u && note_on)) {
+        if (fill >= MQ)
+            host_midi_overflow = 1;
+        return 0;
+    }
+    min_q[mi_w % MQ] = pkt;
+    min_ts[mi_w % MQ] = ts;
+    mi_w++;
+    return 1;
+}
+int plat_midi_in(uint32_t *pkt, uint32_t *sample)
 {
     if (mi_r == mi_w)
         return 0;
-    *pkt = min_q[mi_r++ % MQ];
+    *pkt = min_q[mi_r % MQ];
+    *sample = min_ts[mi_r % MQ];
+    mi_r++;
     return 1;
 }
+int plat_midi_overflow(void)
+{
+    int o = host_midi_overflow != 0;
+    host_midi_overflow = 0;
+    return o;
+}
+uint32_t plat_sample_now(void) { return host_sample; }
+void plat_sample_sync(void) { }
 static uint32_t midi_out_count, clock_out_count, note_ons;
 void plat_midi_out(uint32_t pkt)
 {
@@ -284,7 +314,6 @@ static int rc_host_words;                            /* fields the last `stats` 
  * b:8 | c:12, type 0..7 = a parameter's target (engine.h T_*), 8 = a drum note, 9 = a bass note
  * on, 10 = a bass note off. */
 static FILE *events_log;
-static uint32_t host_sample;             /* frames rendered since boot: the only clock */
 static uint32_t bar_count;               /* the 909's wraps since the transport started */
 static uint32_t boffs;                   /* T7a: note-offs the tap has seen (leaving LIVE releases) */
 static uint8_t bass_on[2];               /* T7a r2: the 303 gates the tap has seen stick (expect bassheld) */
@@ -556,7 +585,8 @@ static void run_ms(uint32_t ms)
     uint32_t i;
     for (i = 0; i < ms; i++) {
         now_ms++;
-        midi_live_poll(host_sample);                 /* T11i: the TRS/USB ring -> the app (main loop) */
+        if (!host_stall)
+            midi_live_poll(host_sample);             /* T11i: the TRS/USB ring -> the app (main loop) */
         while (audio_due_ms <= (double)now_ms) {      /* 256-frame half buffers, as the I2S DMA */
             double t0 = now_ns(), dt;
             uint32_t k;
@@ -606,11 +636,13 @@ static void run_ms(uint32_t ms)
             }
             audio_due_ms += 256.0 * 1000.0 / 44100.0;
         }
-        if (now_ms >= ui_due) {
-            ui_due = now_ms + 16;
-            ui_frame();
-        } else {
-            ui_input_only();
+        if (!host_stall) {
+            if (now_ms >= ui_due) {
+                ui_due = now_ms + 16;
+                ui_frame();
+            } else {
+                ui_input_only();
+            }
         }
         host_log_seq();                                  /* cues and mutes set this millisecond */
     }
@@ -1201,10 +1233,10 @@ int main(int argc, char **argv)
         else if (!strcmp(cmd, "midi")) {
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
-            min_q[mi_w++ % MQ] = cin | s << 8 | d1 << 16 | d2 << 24;
+            host_midi_push(cin | s << 8 | d1 << 16 | d2 << 24, host_sample);
         } else if (!strcmp(cmd, "midicfg")) {           /* T11i: LIVE SETUP, for the tests: CHANNEL PC */
             midi_live_set_song_cfg((uint8_t)atoi(a), (uint8_t)(b[0] ? atoi(b) : 0));
-        } else if (!strcmp(cmd, "midiclock")) {         /* T11i: N F8 ticks at BPM, sample-accurate */
+        } else if (!strcmp(cmd, "midiclock")) {         /* T11i: N F8 ticks at BPM, into the ring with stamps */
             int bpm = atoi(a), n = b[0] ? atoi(b) : 25, k;
             uint32_t step, span, base;
             if (bpm < 20)
@@ -1215,8 +1247,20 @@ int main(int argc, char **argv)
             span = (uint32_t)(n - 1) * step;
             base = host_sample > span ? host_sample - span : 0u;
             for (k = 0; k < n; k++)
-                midi_live_feed(0x0000F80Fu, base + (uint32_t)k * step);
-            midi_live_tick(host_sample);
+                host_midi_push(0x0000F80Fu, base + (uint32_t)k * step);
+        } else if (!strcmp(cmd, "stall")) {              /* T11i: MS ms of a stalled main loop (no MIDI poll) */
+            host_stall = 1;
+            run_ms((uint32_t)atoi(a));
+            host_stall = 0;
+        } else if (!strcmp(cmd, "midiflood")) {          /* T11i: fill the ring past full, then a note-off */
+            int k, m = atoi(a);
+            for (k = 0; k < m; k++)                      /* note-ons: the reserve caps them at MQ-16 */
+                host_midi_push(0x09u | (uint32_t)(0x90u | (k & 15)) << 8 |
+                               (uint32_t)(k & 127) << 16 | 100u << 24, host_sample);
+            for (k = 0; k < m; k++)                      /* CCs: these may fill it to overflowing */
+                host_midi_push(0x0Bu | (uint32_t)(0xB0u | (k & 15)) << 8 |
+                               (uint32_t)(7u) << 16 | (uint32_t)(k & 127) << 24, host_sample);
+            host_midi_push(0x08u | (uint32_t)0x80u << 8 | (uint32_t)((m - 1) & 127) << 16, host_sample);
         } else if (!strcmp(cmd, "midifuzz")) {          /* T11i: a deterministic MIDI fuzz */
             fails += host_midi_fuzz((uint32_t)atoi(a), b[0] ? atoi(b) : 200);
         } else if (!strcmp(cmd, "wav")) {

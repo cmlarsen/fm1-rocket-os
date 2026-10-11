@@ -4,8 +4,10 @@
  * One midi_in_t (core/midi/midi_in.c, T11c) is fed from the shared TRS/USB ring in the MAIN LOOP,
  * because everything it drives — the LIVE play path, the clip engine's launch/transport/tempo —
  * is a main-loop API (X0X's command queue is produced only from the main loop; see engine.c's
- * `in_isr` trap). The clock-lost check runs in the same call, on the same sample counter, so the
- * byte timestamps line up with it.
+ * `in_isr` trap). Each packet carries the sample counter the producer recorded when it took it out
+ * of the endpoint (see plat_sample_now), so a stalled main loop draining a batch feeds the true
+ * arrival times, not one stamp for the whole batch. The clock-lost check runs in the same call, on
+ * the same clock.
  *
  * Routing is by the song: notes on `song.live_channel` (0 = omni) play the focused role through
  * the LIVE bridge, Program Change (when `song.pc_launch`) launches that clip quantized, CC 120 /
@@ -20,13 +22,16 @@
 #include "core/midi/midi_in.h"     /* midi_in_t + midi_cfg_from_song (model.h's song_t) */
 
 /* The app it feeds. */
-extern int  plat_midi_in(uint32_t *pkt);                     /* the TRS/USB ring (plat.h) */
+extern int  plat_midi_in(uint32_t *pkt, uint32_t *sample);   /* the TRS/USB ring (plat.h) */
+extern int  plat_midi_overflow(void);                        /* the ring dropped a packet */
 extern void *live_bridge_song(void);                         /* live_bridge.h */
 extern int  live_bridge_active(void);
 extern void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
-extern void live_bridge_transport_start(void);
+extern void live_bridge_transport_restart(void);
+extern void live_bridge_transport_continue(void);
 extern void live_bridge_transport_stop(void);
 extern void live_bridge_set_bpm(uint16_t bpm_x10);
+extern void live_bridge_set_bpm_soft(uint16_t bpm_x10);
 extern void live_bridge_launch_quant(uint8_t clip, uint8_t quant);   /* T11i (additive, live_bridge.c) */
 extern void engine_all_off(void);                            /* engine.h */
 extern int  live_focus(void);                                /* ui_live.c: the PLAY layer's focus */
@@ -77,8 +82,8 @@ static void ml_launch(void *x, uint8_t clip, uint8_t quant)
     if (clip < NCLIPS)
         live_bridge_launch_quant(clip, quant);
 }
-static void ml_start(void *x) { (void)x; live_bridge_transport_start(); }
-static void ml_cont(void *x)  { (void)x; live_bridge_transport_start(); }   /* resume where it is */
+static void ml_start(void *x) { (void)x; live_bridge_transport_restart(); }   /* bar 1, step 0 */
+static void ml_cont(void *x)  { (void)x; live_bridge_transport_continue(); }  /* resume, no reset */
 static void ml_stop(void *x)  { (void)x; live_bridge_transport_stop(); }
 static void ml_lost(void *x)  { (void)x; g_ext = 0; }
 
@@ -111,6 +116,12 @@ static void ml_sync_cfg(void)
     midi_in_set_cfg(&g_in, &c);
 }
 
+static uint16_t ml_song_bpm(void)
+{
+    const song_t *s = (const song_t *)live_bridge_song();
+    return s ? s->bpm_x10 : 0u;
+}
+
 void midi_live_feed(uint32_t pkt, uint32_t sample)
 {
     ml_ensure();
@@ -124,23 +135,32 @@ void midi_live_tick(uint32_t sample)
     uint16_t bpm;
     uint32_t d;
     ml_ensure();
+    if (g_clk_internal) {                           /* Internal: the song's own tempo is authoritative */
+        uint16_t sb = ml_song_bpm();
+        if (sb && sb != g_sent_bpm) {
+            live_bridge_set_bpm(sb);
+            g_sent_bpm = sb;
+        }
+        g_ext = 0;
+        return;
+    }
     midi_in_tick(&g_in, sample);                    /* fires clock_lost -> ml_lost clears g_ext */
     if (!midi_in_clock_ok(&g_in)) {
         g_ext = 0;
         return;
     }
-    g_ext = (uint8_t)!g_clk_internal;
+    g_ext = 1;
     bpm = midi_in_bpm_x10(&g_in);
     d = bpm > g_sent_bpm ? (uint32_t)(bpm - g_sent_bpm) : (uint32_t)(g_sent_bpm - bpm);
     if (bpm && (!g_sent_bpm || d >= ML_TEMPO_STEP)) {
-        live_bridge_set_bpm(bpm);                   /* the clip engine follows only while clocked */
+        live_bridge_set_bpm_soft(bpm);              /* live tempo: the song's own bpm is untouched */
         g_sent_bpm = bpm;
     }
 }
 
 int midi_live_poll(uint32_t sample)
 {
-    uint32_t pkt;
+    uint32_t pkt, ts;
     int n = 0;
     if (!live_bridge_active()) {                    /* Classic: engine.c owns the ring and X0X's handling */
         if (g_nheld)
@@ -149,10 +169,12 @@ int midi_live_poll(uint32_t sample)
     }
     ml_ensure();
     ml_sync_cfg();
-    while (n < 256 && plat_midi_in(&pkt)) {
-        midi_live_feed(pkt, sample);
+    while (n < 256 && plat_midi_in(&pkt, &ts)) {
+        midi_live_feed(pkt, ts);
         n++;
     }
+    if (plat_midi_overflow())                       /* a dropped packet may have been a note-off */
+        midi_live_note_all_off();
     midi_live_tick(sample);
     return n;
 }
@@ -166,7 +188,13 @@ void midi_live_set_song_cfg(uint8_t live_channel, uint8_t pc_launch)
     s->pc_launch = pc_launch ? 1u : 0u;
 }
 
-void midi_live_set_clock(int internal) { g_clk_internal = (uint8_t)(internal != 0); }
+void midi_live_set_clock(int internal)
+{
+    g_clk_internal = (uint8_t)(internal != 0);
+    g_sent_bpm = 0;                                 /* re-send the tempo the new source wants */
+    if (g_clk_internal)
+        g_ext = 0;
+}
 
 void midi_live_note_all_off(void)
 {

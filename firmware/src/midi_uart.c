@@ -17,12 +17,7 @@ static struct {
 
 static int um_put(uint32_t pkt)                    /* into midi_in_q (usb.c): 0 = full */
 {
-    if (mi_w - mi_r >= MQ)
-        return 0;
-    midi_in_q[mi_w % MQ] = pkt;
-    RING_PUBLISH();
-    mi_w++;
-    return 1;
+    return midi_q_push(pkt, plat_sample_now());
 }
 
 static void uart_midi_init(void)                   /* before TIMER5 starts: PORTH read-modify-write */

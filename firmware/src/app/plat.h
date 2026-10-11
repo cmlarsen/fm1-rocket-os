@@ -36,9 +36,18 @@ void plat_keys_dim(uint32_t keys);     /* these keys light dim (a second level; 
 void plat_play_red(int red);           /* PLAY lights green; red (its other LED) while recording (before plat_leds) */
 
 /* USB MIDI, 4-byte USB-MIDI event packets (cable 0) */
-int plat_midi_in(uint32_t *pkt);       /* 1 = got one (engine.c's classic MIDI-in, audio ISR;
-                                        * or T11i's midi_live_poll, main loop) */
+int plat_midi_in(uint32_t *pkt, uint32_t *sample);   /* 1 = got one; *sample = the audio sample counter
+                                                      * the producer recorded when it took the packet
+                                                      * (engine.c's classic MIDI-in, audio ISR; or
+                                                      * T11i's midi_live_poll, main loop) */
+int plat_midi_overflow(void);          /* T11i: the ring dropped a packet; clears and returns 1 */
 void plat_midi_out(uint32_t pkt);      /* queue one (audio ISR or main loop) */
+
+/* T11i: the audio sample counter now, sub-block (the audio ISR's block start plus a 24 MHz timer
+ * estimate). The MIDI producers stamp each packet with it and midi_live ticks on it, so a stalled
+ * main loop draining a batch keeps the true arrival times. */
+uint32_t plat_sample_now(void);
+void plat_sample_sync(void);           /* the audio ISR anchors the clock to the block just rendered */
 
 /* persistent storage (Felucca storage.c objects: A/B sectors, CRC, torn-write safe) */
 int plat_store_load(uint32_t obj, void *dst, uint32_t max);   /* bytes loaded, < 0 = none / bad */

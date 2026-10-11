@@ -87,6 +87,8 @@ void live_bridge_render(uint32_t nframes, const live_sink_t *sink);
 
 /* Transport (the PLAY button in LIVE). */
 void live_bridge_transport_start(void);
+void live_bridge_transport_restart(void);    /* T11i: MIDI Start: bar 1, step 0, relaunch */
+void live_bridge_transport_continue(void);   /* T11i: MIDI Continue: resume, no reset */
 void live_bridge_transport_stop(void);
 int  live_bridge_transport_playing(void);
 
@@ -102,6 +104,7 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
 
 /* Tempo, in the clip engine's single source of truth. */
 void live_bridge_set_bpm(uint16_t bpm_x10);
+void live_bridge_set_bpm_soft(uint16_t bpm_x10);   /* T11i: a live tempo (the clock), not saved in the song */
 uint16_t live_bridge_bpm_x10(void);
 
 /* T10i: the sample distances from the transport's current position to its next 1/8 and 1/16 grid

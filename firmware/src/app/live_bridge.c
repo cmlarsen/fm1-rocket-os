@@ -418,6 +418,8 @@ void live_bridge_render(uint32_t nframes, const live_sink_t *sink)
 /* ----- transport and launching (main loop) ----- */
 
 void live_bridge_transport_start(void) { clip_engine_start(&g_eng); }
+void live_bridge_transport_restart(void) { clip_engine_restart(&g_eng); }   /* T11i: MIDI Start */
+void live_bridge_transport_continue(void) { clip_engine_continue(&g_eng); }   /* T11i: MIDI Continue resumes */
 void live_bridge_transport_stop(void) { clip_engine_transport_stop(&g_eng); }
 int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 
@@ -470,6 +472,7 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 }
 
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
+void live_bridge_set_bpm_soft(uint16_t bpm_x10) { clip_engine_queue_bpm_soft(&g_eng, bpm_x10); }   /* T11i: the clock */
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
 
 /* T10i: the next 1/8 and 1/16 grid distances. The clip engine's step math is

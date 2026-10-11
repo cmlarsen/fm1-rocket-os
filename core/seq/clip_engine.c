@@ -293,6 +293,7 @@ void clip_engine_init(clip_engine_t *e, song_t *song)
     for (j = 0; j < NROLES; j++) {
         e->cur[j] = CLIP_NONE;
         e->que[j] = CLIP_NONE;
+        e->s_cur[j] = CLIP_NONE;              /* T11i: nothing to relaunch until a clip plays */
     }
     e->bpm_x10 = (song && song->bpm_x10) ? song->bpm_x10 : 1200u;
     e->bpm_src = e->bpm_x10;
@@ -301,7 +302,9 @@ void clip_engine_init(clip_engine_t *e, song_t *song)
     e->step_f = CLIP_STEP_NUM % e->bpm_x10;
 }
 
-void clip_engine_start(clip_engine_t *e) { e->playing = 1; }
+void clip_engine_start(clip_engine_t *e) { e->playing = 1; e->resume = 0; }
+void clip_engine_continue(clip_engine_t *e) { e->playing = 1; e->resume = 1; e->restart = 0; }
+void clip_engine_restart(clip_engine_t *e) { e->playing = 1; e->resume = 0; e->restart = 1; }
 void clip_engine_transport_stop(clip_engine_t *e) { e->playing = 0; }
 
 /* ---- UI entry points ----------------------------------------------------- */
@@ -351,6 +354,12 @@ void clip_engine_stop(clip_engine_t *e, uint8_t role)
 void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10)
 {
     push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10);
+}
+
+/* T11i: the external clock's tempo: the running tempo only, never the song's */
+void clip_engine_queue_bpm_soft(clip_engine_t *e, uint16_t bpm_x10)
+{
+    push_cmd(e, CLIP_CMD_SET_BPM_SOFT, 0, 0, bpm_x10);
 }
 
 /* T10i: mute / unmute a role, through the ring. */
@@ -445,6 +454,12 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         if (c.cmd == CLIP_CMD_SET_BPM) {
             if (e->song)
                 e->song->bpm_x10 = c.bpm_x10;  /* one source of truth */
+            e->bpm_ext = 0;                    /* T11i: the song's tempo wins again */
+            set_bpm(e, c.bpm_x10);
+            continue;
+        }
+        if (c.cmd == CLIP_CMD_SET_BPM_SOFT) {  /* T11i: the external clock's live tempo */
+            e->bpm_ext = c.bpm_x10;
             set_bpm(e, c.bpm_x10);
             continue;
         }
@@ -546,36 +561,64 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
 
     /* the song is the tempo source of truth: the UI writes song->bpm_x10 directly, or a
      * ring tempo command writes it (in consume_cmds) */
-    if (e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src)
+    if (e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src && !e->bpm_ext)
         set_bpm(e, e->song->bpm_x10);
 
     consume_cmds(e, sink);
 
-    if (e->playing && !e->was_playing) {
-        e->global_step = 0;
-        e->step_sample = 0;
-        e->step_frac = 0;
-        e->elapsed = 0;
-        for (r = 0; r < NROLES; r++) {
-            e->pos[r] = 0;
-            if (e->que_set[r])
-                e->que_at[r] = 0;
+    if (e->playing && (e->restart || !e->was_playing)) {
+        uint8_t restart = e->restart;
+        e->restart = 0;
+        if (e->resume) {
+            /* T11i: Continue resumes the stop point (time paused during the stop) */
+            e->resume = 0;
+            e->elapsed = e->s_elapsed;
+            e->step_sample = e->s_step_sample;
+            e->step_frac = e->s_step_frac;
+            e->global_step = e->s_global;
+            for (r = 0; r < NROLES; r++) {
+                e->cur[r] = e->s_cur[r];
+                e->pos[r] = e->s_pos[r];
+            }
+            ev(sink, 0, CLIPEV_PLAYING, 1, 0, 0, 0);
+            base = e->elapsed;
+        } else {
+            if (restart)                              /* T11i: MIDI Start relaunches what was playing */
+                for (r = 0; r < NROLES; r++)
+                    if (e->cur[r] == CLIP_NONE)
+                        e->cur[r] = e->s_cur[r];
+            e->global_step = 0;
+            e->step_sample = 0;
+            e->step_frac = 0;
+            e->elapsed = 0;
+            for (r = 0; r < NROLES; r++) {
+                e->pos[r] = 0;
+                if (e->que_set[r])
+                    e->que_at[r] = 0;
+            }
+            ev(sink, 0, CLIPEV_PLAYING, 1, 0, 0, 0);
+            do_step(e, 0, 0, sink);               /* step 0 fires at sample 0 */
+            base = 0;
         }
-        ev(sink, 0, CLIPEV_PLAYING, 1, 0, 0, 0);
-        do_step(e, 0, 0, sink);               /* step 0 fires at sample 0 */
-        base = 0;
     } else if (!e->playing) {
         if (e->was_playing) {
             for (r = 0; r < NROLES; r++) {
                 release_role(e, r, 0, sink);
+                e->s_cur[r] = e->cur[r];           /* T11i: what a Continue will resume */
+                e->s_pos[r] = e->pos[r];
                 e->cur[r] = CLIP_NONE;
                 e->pos[r] = 0;
             }
+            e->s_elapsed = e->elapsed;
+            e->s_step_sample = e->step_sample;
+            e->s_step_frac = e->step_frac;
+            e->s_global = e->global_step;
             ev(sink, 0, CLIPEV_STOPPED, 0, 0, 0, 0);
         }
         e->was_playing = 0;
         return;
     } else {
+        e->resume = 0;                         /* a Continue while already playing is a no-op */
         base = e->elapsed;
     }
 

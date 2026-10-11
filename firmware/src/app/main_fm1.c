@@ -37,6 +37,7 @@ struct x0x_worst_s {
 static void render_block(int32_t *o)                /* ALNK0: one half, measured */
 {
     uint32_t t0 = fm1_ticks(), us, budget = HALF_FRAMES * 1000000u / FS;
+    plat_sample_sync();                             /* T11i: anchor the MIDI timestamp clock to this half */
     x0x_dbg.in_audio = 1;
 #if FELUCCA_UAC
     uac_render_start();
@@ -345,7 +346,7 @@ static void fm1_main(void)
     for (;;) {
         fm1_wdt_feed();
         usb_retry(fm1_ms);
-        midi_live_poll(eng_prof_frames);            /* T11i: the TRS/USB ring -> the app (main loop) */
+        midi_live_poll(plat_sample_now());          /* T11i: the TRS/USB ring -> the app (main loop) */
         if (fm1_ms > 30000u && bootguard.pending) {     /* a crash or hang in the first 30 s counts */
             bootguard.pending = 0;
             bootguard.failed = 0;
