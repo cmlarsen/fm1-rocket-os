@@ -236,7 +236,8 @@ static void live_draw_header(void)
     w = tw(&AF_S, "LIVE") + 10;
     box(4, 3, w, 14, TOK_THEME);
     cv_text(4 + 5, vc(&AF_S, 3, 14), &AF_S, "LIVE", C_BLACK);
-    cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S, live.layer == LIVE_PADS ? "PADS" : "PLAY", TOK_MID);
+    cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
+            help_shift_active() ? "SHIFT" : live.layer == LIVE_PADS ? "PADS" : "PLAY", TOK_MID);
     x = 104;
     if (playing)
         play_icon(x, 4, C_WHITE);

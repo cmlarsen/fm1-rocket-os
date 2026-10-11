@@ -17,6 +17,7 @@
 #include "song_io.h"                           /* T6i: the current song on flash */
 #include "live_bridge.h"                       /* T3/T7a: the clip engine and the song it owns */
 #include "ui_songs.h"                          /* T8i: the SONGS view (songs_ops_t, songs_ui_t) */
+#include "ui_help.h"                           /* T11h: the cheat sheet and the GLO+button cards */
 #include "undo.c"
 
 /* ================================================================ model === */
@@ -1219,9 +1220,8 @@ static void clear_part(pattern_t *p, int part)
 }
 
 /* ============================================================ help cards === */
-/* Hold one button for HELP_HOLD ms without using it with anything: a card says what it does here,
- * its combinations included. A key, a turn or another button puts the card away (and the
- * combination works as always); letting go of the button after its card does nothing else. */
+/* T11h: this is X0X's own "hold one button ~1 s" help, and it stays only inside Classic. Outside
+ * Classic the help is SYSTEM 2 (GLO + a button) in ui_help.c, and a hold never shows X0X help. */
 #define HELP_HOLD 900u
 #define HELP_HOLD_SAVE 400u                    /* SAVE is held to copy: its card says what will be copied */
 static int perf_testing(void);
@@ -1314,6 +1314,8 @@ static void help_tick(uint32_t btn, uint32_t keys)
 {
     uint32_t now = plat_ms();
     int i;
+    if (!ui.classic)
+        return;                                      /* T11h: outside Classic the 1 s help is off */
     if (ui.help) {
         uint32_t m = 1u << (ui.help - 1);
         if (btn != m || keys || (int32_t)(ui.turn_t - ui.down_t[ui.help - 1]) > 0 || ui.overlay == O_ASK)
@@ -2722,6 +2724,11 @@ static void input(void)
         ev.ms = plat_ms();
         for (i = 0; i < NE; i++)
             ev.enc[i] = enc((int)i);
+        if (help_songs_tick(btn, keys)) {              /* T11h: GLO + a button: its card, and modal */
+            ev.btn = 0;
+            for (j = 0; j < NE; j++)
+                ev.enc[j] = 0;
+        }
         if (ui_songs_input(&songs, &ev) != SONG_ACTION_NONE)
             songs_close();
         /* keep ui.c's button bookkeeping in step: a press stamps down_t, and the view
@@ -2749,6 +2756,8 @@ static void input(void)
             any_button = 1;
             ui.btn_used &= ~m;
             ui.down_t[i] = plat_ms();
+            if (help_glo_press(btn, (int)i))           /* T11h: GLO + a button: its card, no action */
+                continue;
             if (i == B_REC)                            /* transport acts on the press: timing */
                 button_tap((int)i);
         } else if (!(ui.btn_used & m) && i != B_REC && i != B_PLAY) {
@@ -2761,6 +2770,7 @@ static void input(void)
         copy_tick(btn, keys);
         help_tick(btn, keys);
     }
+    help_overlay_tick(btn, keys);                      /* T11h: the HOME sheet, and the card's close */
     ui.btn = btn;
     ch = keys ^ ui.keys;
     ui.keys = keys;
@@ -3931,24 +3941,27 @@ static void draw_help(int band)
 }
 
 #ifdef X0X_HOST
-/* every card, on every kind of screen, fits the screen: 1 = yes (prints the first that does not) */
+/* every card, on every kind of screen, fits the screen: 1 = yes (prints the first that does not).
+ * T11h: it also walks Classic on and off (the footer's two discovery lines) and checks the new
+ * ui_help.c tables. */
 static int help_fits(void)
 {
     static const uint8_t views[] = {V_PART, V_SEQ, V_HOME, V_SONG, V_GEN, V_FX, V_MIX, V_LIVE};
     const char *l[HELP_LINES];
     ui_t keep = ui;
     uint8_t keep_any = any_button;
-    int b, p, v, kb, n, k, ok = 1;
+    int b, p, v, kb, cl, n, k, ok = 1;
     for (v = 0; v < (int)sizeof views; v++)
         for (p = 0; p < NPARTS; p++)
             for (kb = 0; kb < 2; kb++)
-                for (b = 0; b < NB; b++) {
-                    ui.view = views[v];
-                    ui.part = (uint8_t)p;
-                    ui.rec = (uint8_t)kb;
-                    {
+                for (cl = 0; cl < 2; cl++)
+                    for (b = 0; b < NB; b++) {
                         const char *fa, *fb, *fc;
                         int32_t w;
+                        ui.view = views[v];
+                        ui.part = (uint8_t)p;
+                        ui.rec = (uint8_t)kb;
+                        ui.classic = (uint8_t)cl;
                         ui.overlay = (uint8_t)(b % 3);           /* none, a list, a question */
                         ui.gen_stale[0] = (uint8_t)(b & 1);
                         ui.rec = (uint8_t)(b & 2);
@@ -3960,17 +3973,17 @@ static int help_fits(void)
                                 printf("footer too wide: \"%s / %s / %s\" (%d px)\n", fa, fb ? fb : "", fc ? fc : "", (int)w);
                             ok = 0;
                         }
-                    }
-                    n = help_lines(b, l);
-                    if (n < 1 || n > HELP_LINES)
-                        ok = 0;
-                    for (k = 0; k < n; k++)
-                        if (tw(&AF_S, l[k]) > 224) {
-                            if (ok)
-                                printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&AF_S, l[k]));
+                        n = help_lines(b, l);
+                        if (n < 1 || n > HELP_LINES)
                             ok = 0;
-                        }
-                }
+                        for (k = 0; k < n; k++)
+                            if (tw(&AF_S, l[k]) > 224) {
+                                if (ok)
+                                    printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&AF_S, l[k]));
+                                ok = 0;
+                            }
+                    }
+    ok = help_cards_fit() && ok;                           /* T11h: the sheet rows and the new cards */
     ui = keep;
     any_button = keep_any;
     return ok;
@@ -3982,8 +3995,15 @@ static int help_fits(void)
 static uint16_t footer_text(const char **a, const char **b, const char **c)
 {
     *a = *b = *c = 0;
+    if (help_footer(a, b, c))                          /* T11h: the sheet / a card is up */
+        return C_GRAY;
     if (!any_button) {
-        *a = "HOLD ANY BUTTON: WHAT IT DOES";
+        if (ui.classic) {                              /* T11h: X0X's own help still lives in Classic */
+            *a = "HOLD ANY BUTTON: WHAT IT DOES";
+        } else {                                       /* T11h: outside Classic, the ways in */
+            *a = "GLO: A CARD";
+            *b = "HOLD HOME: COMBOS";
+        }
         return C_GRAY;
     }
     if (ui.overlay == O_ASK) {
@@ -4059,7 +4079,9 @@ static void draw_main(void)
     cv_begin(240, 2 * BAND_H, C_BLACK);           /* both bands, then one transfer: no tear between them */
     for (band = 0; band < 2; band++) {
         cv_band(band * BAND_H, BAND_H);
-        if (ui.help)
+        if (help_card_active() || help_shift_active())
+            help_draw(band);                           /* T11h: the GLO card / the HOME sheet */
+        else if (ui.help)
             draw_help(band);
         else if (ui.overlay == O_ASK)
             draw_ask(band);
@@ -4286,6 +4308,8 @@ static void draw_knobs(void)
  * the rename screen). Both draw through gfx.c's canvas, like ui_live.c. */
 #include "ui_name.c"
 #include "ui_songs.c"
+/* T11h: the cheat sheet and the GLO+button help cards (its own file, included like the views). */
+#include "ui_help.c"
 
 static void leds(void)
 {
@@ -4480,9 +4504,11 @@ void ui_frame(void)
         volatile uint8_t *h = &eng_hit[i / NDRUM][i % NDRUM];
         *h = (uint8_t)(*h - (*h >> 3) - (*h ? 1 : 0));
     }
-    if (songs_mode())                                  /* T8i: the songs view draws its own screen */
+    if (songs_mode()) {                                /* T8i: the songs view draws its own screen */
         ui_songs_draw(&songs, plat_ms());
-    else {
+        if (help_card_active())                        /* T11h: a GLO+button card over it */
+            help_draw_songs();
+    } else {
         draw_header();
         draw_main();
         draw_knobs();
