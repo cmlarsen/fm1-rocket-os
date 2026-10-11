@@ -4,9 +4,16 @@
 # against its reference implementation, and the whole firmware app in the simulator
 # (tests/scenarios/*.x0x: UI, patterns, persistence, MIDI clock), with screenshots and
 # audio in build/scenarios/. Needs the reference sources (see tests/host/run_*.sh).
-#   tests/run_tests.sh
+#   tests/run_tests.sh            everything
+#   tests/run_tests.sh --unit     only the host unit suites (what `make unit` runs)
+# The reference comparisons need their checkouts next to the tree; without them they are
+# skipped (a plain macOS checkout has no ../schwung-*).
 set -u
 cd "$(dirname "$0")/.."
+UNIT_ONLY=0
+for a in "$@"; do
+    [ "$a" = "--unit" ] && UNIT_ONLY=1
+done
 CC="${CC:-cc}"
 FAIL=0
 OUT=build/host
@@ -47,8 +54,18 @@ run motion sh -c "$CC $W -o $OUT/motion_test tests/host/motion_test.c firmware/s
 run drum-pan sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/drum_pan_test tests/host/drum_pan_test.c firmware/src/dsp/drum909.c firmware/src/dsp/drum808.c -lm && $OUT/drum_pan_test"
 run stereo sh -c "$CC -O2 -ffp-contract=off -w -Ifirmware/src/dsp -Ifirmware/src -Ibuild/gen -o $OUT/stereo_test tests/host/stereo_test.c firmware/src/dsp/master.c firmware/src/dsp/fxbus.c -lm && $OUT/stereo_test"
 run master sh -c "$CC $W -Wno-double-promotion -o $OUT/master_test tests/host/master_test.c firmware/src/dsp/master.c -lm && $OUT/master_test"
+# the engine reference comparisons: run only when their checkout is next to the tree
+NINEW9_DIR="${NINEW9_DIR:-../schwung-9W9}"
+EIGHTW8_DIR="${EIGHTW8_DIR:-../schwung-8W8}"
+SCHWUNG303="${SCHWUNG303:-../schwung-303}"
 for t in drum909 drum808 bass303; do
-    [ -f "tests/host/run_$t.sh" ] && run "$t" sh "tests/host/run_$t.sh"
+    [ -f "tests/host/run_$t.sh" ] || continue
+    case $t in
+    drum909) [ -f "$NINEW9_DIR/src/dsp/er99_engine.c" ] || { echo "  skip $t (set NINEW9_DIR; $NINEW9_DIR not found)"; continue; } ;;
+    drum808) [ -f "$EIGHTW8_DIR/src/dsp/sc808_engine.cpp" ] || { echo "  skip $t (set EIGHTW8_DIR; $EIGHTW8_DIR not found)"; continue; } ;;
+    bass303) [ -f "$SCHWUNG303/src/dsp/open303/rosic_Open303.cpp" ] || { echo "  skip $t (set SCHWUNG303; $SCHWUNG303 not found)"; continue; } ;;
+    esac
+    run "$t" sh "tests/host/run_$t.sh"
 done
 run storage sh -c "$CC -O2 -o $OUT/storage_test tests/storage_test.c && $OUT/storage_test"
 # the update path, against the firmware package (Felucca's tests; needs ./build.sh)
@@ -67,10 +84,14 @@ else
     echo "  skip update-path tests (no build/x0x.fwsc: run ./build.sh)"
 fi
 run host-build sh host/build_host.sh
+if [ "$UNIT_ONLY" = 1 ]; then
+    [ $FAIL -eq 0 ] && echo "unit tests passed" || echo "UNIT TESTS FAILED"
+    exit $FAIL
+fi
 if command -v emcc >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then   # the browser build, when it can be built
-    printf 'wav emu_ref.wav\nwait 500\ntapkey b0\ntapkey w0\ntapkey w8\ntap PLAY\nwait 2960\nwavstop\n' > build/host/emu_ref.x0x
-    run emu sh -c "sh web/emu/build.sh >/dev/null 2>&1 && build/host/x0x_host build/host/emu_ref.x0x build/host >/dev/null && \
-        node tests/host/emu_test.mjs build/emu/x0x.wasm build/host/emu_ref.wav"
+    run emu sh tests/parity.sh
+else
+    echo "  skip emu/parity (needs emcc and node)"
 fi
 for s in tests/scenarios/*.x0x; do
     n=$(basename "$s" .x0x)

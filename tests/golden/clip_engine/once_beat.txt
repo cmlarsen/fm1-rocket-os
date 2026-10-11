@@ -1,0 +1,19 @@
+# case once_beat
+# script:
+clip 12 melodic 2
+note 12 0 60 100 1
+mode 12 once
+play
+run 6000
+launch 12 1
+runto 40000
+
+# events:
+0 playing bass 0 0 0
+6000 clip_queued lead 0 0 12
+24000 clip_started lead 0 0 12
+24000 note_on lead 60 100 12
+30000 note_off lead 60 0 0
+36000 clip_stopped lead 0 0 12
+
+# events=6
