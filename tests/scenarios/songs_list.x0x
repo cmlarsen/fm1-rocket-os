@@ -1,0 +1,100 @@
+# T8i STUDIO 7/8: SAVE held opens the songs list; New > Starter and Empty; the 5-slot limit.
+# The list starts on "+ New song" when there is no current song; otherwise on the current
+# song, so a create first turns the cursor back to "+ New song" (turn SELECT -9 clamps to 0).
+wait 300
+expect view 10
+expect songused 0
+expect songcurrent -1
+press SAVE
+wait 700
+release SAVE
+wait 40
+expect songson 1
+expect songcurrent -1
+expect songused 0
+wait 1400
+shot songs_list_empty.png
+dump songs_list_empty.json
+# New > Starter (the default: A MIN, 125 BPM)
+tap SEL
+wait 40
+expect songson 1
+shot songs_new_starter.png
+tap SEL
+wait 40
+expect songson 0
+expect songused 1
+expect songcurrent 0
+expect songslot0 1
+expect songclips0 13
+# New > Empty
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+turn SELECT -1
+expect songson 1
+shot songs_new_empty.png
+tap SEL
+wait 40
+expect songused 2
+expect songcurrent 1
+expect songclips1 0
+# back to the list: two songs and the meter
+press SAVE
+wait 700
+release SAVE
+wait 40
+shot songs_list_two.png
+dump songs_list_two.json
+# fill the last three slots with Starters
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+tap SEL
+wait 40
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+tap SEL
+wait 40
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+tap SEL
+wait 40
+expect songused 5
+# a sixth is refused
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+tap SEL
+wait 40
+expect songused 5
+expect songson 1
+shot songs_five_max.png
+dump songs_five_max.json
+tap HOME
+wait 40
+tap HOME
+wait 40
+expect songson 0

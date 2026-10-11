@@ -1,0 +1,64 @@
+# T8i: open a song from the list while clips are playing. The transport stops and the
+# voices release (silence), then the chosen song is the current one; a reboot keeps it.
+wait 300
+# two songs: Starter (slot 0) then Empty (slot 1)
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap SEL
+wait 40
+tap SEL
+wait 40
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+turn SELECT -1
+tap SEL
+wait 40
+expect songused 2
+expect songcurrent 1
+# open the Starter (slot 0) and play a clip
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+turn SELECT 1
+expect songrow 1
+tap SEL
+wait 40
+expect songson 0
+expect songcurrent 0
+expect clipused0 1
+tap SEL
+tap PLAY
+expect playing 1
+wait-bar 1
+expect liveclip0 0
+# open the Empty (slot 1) while it plays: the music stops, the new song loads
+press SAVE
+wait 700
+release SAVE
+wait 40
+expect songson 1
+expect playing 1
+turn SELECT 1
+expect songrow 2
+tap SEL
+wait 40
+expect playing 0
+expect songcurrent 1
+expect songson 0
+wait 1400
+shot songs_open_playing.png
+dump songs_open_playing.json
+# the reboot keeps it the current song (the autosave remembers the slot)
+wait 4500
+reboot
+expect songcurrent 1
+expect songused 2

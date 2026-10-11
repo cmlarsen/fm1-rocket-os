@@ -17,3 +17,13 @@ Coordinator decisions are in **bold**. First merge `integration` into your branc
 9. On empty slots, show "empty" once, not in both columns. Give the `+ New song` row the design's dashed border.
 
 Then re-render every PNG, run `make unit-songs unit-core scenarios screens-lint check fw` and `tools/check_loader.sh build/x0x.fwsc`, commit, update reports/T8.md, and send worker_done. T8i (wiring) comes after T7a merges.
+
+## T8i (now): wire the songs view
+T7a has merged.
+1. Merge `integration` into your branch.
+2. Implement `songs_ops_t` over `song_io`. Add `song_io` functions as needed: you own them for this step. T7b is touching `song_io` in parallel, so keep your additions in a clearly separate block.
+3. Add the `ui.c` hook: `V_SONGS`, opened by holding SAVE for about 600 ms, plus routing, draw, footer and LEDs. A short SAVE tap stays "save now".
+4. Opening a song loads it into the song home, with the clip engine stopped first and all-off.
+5. Use T7a's held-note table: `note_release_all` on entering and leaving the songs view.
+6. Move `tests/scenarios/pending/t8_*.x0x` into `tests/scenarios` with goldens. Add: open a song while clips are playing (silence, then the new song), delete the current song, and reboot persistence.
+7. Run the full ladder and `tools/check_loader.sh`, commit, update reports/T8.md, and send worker_done.
