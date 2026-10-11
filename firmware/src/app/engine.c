@@ -86,6 +86,13 @@ void engine_perform_release(int fx)
 void engine_perform_reset(void) { perform_reset(&perf); }
 void engine_perform_echo_throw(int on) { perform_echo_throw(&perf, on); }
 int engine_perform_latched(int fx) { return perform_latched(&perf, fx); }
+int engine_perform_active(int fx) { return perform_active(&perf, fx); }
+
+/* T9i: the take playback sink's FX half, ISR only. It applies the recorded punch FX directly to
+ * perform's state (no ring push, no re-recording), the same as the main-loop path would after its
+ * ring drains. `how` is take.h's TAKE_FX_OFF / _ON / _LATCH. */
+void engine_take_perform(int fx, int how) { perform_take_fx(&perf, fx, how); }
+void engine_take_perform_reset(void) { perform_take_reset(&perf); }
 
 void engine_perform_tick(void)
 {

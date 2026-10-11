@@ -212,6 +212,22 @@ void take_stop(take_t *t, uint32_t now)
     t->stop_set = 1;
 }
 
+/* T9i: end the take at once, on `now`, with no wait for a bar boundary. Leaving LIVE must close the
+ * take immediately (the transport may never reach another bar), so the recording is not lost and no
+ * further feed is appended. An arm that never started is cancelled (like take_stop). */
+void take_finish(take_t *t, uint32_t now)
+{
+    if (!t)
+        return;
+    if (t->state == TAKE_IDLE || t->state == TAKE_PLAY)
+        return;
+    if (t->state == TAKE_ARMED && (int32_t)(t->start - now) > 0) {
+        take_clear(t);                   /* never started: cancel the arm */
+        return;
+    }
+    take_end(t, (uint32_t)(now - t->start), 0);
+}
+
 /* ---- player -------------------------------------------------------------- */
 
 void take_play(take_t *t, uint32_t now)

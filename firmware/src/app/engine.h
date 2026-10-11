@@ -122,6 +122,12 @@ void engine_perform_reset(void);
 void engine_perform_echo_throw(int on);
 void engine_perform_tick(void);
 int  engine_perform_latched(int fx);
+/* T9i: the effect is engaged now (latched or momentary), for the take prelude. ISR-safe read. */
+int  engine_perform_active(int fx);
+/* T9i: the take playback sink's FX half (ISR only). Applies the recorded punch FX directly to
+ * perform's state; no ring push and no re-recording. how is TAKE_FX_OFF / _ON / _LATCH (take.h). */
+void engine_take_perform(int fx, int how);
+void engine_take_perform_reset(void);
 /* motion (seq/motion.h): lanes play into the engine, never into the sound_t mirror */
 int engine_motion_part(int target, int voice);              /* the part a parameter's lane follows */
 int engine_motion_value(int lane);                          /* what the lane plays now, -1 none */

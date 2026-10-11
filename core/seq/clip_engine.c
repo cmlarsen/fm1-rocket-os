@@ -34,6 +34,12 @@
 /* publish we have written the slot / read the head before the slot */
 #define CLIP_BARRIER() __asm__ volatile("" ::: "memory")
 
+#ifdef X0X_HOST
+/* T9i r1: the host test traps a command-ring push from the audio-ISR side (the take player). Set by
+ * the test around the ISR-side call; never set on the device (the guard compiles out). */
+volatile int clip_engine_isr;
+#endif
+
 /* ---- tempo --------------------------------------------------------------- */
 
 static uint16_t clamp_bpm(uint16_t b)
@@ -354,6 +360,10 @@ void clip_engine_transport_stop(clip_engine_t *e)
 static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm, uint32_t at)
 {
     uint8_t head = e->cmd_head, next = (uint8_t)((head + 1u) % CLIP_CMD_RING);
+#ifdef X0X_HOST
+    if (clip_engine_isr)               /* T9i r1: an ISR-side path must never push onto this ring */
+        __builtin_trap();
+#endif
     if (next == e->cmd_tail)
         return -1;                        /* full: the UI may retry */
     e->cmd[head].cmd = cmd;
@@ -461,6 +471,70 @@ void clip_engine_mute_clear(clip_engine_t *e)
      * later cannot re-apply (T10i review). */
     push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0, 0);
 }
+
+/* ---- T9i: the take player's ISR-side entry points ------------------------ *
+ * These run from the audio ISR (the take sink), so they never push onto the command ring and never
+ * read song->clip[]. The main loop stages the launch's copy in next[role]; apply_role swaps it in at
+ * the boundary, so the sound is the staged snapshot. */
+
+/* how: 0 = queue at `quant` (0xFF = the staged copy's own quantize), 1 = next step. */
+int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant)
+{
+    uint8_t role;
+    if (clip >= NCLIPS)
+        return 0;
+    role = clip_role(clip);
+    /* a relay launch of the already-queued clip cancels it, as consume_cmds does (not for NOW) */
+    if (how == 0 && e->que_set[role] && e->que[role] == clip) {
+        e->que_set[role] = 0;
+        e->que[role] = CLIP_NONE;
+        return 1;
+    }
+    e->que[role] = clip;
+    e->que_set[role] = 1;
+    if (how == 1)
+        e->que_at[role] = e->global_step + 1u;
+    else
+        e->que_at[role] = e->global_step + action_lead(e, role, quant == 0xFFu ? e->next[role].quant : quant);
+    return 1;
+}
+
+void clip_engine_take_stop(clip_engine_t *e, uint8_t role)
+{
+    uint8_t q;
+    if (role >= NROLES)
+        return;
+    if (e->que_set[role] && e->que[role] == CLIP_NONE) {   /* a second stop cancels, as consume_cmds */
+        e->que_set[role] = 0;
+        return;
+    }
+    e->que[role] = CLIP_NONE;
+    e->que_set[role] = 1;
+    q = (e->cur[role] != CLIP_NONE) ? e->play[role].quant : Q_BAR;
+    e->que_at[role] = e->global_step + action_lead(e, role, q);
+}
+
+/* Latch a take mute; clip_engine_render() applies it at the window start (release_role needs the
+ * sink, which only the render has). */
+void clip_engine_take_mute(clip_engine_t *e, uint8_t role, int on)
+{
+    if (role >= NROLES)
+        return;
+    e->take_mute[role] = (uint8_t)(on ? 1 : 0);
+    e->take_mute_set = 1;
+}
+
+void clip_engine_take_mute_clear(clip_engine_t *e)
+{
+    uint8_t r;
+    for (r = 0; r < NROLES; r++) {
+        e->muted[r] = 0;
+        e->take_mute[r] = 0;
+    }
+    e->take_mute_set = 0;
+}
+
+void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10) { set_bpm(e, bpm_x10); }
 
 /* ---- the render loop ----------------------------------------------------- */
 
@@ -670,6 +744,23 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
     }
     if (!nframes)
         return;
+
+    /* T9i: a take mute latched by the sink is applied here, at the window start, so its release's
+     * note-offs reach the sink (the sink is only available during the render). */
+    if (e->take_mute_set) {
+        uint8_t r;
+        e->take_mute_set = 0;
+        for (r = 0; r < NROLES; r++) {
+            if (e->take_mute[r]) {
+                if (!e->muted[r]) {
+                    e->muted[r] = 1;
+                    release_role(e, r, 0, sink);
+                }
+            } else {
+                e->muted[r] = 0;
+            }
+        }
+    }
 
     /* the song is the tempo source of truth: the UI writes song->bpm_x10 directly, or a
      * ring tempo command writes it (in consume_cmds) */

@@ -466,6 +466,35 @@ void perform_reset(perform_t *p)
         p->reset_req = 1;                 /* never dropped */
 }
 
+/* T9i: the take player's ISR-side apply. Mirrors drain()'s handling of PERF_CMD_ENGAGE/_RELEASE
+ * exactly, but runs in the audio ISR (the take sink) so it never pushes onto the ring. It is safe
+ * because perform_process() (the ring's consumer) runs in the same ISR, later in the same block. */
+void perform_take_fx(perform_t *p, int fx, int how)
+{
+    if (fx < 0 || fx >= PERF_NFX)
+        return;
+    if (how == 2) {                       /* latch: a tap on a latched effect releases it */
+        if (p->latch[fx]) {
+            p->latch[fx] = 0;
+            release_fx(p, fx);
+        } else {
+            p->latch[fx] = 1;
+            engage_fx(p, fx);
+        }
+    } else if (how == 1) {                /* momentary: the latch is unchanged (as drain()) */
+        engage_fx(p, fx);
+    } else {                              /* off */
+        p->latch[fx] = 0;
+        release_fx(p, fx);
+    }
+}
+
+void perform_take_reset(perform_t *p)
+{
+    p->cmd_tail = p->cmd_head;            /* the stale queued commands go too, as PERF_CMD_RESET */
+    reset_state(p);
+}
+
 void perform_set_tempo(perform_t *p, uint16_t bpm_x10)
 {
     p->tempo_req = bpm_x10;               /* coalesced to the latest value */
@@ -511,6 +540,23 @@ int perform_echo_targets(perform_t *p, perform_echo_t *out)
 int perform_latched(const perform_t *p, int fx)
 {
     return (fx >= 0 && fx < PERF_NFX) ? (int)p->latch[fx] : 0;
+}
+
+int perform_active(const perform_t *p, int fx)
+{
+    if (fx < 0 || fx >= PERF_NFX)
+        return 0;
+    if (p->latch[fx])
+        return 1;
+    if (fx == PERF_FILTER)
+        return p->filt_on ? 1 : 0;
+    if (fx == PERF_ECHO)
+        return p->echo_on ? 1 : 0;
+    if (p->act_on && p->act.type == (uint8_t)fx)
+        return 1;
+    if (p->pend_on && p->pend.type == (uint8_t)fx)
+        return 1;
+    return 0;
 }
 
 /* Crossfade advance: one call per sample, after the sample is produced. */

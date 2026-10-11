@@ -173,6 +173,13 @@ void perform_release(perform_t *p, int fx);
 /* HOME + FX: everything off at once, back to the dry signal. Never dropped. */
 void perform_reset(perform_t *p);
 
+/* T9i: the take player's ISR-side FX apply, the same effect as the ring command but run directly on
+ * the audio ISR (before the next perform_process), so a take replay never pushes onto the main-loop
+ * ring. how: 0 off, 1 on (momentary), 2 latch (a tap on a latched effect releases it). */
+void perform_take_fx(perform_t *p, int fx, int how);
+/* T9i: end a take: every effect off, the queued main-loop commands dropped (ISR-safe). */
+void perform_take_reset(perform_t *p);
+
 /* Main loop: tempo in BPM x10 (coalesced to the latest value, applied at the
  * next perform_process). */
 void perform_set_tempo(perform_t *p, uint16_t bpm_x10);
@@ -197,3 +204,6 @@ void perform_process(perform_t *p, float *l, float *r, uint32_t nframes,
 
 /* Best-effort query for the UI/LEDs: the effect was last latched on. */
 int perform_latched(const perform_t *p, int fx);
+
+/* T9i: the effect is engaged now, latched or momentary (for the take recorder's prelude). */
+int perform_active(const perform_t *p, int fx);

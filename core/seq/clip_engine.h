@@ -79,6 +79,8 @@ typedef struct {
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
     uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
+    uint8_t  take_mute[NROLES]; /* T9i: a take mute latched for the next render (the release needs the sink) */
+    uint8_t  take_mute_set;
 
     /* T11i: MIDI Start / Continue. start() resets to bar 1, step 0; continue() resumes from the
      * stop point, which a stop saved here (the visible cur/pos are cleared as before). */
@@ -172,6 +174,19 @@ int  clip_engine_muted(const clip_engine_t *e, uint8_t role);
  * which drains after any mute command already in the ring, so a pending CLIP_CMD_MUTE cannot
  * re-apply. The mute is performance state, never song state; live_enter also clears. */
 void clip_engine_mute_clear(clip_engine_t *e);
+
+/* T9i: the take player's ISR-side entry points. A take replays launches/mutes/tempo sample-exactly
+ * from the audio ISR, but it must not push onto the command ring (that is the main loop's) or read
+ * song->clip[] (the invariant). The main loop stages the launch's clip copy in next[role] ahead of
+ * the event time; these apply directly, exactly as consume_cmds would, and never call push_cmd.
+ *   take_launch: how 0 = queue at `quant` (0xFF = the staged copy's own quantize), 1 = next step.
+ *   take_mute:   latched; clip_engine_render() applies it at the window start so the release's
+ *                note-offs reach the sink (`on` = 0/1).                       */
+int  clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant);
+void clip_engine_take_stop(clip_engine_t *e, uint8_t role);
+void clip_engine_take_mute(clip_engine_t *e, uint8_t role, int on);
+void clip_engine_take_mute_clear(clip_engine_t *e);   /* leaving/ending a take: no ring, ISR-safe */
+void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10);
 
 /* Add nframes of transport and call the sink for every event in that window, with its
  * exact sample offset into the window. */
