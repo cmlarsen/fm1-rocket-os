@@ -235,6 +235,61 @@ static void test_clip_edits(void)
     (void)before;
 }
 
+/* T7b: the clip editor's edits — drums, notes and motion, each editor session one undo entry. */
+static void test_clip_editor_ops(void)
+{
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    /* a DRUMS clip: the session (three edits) is one undo entry */
+    song_io_clip_create(0, 16, 0, 0);
+    CHECK(song_io_clip_is_drum(0) == 1);
+    song_io_edit_begin(0);
+    song_io_drum_set(0, 0, 0, 1);
+    song_io_drum_set(0, 1, 4, 1);
+    song_io_drum_set_accent(0, 0, 1);
+    song_io_edit_end();
+    CHECK(song_io_drum_get(0, 0, 0) == 1 && song_io_drum_get(0, 0, 1) == 0);
+    CHECK(song_io_drum_get(0, 1, 4) == 1 && song_io_drum_accent(0, 0) == 1);
+    CHECK(song_io_undo_depth() == 1);
+    CHECK(song_io_undo() == 1);
+    CHECK(song_io_drum_get(0, 0, 0) == 0 && song_io_drum_accent(0, 0) == 0);
+    CHECK(song_io_undo_pos() == 0);
+
+    /* a melodic clip: notes, a chord on one step, and the same note not added twice */
+    song_io_clip_create(7, 16, 0, 0);
+    CHECK(song_io_clip_is_drum(7) == 0);
+    song_io_edit_begin(7);
+    CHECK(song_io_note_add(7, 0, 60, 100, 1) == 0);
+    CHECK(song_io_note_add(7, 0, 64, 100, 1) == 1);
+    CHECK(song_io_note_add(7, 0, 60, 100, 1) == 0);
+    CHECK(song_io_note_count(7) == 2);
+    CHECK(song_io_note_index(7, 0, 64) == 1);
+    {
+        int st, no, ve, le;
+        CHECK(song_io_note_get(7, 1, &st, &no, &ve, &le) == 1);
+        CHECK(st == 0 && no == 64 && ve == 100 && le == 1);
+    }
+    song_io_note_remove(7, 0, 64);
+    CHECK(song_io_note_count(7) == 1);
+    song_io_edit_end();
+    CHECK(song_io_undo() == 1);                 /* the session: back to the empty clip */
+    CHECK(song_io_note_count(7) == 0);
+
+    /* motion: two lanes at most; the same param reuses its lane */
+    song_io_clip_create(7, 16, 0, 0);
+    song_io_edit_begin(7);
+    CHECK(song_io_motion_lane(7, 0x6001, 1) == 0);
+    CHECK(song_io_motion_lane(7, 0x6001, 1) == 0);
+    CHECK(song_io_motion_lane(7, 0x4002, 1) == 1);
+    CHECK(song_io_motion_lane(7, 0x5003, 1) == -1);        /* two lanes at most */
+    song_io_motion_set(7, 0, 3, 99);
+    CHECK(song_io_motion_get(7, 0, 3) == 99 && song_io_motion_get(7, 0, 2) == -1);
+    song_io_motion_clear(7, 0);
+    CHECK(song_io_motion_param(7, 0) == -1);
+    song_io_edit_end();
+}
+
 static void test_backend_refuses_out_of_region(void)
 {
     uint8_t b[8];
@@ -331,6 +386,7 @@ int main(void)
     test_save_reload();
     test_project_change_kept();
     test_clip_edits();
+    test_clip_editor_ops();
     test_backend_refuses_out_of_region();
     test_power_cut_keeps_previous();
     test_failed_save_no_retry();
@@ -339,6 +395,6 @@ int main(void)
         printf("song_io: %d FAILED\n", fails);
         return 1;
     }
-    printf("song_io: boot, save/reboot, project rebuild, region guard, power cut, failed save, corrupt fallback all pass\n");
+    printf("song_io: boot, save/reboot, project rebuild, clip edits, the editor ops, region guard, power cut, failed save, corrupt fallback all pass\n");
     return 0;
 }
