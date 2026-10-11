@@ -1,0 +1,24 @@
+# TLSET regression: EDIT opens setup and assignment requires a release to commit.
+wait 300
+press PLAY
+wait 700
+release PLAY
+tap EDIT
+tap SEL
+key 0 down
+turn PRESET 20 80
+expect keyclip0 0
+key 0 up
+expect keyclip0 20
+expect songdirty 1
+expect songwrites 0
+tap HOME
+tap EDIT
+press PLAY
+wait 700
+release PLAY
+wait 1000
+expect songdirty 0
+reboot
+wait 300
+expect keyclip0 20
