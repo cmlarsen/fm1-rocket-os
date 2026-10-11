@@ -3,12 +3,6 @@
 #include "pattern.h"
 #include "tb3po.h"
 
-static const uint8_t BRK_DEFAULTS[BRK_NSET] = {
-    25, 60, 20, 50,                   /* complexity, anchor, roll, fill */
-    10, 0, 5, 0,                      /* retrig 2x 3x 4x 8x */
-    2, 0, 2, 2,                       /* phrase 4 bars, B chance 0, A length 1 bar, B length 1 bar */
-};
-
 void pattern_init(pattern_t *p, uint32_t seed_a, uint32_t seed_b)
 {
     uint32_t i, b;
@@ -33,9 +27,4 @@ void pattern_init(pattern_t *p, uint32_t seed_a, uint32_t seed_b)
             bp->step[i].flags = G_REST;
         }
     }
-    p->brk.steps = 0;                 /* the break is silent until switched on */
-    for (i = 0; i < BRK_NSET; i++)
-        p->brk.set[i] = BRK_DEFAULTS[i];
-    p->brk.slot_a = 0;                /* the built-in bank's first two: the groove, and the fill for B */
-    p->brk.slot_b = 1;
 }

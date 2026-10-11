@@ -15,7 +15,7 @@
  *   master N                     MASTER pot 0..4096
  *   param T V I VALUE            a sound pot (engine.h target, voice, index), as its knob would
  *   slot K NAME A.wav [B.wav..]  user sample slot K (0..2): one loop (zone) per WAV, encoded here
- *   slotimg K F.hdr F.bin       slot K from tools/upload_breaks.py --dry-run's image (the device format)
+ *   slotimg K F.hdr F.bin       slot K from tools/fm1_sample_upload.py's image (the device format)
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
  *   wav FILE | wavstop           start / stop recording the output
  *   load N                       the overload guard sees every block cost N% (-1: as measured)
@@ -140,7 +140,7 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
 }
 
 /* sample slots, two ways in:
- *  - slotimg: a slot image exactly as tools/upload_breaks.py writes it, read by the firmware's own
+ *  - slotimg: a slot image exactly as tools/fm1_sample_upload.py writes it, read by the firmware's own
  *    slots.c (the device path: what the upload tool writes is what the firmware parses);
  *  - slot: WAVs encoded here, one zone each (quick, for scenarios that do not test the format). */
 static uint8_t slot_img[3][0x14000];
@@ -397,12 +397,10 @@ static void boot(void)
     seq.bpm = (float)proj.set.bpm_x10 / 10.0f;
     seq.accent_q7 = proj.set.accent_q7;
     project_apply_io();                             /* clock and notes out, the MIDI channels, the output */
-    engine_brk_loops();
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui_init();
 }
 
-static uint8_t last_pat = 0xFF;
 static void run_ms(uint32_t ms)
 {
     static int32_t blk[512];
@@ -455,10 +453,6 @@ static void run_ms(uint32_t ms)
                 }
             }
             audio_due_ms += 256.0 * 1000.0 / 44100.0;
-        }
-        if (seq.ppat[TRK_BRK] != last_pat) {
-            last_pat = seq.ppat[TRK_BRK];
-            engine_brk_loops();
         }
         if (now_ms >= ui_due) {
             ui_due = now_ms + 16;
@@ -667,10 +661,6 @@ static int expect(const char *what, const char *val)
     }
     else if (!strncmp(what, "playhead", 8))        /* playheadT: track T's step (1-based) */
         got = eng_step[atoi(what + 8)] + 1;
-    else if (!strncmp(what, "brkslice", 8))        /* brksliceS: step S's own slice (1-8), 0 = the generator's */
-        got = proj.pat[seq.ppat[PART_BRK]].brk.slice[atoi(what + 8)];
-    else if (!strcmp(what, "brknow"))               /* the slice sounding now, 1-8, 0 none */
-        got = engine_brk_slice() + 1;
     else if (!strcmp(what, "mempct"))
         got = project_mem_pct();
     else if (!strcmp(what, "part"))
@@ -721,10 +711,6 @@ static int expect(const char *what, const char *val)
         int b, s;
         sscanf(what, "note%d.%d", &b, &s);
         got = proj.pat[seq.ppat[PART_303A + b]].bass[b].step[s].note;
-    } else if (!strncmp(what, "brk", 3)) {
-        int s;
-        sscanf(what, "brk%d", &s);
-        got = (int)((proj.pat[seq.ppat[PART_BRK]].brk.steps >> s) & 1u);
     } else if (!strncmp(what, "sound", 5)) {       /* soundT.V.I */
         int t, v, i;
         sscanf(what, "sound%d.%d.%d", &t, &v, &i);
@@ -733,10 +719,6 @@ static int expect(const char *what, const char *val)
         got = (int)seq.mute;
     else if (!strcmp(what, "vmute"))                /* drum tracks muted on their own (bit kit * 11 + track) */
         got = (int)seq.vmute;
-    else if (!strcmp(what, "loops"))
-        got = engine_brk_nslots();
-    else if (!strcmp(what, "loop_a"))
-        got = proj.pat[seq.ppat[PART_BRK]].brk.slot_a;
     else {
         printf("FAIL unknown expect %s\n", what);
         return 1;
@@ -859,7 +841,6 @@ int main(int argc, char **argv)
                     return 2;
                 }
             }
-            engine_brk_loops();
         } else if (!strcmp(cmd, "slotimg")) {          /* slotimg K FILE.hdr FILE.bin: as uploaded */
             int k = atoi(a);
             FILE *fh = fopen(b, "rb"), *fd = fopen(c, "rb");
@@ -884,7 +865,6 @@ int main(int argc, char **argv)
             slot_is_img[k] = 1;
             smp_user_scan((uint32_t)k);
             printf("  slot %d: %d zone(s) from the image\n", k, usr_nz[k]);
-            engine_brk_loops();
         } else if (!strcmp(cmd, "midi")) {
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
@@ -994,7 +974,7 @@ int main(int argc, char **argv)
            render_budget_ns_total > 0 ? 100.0 * render_ns_total / render_budget_ns_total : 0.0,
            fails ? ", EXPECTATIONS FAILED" : "");
     if (getenv("X0X_PROFILE")) {
-        static const char *const N[ENG_PROF_N] = {"909", "808", "303A", "303B", "BREAK", "FX", "MASTER", "SEQ"};
+        static const char *const N[ENG_PROF_N] = {"909", "808", "303A", "303B", "FX", "MASTER", "SEQ"};
         uint64_t tot = 0;
         int k;
         for (k = 0; k < ENG_PROF_N; k++)

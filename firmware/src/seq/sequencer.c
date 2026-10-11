@@ -25,7 +25,7 @@ void seq_init(seq_t *s, pattern_t *patterns)
     s->accent_q7 = 88;                /* a 909 non-accented hit sits ~3 dB under an accent */
     s->send_clock = 1;
     {
-        static const uint8_t CH[NTRACKS] = {9, 10, 1, 2, 3};   /* 909 10, 808 11, 303s 2 / 3, break 4 */
+        static const uint8_t CH[NTRACKS] = {9, 10, 1, 2};   /* 909 10, 808 11, 303s 2 / 3 */
         for (i = 0; i < NTRACKS; i++)
             s->ch[i] = CH[i];
     }
@@ -57,13 +57,13 @@ static bpart_t *bpart(const seq_t *s, int b) { return &s->pat[s->ppat[TRK_BASS0 
 
 int seq_part_len(const seq_t *s, int t)
 {
-    int n = is_drum(t) ? dpart(s, t)->len : t == TRK_BRK ? 16 : bpart(s, t - TRK_BASS0)->len;
+    int n = is_drum(t) ? dpart(s, t)->len : bpart(s, t - TRK_BASS0)->len;
     return n < 1 ? 1 : n > NSTEPS ? NSTEPS : n;
 }
 
 static int part_rate(const seq_t *s, int t)
 {
-    return (is_drum(t) ? dpart(s, t)->rate : t == TRK_BRK ? RATE_16 : bpart(s, t - TRK_BASS0)->rate) & 3;
+    return (is_drum(t) ? dpart(s, t)->rate : bpart(s, t - TRK_BASS0)->rate) & 3;
 }
 
 /* swing offset of a step, Q8: odd 16ths / 32nds come late; triplets are never swung */
@@ -315,7 +315,7 @@ static uint32_t fire_step(seq_t *s, int t, const seq_sink_t *o)
     }
     if (wrapped && bass)
         auto_mutate(s, t - TRK_BASS0);
-    if (wrapped && (t == TRK_BRK || is_drum(t)))   /* (the 303s count theirs in auto_mutate) */
+    if (wrapped && is_drum(t))                       /* (the 303s count theirs in auto_mutate) */
         tr->bars++;
     if (changed & 1u)                                /* the 909's new pattern: its passes from 1 again, as */
         tr->bars = 0;                                /* restart() does for the others (probability cycles) */
@@ -324,11 +324,7 @@ static uint32_t fire_step(seq_t *s, int t, const seq_sink_t *o)
         o->step(o->ctx, t, p);                       /* below must hear (a drum takes its tune as it fires) */
     if (is_drum(t))
         fire_drum(s, t, p, o);
-    else if (t == TRK_BRK) {
-        if (o->brk)
-            o->brk(o->ctx, p, tr->bars, (float)L / 256.0f,
-                   (s->pat[s->ppat[TRK_BRK]].brk.steps >> p & 1u) && !(s->mute & (1u << MUTE_BRK)));
-    } else
+    else
         fire_bass(s, t - TRK_BASS0, p, L, carry, o);
     if (s->ext) {
         tr->to_next = NEVER;                         /* the clock arms the next one */
@@ -385,8 +381,6 @@ static void do_stop(seq_t *s, const seq_sink_t *o)
     s->playing = 0;
     for (b = 0; b < NBASS; b++)
         bass_release(s, b, o);
-    if (o->brk_stop)
-        o->brk_stop(o->ctx);
     for (t = 0; t < NTRACKS; t++)
         s->t[t].to_next = NEVER;
     if (!s->ext && s->send_clock)

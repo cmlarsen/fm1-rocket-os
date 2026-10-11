@@ -5,7 +5,6 @@
 #include "../dsp/drum909.h"
 #include "../dsp/drum808.h"
 #include "../dsp/bass303.h"
-#include "../dsp/breaks.h"
 #include "../dsp/fxbus.h"
 #include "../dsp/master.h"
 #include "../dsp/fastmath.h"
@@ -29,12 +28,10 @@ volatile uint32_t eng_scope_w;
 static drum909_t d909 POOL;
 static drum808_t d808 POOL;
 static bass303_t b303[NBASS] POOL;
-static breaks_t brk POOL;
 static fxbus_t fx POOL;
 static master_t mst;
 #define DLY_LEN 88200
 static int16_t dly_buf[DLY_LEN] POOL;
-static volatile uint8_t brk_hold;      /* main loop is rewriting the break loops: ISR leaves it alone */
 static motion_t mot;
 static const sound_t *mot_base_snd;    /* the knobs' own values (the project's mirror) */
 static uint8_t mot_playing;
@@ -91,16 +88,16 @@ static void guard_apply(void)
 /* mixer: per part Level, Rev send, Dly send (a drum machine's add to its voices' own sends) */
 static const x0x_param_t MIX_P[MX_NPARAMS] = {{"LEVEL", 127, 100, 0}, {"REV", 127, 0, 0}, {"DLY", 127, 0, 0},
                                                {"PAN", 127, 64, 0}};
-static const char *const PART_NAMES[NPARTS] = {"909", "808", "303 A", "303 B", "BREAK"};
+static const char *const PART_NAMES[NPARTS] = {"909", "808", "303 A", "303 B"};
 static float mix_level[NPARTS], mix_rev[NPARTS], mix_dly[NPARTS];
 /* pan: a balance law. Centre is full level on both sides (a centred mix is the mono one exactly);
  * turning toward a side fades the other out along a quarter cosine, the near side stays at 1 */
-static float mix_pl[NPARTS] = {1, 1, 1, 1, 1}, mix_pr[NPARTS] = {1, 1, 1, 1, 1};
+static float mix_pl[NPARTS] = {1, 1, 1, 1}, mix_pr[NPARTS] = {1, 1, 1, 1};
 
 /* ------------------------------------------------------- command queue --- */
 /* uint32 commands, single producer (main loop) / single consumer (audio ISR):
  * type:4 | a:8 | b:8 | c:12 */
-enum { C_PARAM_T0 = 0, C_DRUM = 8, C_BON, C_BOFF, C_BRK, C_NOP };
+enum { C_PARAM_T0 = 0, C_DRUM = 8, C_BON, C_BOFF, C_NOP };
 #define CQ 1024u
 static uint32_t cq[CQ];
 static volatile uint32_t cq_w, cq_r;
@@ -133,7 +130,6 @@ int engine_nparams(int t, int v)
     case T_909: return drum909_nparams(v);
     case T_808: return drum808_nparams(v);
     case T_303: return bass303_nparams();
-    case T_BRK: return 2;                                /* Level, Pitch (sends: the mixer's; the rest: the pattern's) */
     case T_FX: return fxbus_nparams();
     case T_MIX: return MX_NPARAMS;                       /* every part: Level, Rev send, Dly send */
     case T_MST: return master_nparams();
@@ -147,7 +143,6 @@ const x0x_param_t *engine_param(int t, int v, int i)
     case T_909: return drum909_param(v, i);
     case T_808: return drum808_param(v, i);
     case T_303: return bass303_param(i);
-    case T_BRK: return breaks_param(BRK_NSET + i);
     case T_FX: return fxbus_param(i);
     case T_MIX: return (i >= 0 && i < MX_NPARAMS) ? &MIX_P[i] : 0;
     case T_MST: return master_param(i);
@@ -165,7 +160,6 @@ const char *engine_voice_name(int t, int v)
     case T_808: return (v >= 0 && v <= D8_NUM) ? N808[v] : "";
     case T_303: return v ? "303 B" : "303 A";
     case T_MIX: return (v >= 0 && v < NPARTS) ? PART_NAMES[v] : "";
-    case T_BRK: return "BREAK";
     case T_FX: return "FX";
     case T_MST: return "MASTER";
     default: return "";
@@ -178,7 +172,6 @@ static void apply_param(int t, int v, int i, int val)    /* ISR */
     case T_909: drum909_set(&d909, v, i, val); break;
     case T_808: drum808_set(&d808, v, i, val); break;
     case T_303: if (v >= 0 && v < NBASS) bass303_set(&b303[v], i, val); break;
-    case T_BRK: breaks_set(&brk, BRK_NSET + i, val); break;
     case T_FX: fxbus_set(&fx, i, val); break;
     case T_MIX:
         if (v < 0 || v >= NPARTS)
@@ -221,19 +214,16 @@ void engine_sound_defaults(sound_t *s)
                 s->v[t][v][i] = p ? p->def : 0;
             }
     /* the factory mix: big beat (Chemical Brothers, Fatboy Slim), balanced by tools/mix_report.py
-     * against a funk break, a 909 kick under it and a 303 line. The break leads, the kick sits
-     * under it, the 303 screams through its RAT; the master squeezes and pumps. Each engine's
-     * own voicing (its pot defaults) is left as its original; only these are X0X's. */
+     * against a 909 kick and a 303 line (the removed break part's level and send are gone). The
+     * kick sits under the top, the 303 screams through its RAT; the master squeezes and pumps.
+     * Each engine's own voicing (its pot defaults) is left as its original; only these are X0X's. */
     s->v[T_MIX][PART_909][MX_LEVEL] = 75;            /* 9W9's kit is hot (it drives its own glue): -5 dB */
-    s->v[T_909][DR_BD][3] = 61;                      /* its kick under the break, its clap and hats over */
+    s->v[T_909][DR_BD][3] = 61;                      /* its kick under the top, its clap and hats over */
     s->v[T_909][DR_BD][2] = 80;                      /* the kick: a little shorter, and driven. Its Attack */
     s->v[T_909][DR_BD][6] = 30;                      /* stays 9W9's 13: at 50 its tick was 12 dB louder, a click on every kick */
     s->v[T_909][DR_OH][1] = 60;
     s->v[T_MIX][PART_808][MX_LEVEL] = 112;
     s->v[T_808][D8_KIT][0] = 127;                    /* kit level */
-    s->v[T_BRK][0][0] = 127;                         /* the break: full level, part a little over unity */
-    s->v[T_MIX][PART_BRK][MX_LEVEL] = 120;
-    s->v[T_MIX][PART_BRK][MX_REV] = 25;
     for (v = 0; v < NBASS; v++) {                    /* acid: low cutoff, high resonance, a long sweep, RAT */
         s->v[T_303][v][BASS303_CUTOFF] = 48;
         s->v[T_303][v][BASS303_RESO] = 100;
@@ -294,7 +284,6 @@ void engine_bass_on(int part, int note, int accent, int slide)
     cq_put(C_BON, (uint32_t)part, (uint32_t)note, (uint32_t)((accent ? 1 : 0) | (slide ? 2 : 0)));
 }
 void engine_bass_off(int part) { cq_put(C_BOFF, (uint32_t)part, 0, 0); }
-void engine_brk_live(int key, int down) { cq_put(C_BRK, (uint32_t)key, (uint32_t)(down != 0), 0); }
 
 /* ------------------------------------------------------- sequencer sink --- */
 /* probability: each part's (and drum track's) chance on the step playing now, set by its T_PROB lane
@@ -345,26 +334,6 @@ static void s_bon(void *x, int p, int note, int acc, int sl)
         bass303_note_on(&b303[p], note, acc, sl);
 }
 static void s_boff(void *x, int p) { (void)x; bass303_note_off(&b303[p]); }
-static uint8_t brk_applied[BRK_NSET];  /* the pattern settings the break was last given */
-static void s_brk(void *x, int s16, int bar, float spb, int en)
-{
-    const brkpart_t *bp = &seq.pat[seq.ppat[TRK_BRK]].brk;
-    int i;
-    if (en && prob_skip(PART_BRK, 0))
-        en = 0;
-    (void)x;
-    if (brk_hold)
-        return;
-    breaks_set_quiet(&brk, bp->steps == 0 || (seq.mute & (1u << MUTE_BRK)));   /* unheard: stop decoding */
-    for (i = 0; i < BRK_NSET; i++)       /* follow the playing pattern's settings (12 compares) */
-        if (bp->set[i] != brk_applied[i]) {
-            brk_applied[i] = bp->set[i];
-            breaks_set(&brk, i, bp->set[i]);
-        }
-    breaks_pin(&brk, (int)bp->slice[s16 & 15] - 1);   /* the step's own slice, if it has one */
-    breaks_step(&brk, s16, bar, spb, en);
-}
-static void s_brkstop(void *x) { (void)x; breaks_stop(&brk); }
 static void s_midi(void *x, uint8_t st, uint8_t d1, uint8_t d2)
 {
     uint32_t cin = st >= 0xF0 ? 0x0Fu : (uint32_t)(st >> 4);
@@ -403,7 +372,6 @@ int engine_motion_part(int t, int v)
     case T_909: return PART_909;
     case T_808: return PART_808;
     case T_303: return PART_303A + (v & 1);
-    case T_BRK: return PART_BRK;
     case T_MIX: return v < NPARTS ? v : PART_909;
     case T_PROB: return (v >> 4) < NPARTS ? v >> 4 : PART_909;
     default: return PART_909;                     /* FX, master: the bar */
@@ -412,7 +380,7 @@ int engine_motion_part(int t, int v)
 int engine_motion_value(int k) { return motion_value(&mot, k); }
 void engine_motion_rec(int k) { motion_req_rec(&mot, k); }
 void engine_motion_hold(int k) { motion_req_hold(&mot, k); }
-static const seq_sink_t SINK = {s_drum_seq, s_bon, s_boff, s_brk, s_brkstop, s_midi, s_step, 0};
+static const seq_sink_t SINK = {s_drum_seq, s_bon, s_boff, s_midi, s_step, 0};
 
 /* ---------------------------------------------------------------- MIDI in --- */
 static uint8_t bass_held[NBASS];       /* note held from MIDI, for legato = slide */
@@ -449,8 +417,6 @@ static void midi_in(uint32_t pkt)
                 bass_held[k] = 0;
             }
         }
-    if (seq.ch[TRK_BRK] == ch && (ty == 0x90 || ty == 0x80) && d1 >= 36 && d1 <= 43)   /* the break's slices */
-        breaks_live(&brk, d1 - 36, ty == 0x90);
 }
 
 /* ---------------------------------------------------------------- render --- */
@@ -469,8 +435,6 @@ static void drain(void)
             bass303_note_on(&b303[a], (int)b, (int)(v & 1u), (int)((v >> 1) & 1u));
         else if (type == C_BOFF && a < NBASS)
             bass303_note_off(&b303[a]);
-        else if (type == C_BRK && !brk_hold)
-            breaks_live(&brk, (int)a, (int)b);
     }
     cq_r = r;
     while (guard-- && plat_midi_in(&pkt))
@@ -524,8 +488,7 @@ __attribute__((noinline)) static void add_glide(float *dst, const float *src, gl
 enum { GL_L, GL_R, GL_REV, GL_DLY, GL_VREV, GL_VDLY, GL_N };
 static glide_t mix_glide[NPARTS][GL_N] = {
     {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}, {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}},
-    {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}, {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}},
-    {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}};
+    {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}, {{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}}};
 static void mix_targets(int p, float g)                     /* g: the part level */
 {
     glide_set(&mix_glide[p][GL_L], g * mix_pl[p]);
@@ -542,8 +505,8 @@ volatile uint32_t eng_dbg_wait, eng_dbg_nsub;  /* 24 MHz ticks waiting for core 
 #endif
 
 /* the mix of one stretch between two events: dry left and right, the reverb and delay sends;
- * t0..tr the 808's scratch, kbuf the break's, mono the 909's kit send */
-static float dry_l[256], dry_r[256], rev[256], dly[256], t0[256], t1[256], t2[256], tr[256], kbuf[256], mono[256];
+ * t0..tr the 808's scratch, mono the 909's kit send */
+static float dry_l[256], dry_r[256], rev[256], dly[256], t0[256], t1[256], t2[256], tr[256], mono[256];
 
 /* a glide applied in place to a buffer that started at zero: buf * c is 0 + buf * c exactly, so this
  * is add_glide(zeros, buf) to the bit (the same steps of c) */
@@ -565,10 +528,9 @@ __attribute__((noinline)) static void scale_glide(float *buf, glide_t *g, uint32
     g->cur = c;
 }
 
-/* the second core's job (or the first's, after its own part, with one core): the 808 into t0..tr
- * and the break into kbuf; arg bit 8: not timed (the cycle counter is the first core's). Nothing
+/* the second core's job (or the first's, after its own part, with one core): the 808 into t0..tr;
+ * arg bit 8: not timed (the cycle counter is the first core's). Nothing
  * here is mixed: the first core does that afterwards, in one core's order */
-static int brk_silent_now = 1;
 static uint8_t d808_was_active;
 static void core2_job(uint32_t arg)
 {
@@ -580,16 +542,8 @@ static void core2_job(uint32_t arg)
         drum808_render_st(&d808, t0, tr, t1, t2, (int)n);
     } else
         drum808_pan_settle(&d808);
-    if (timed) {
-        PROF_ADD(PR_808, pt);
-        pt = plat_cycles();
-    }
-    if (!brk_hold) {
-        brk_silent_now = breaks_silent(&brk);             /* the render writes zeros: nothing to mix */
-        breaks_render(&brk, kbuf, (int)n);
-    }
     if (timed)
-        PROF_ADD(PR_BRK, pt);
+        PROF_ADD(PR_808, pt);
 }
 
 /* a drum machine's mix, from its render (L, R, voice sends; mono, its kit send) */
@@ -601,8 +555,8 @@ __attribute__((noinline)) static void kit_sends(int b, const float *m, uint32_t 
 }
 
 /* one stretch: the 909 (into the mix, in place) and the 303s here while the second core renders the
- * 808 and the break; then those are mixed in, in the order one core always used (909, 808, 303 A,
- * 303 B, break): the same sums either way */
+ * 808; then that is mixed in, in the order one core always used (909, 808, 303 A, 303 B): the same
+ * sums either way */
 static void render_sub(float *out_l, float *out_r, uint32_t n)
 {
     float *bb[NBASS] = {out_l, out_r};
@@ -633,7 +587,7 @@ static void render_sub(float *out_l, float *out_r, uint32_t n)
         PROF_T(pb);
         idle[b] = b303[b].idle;                           /* idle: the render writes zeros */
         bass303_render(&b303[b], bb[b], (int)n);
-        PROF_ADD(2 + b, pb);
+        PROF_ADD(PR_303A + b, pb);
     }
     pt = plat_cycles();
 #if X0X_DEBUG
@@ -673,19 +627,10 @@ static void render_sub(float *out_l, float *out_r, uint32_t n)
         add_glide(dly, bb[b], &mix_glide[p][GL_DLY], n);
         meter(p, bb[b], mix_level[p], n);
     }
-    if (!brk_hold && !brk_silent_now) {
-        float g = mix_level[PART_BRK];
-        mix_targets(PART_BRK, g);
-        add_glide(dry_l, kbuf, &mix_glide[PART_BRK][GL_L], n);
-        add_glide(dry_r, kbuf, &mix_glide[PART_BRK][GL_R], n);
-        add_glide(rev, kbuf, &mix_glide[PART_BRK][GL_REV], n);
-        add_glide(dly, kbuf, &mix_glide[PART_BRK][GL_DLY], n);
-        meter(PART_BRK, kbuf, g, n);
-    }
     {
         PROF_T(pf);
         fxbus_process_st(&fx, dry_l, dry_r, rev, dly, out_l, out_r, (int)n);
-        PROF_ADD(5, pf);
+        PROF_ADD(PR_FX, pf);
     }
 }
 
@@ -711,7 +656,7 @@ void engine_render(int32_t *out_lr, uint32_t n)
             motion_tick(&mot, n);
         fxbus_set_bpm(&fx, seq_tempo(&seq));
         seq_advance(&seq, 0, &SINK);
-        PROF_ADD(7, pt);
+        PROF_ADD(PR_SEQ, pt);
     }
     while (done < n) {
         uint32_t k = seq_until_event(&seq, n - done);
@@ -719,7 +664,7 @@ void engine_render(int32_t *out_lr, uint32_t n)
         {
             PROF_T(pt);
             seq_advance(&seq, k, &SINK);
-            PROF_ADD(7, pt);
+            PROF_ADD(PR_SEQ, pt);
         }
         done += k;
     }
@@ -729,7 +674,7 @@ void engine_render(int32_t *out_lr, uint32_t n)
     {
         PROF_T(pt);
         master_process_st(&mst, out_l, out_r, (int)n, vol);
-        PROF_ADD(6, pt);
+        PROF_ADD(PR_MST, pt);
     }
     for (i = 0; i < n; i++) {
         float l = out_l[i], r = out_r[i];            /* (out_scale: NORMAL 2^22, Felucca's; LOUD 2^23) */
@@ -748,165 +693,8 @@ void engine_render(int32_t *out_lr, uint32_t n)
     }
 }
 
-/* -------------------------------------------------------------- loops --- */
-/* a user loop's length in bars: 1, 2, 4 or 8, whichever puts its tempo nearest 120 BPM
- * inside 80..180 (breaks are recorded at their own tempo; the player stretches to ours) */
-static uint8_t loop_bars(uint32_t ns, uint32_t rate)
-{
-    float sec = (float)ns / (float)(rate ? rate : 22050u), best = 1e9f;
-    uint8_t bars = 1, b;
-    for (b = 1; b <= 8; b = (uint8_t)(b * 2)) {
-        float bpm = (float)b * 240.0f / sec, d = bpm > 120.0f ? bpm - 120.0f : 120.0f - bpm;
-        if (bpm >= 80.0f && bpm <= 180.0f && d < best) {
-            best = d;
-            bars = b;
-        }
-    }
-    return bars;
-}
-
-#include "x0x_break_bank.h"              /* tools/gen_break_bank.py: the built-in loops */
-
-static const brk_loop_t *brk_builtin(int k)
-{
-    static brk_loop_t L[2];
-    static int which;
-    brk_loop_t *l = &L[which ^= 1];      /* two: A and B are set one after the other */
-    if (k < 0 || k >= X0X_NBREAKS)
-        return 0;
-    l->adpcm = X0X_BREAKS[k].adpcm;
-    l->nsamples = X0X_BREAKS[k].n;
-    l->rate = X0X_BREAK_RATE;
-    l->bars = X0X_BREAKS[k].bars;
-    return l;
-}
-
-/* the LOOP choices: the built-in bank, then every loop (zone) of the user slots, in order.
- * The list follows uploads: engine_brk_loops() rescans it. */
-#define NLOOPS_MAX (X0X_NBREAKS + PLAT_NSLOTS * PLAT_SLOT_ZONES)
-static const char *loop_names[NLOOPS_MAX];
-static char user_names[PLAT_NSLOTS * PLAT_SLOT_ZONES][8];
-static uint8_t loop_slot[NLOOPS_MAX], loop_zone[NLOOPS_MAX];
-static int nloops;
-
-static void scan_loops(void)
-{
-    int i, k, z, u = 0;
-    nloops = 0;
-    for (i = 0; i < X0X_NBREAKS; i++)
-        loop_names[nloops++] = X0X_BREAKS[i].name;
-    for (k = 0; k < PLAT_NSLOTS; k++) {                 /* yours: BR1, BR2 ... in order, whatever slot */
-        int nz = plat_slot_zones(k);                    /* holds them (the break page packs the list) */
-        for (z = 0; z < nz && z < PLAT_SLOT_ZONES; z++) {
-            char *n = user_names[k * PLAT_SLOT_ZONES + z];
-            int j = 2;
-            u++;
-            n[0] = 'B';
-            n[1] = 'R';
-            if (u >= 10)
-                n[j++] = (char)('0' + u / 10);
-            n[j++] = (char)('0' + u % 10);
-            n[j] = 0;
-            loop_slot[nloops] = (uint8_t)k;
-            loop_zone[nloops] = (uint8_t)z;
-            loop_names[nloops++] = n;
-        }
-    }
-}
-
-int engine_brk_nslots(void)
-{
-    if (!nloops)
-        scan_loops();
-    return nloops;
-}
-const char *const *engine_brk_slot_names(void)
-{
-    if (!nloops)
-        scan_loops();
-    return loop_names;
-}
-
-int engine_brk_slice(void) { return brk.running ? brk.st_slice : -1; }
-
-void engine_brk_state(int *slice, int *bank, int *div, int *running)
-{
-    *slice = brk.st_slice;
-    *bank = brk.st_bank;
-    *div = brk.st_div;
-    *running = brk.running;
-}
-
-/* the loop's outline for the screen: n columns of peak level 0..255 (main loop: decodes the
- * whole loop once, ~20k IMA steps; called when the loop changes, never per frame) */
-static const int16_t ISTEP[89] = {
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
-    107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
-    876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428,
-    4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350,
-    22385, 24623, 27086, 29794, 32767};
-static const int8_t IIDX[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
-int engine_brk_outline(int which, uint8_t *peaks, int n)
-{
-    const brk_bank_t *bk = &brk.bank[which & 1];
-    uint32_t i, ns = bk->n;
-    int32_t pred = 0, idx = 0, col = 0, pk = 0;
-    uint32_t per;
-    if (!bk->adpcm || !ns || n <= 0)
-        return 0;
-    per = (ns + (uint32_t)n - 1u) / (uint32_t)n;       /* samples per column (32-bit: no __udivdi3) */
-    for (i = 0; i < ns; i++) {
-        uint32_t code = (bk->adpcm[i >> 1] >> ((i & 1u) * 4u)) & 15u;
-        int32_t st = ISTEP[idx], vd = st >> 3, c;
-        if (code & 4u) vd += st;
-        if (code & 2u) vd += st >> 1;
-        if (code & 1u) vd += st >> 2;
-        pred += (code & 8u) ? -vd : vd;
-        pred = pred < -32768 ? -32768 : pred > 32767 ? 32767 : pred;
-        idx += IIDX[code & 7u];
-        idx = idx < 0 ? 0 : idx > 88 ? 88 : idx;
-        c = (int32_t)(i / per);
-        if (c != col) {
-            peaks[col] = (uint8_t)(pk >> 7);
-            col = c;
-            pk = 0;
-        }
-        if ((pred < 0 ? -pred : pred) > pk)
-            pk = pred < 0 ? -pred : pred;
-    }
-    peaks[col] = (uint8_t)(pk >> 7);
-    for (col++; col < n; col++)
-        peaks[col] = 0;
-    return 1;
-}
 float engine_gr_db(void) { return mst.gr_view; }
 void engine_master_format(int i, char *buf) { master_format(&mst, i, buf); }
-
-void engine_brk_loops(void)
-{
-    const brkpart_t *bp = &seq.pat[seq.ppat[TRK_BRK]].brk;
-    brk_loop_t L[2];
-    int w;
-    scan_loops();                                       /* an upload may have changed the user loops */
-    brk_hold = 1;                                       /* the ISR skips the break while we rewrite it */
-    for (w = 0; w < 2; w++) {
-        int slot = w ? bp->slot_b : bp->slot_a;
-        uint32_t ns = 0, rate = 0;
-        char name[9];
-        const uint8_t *d = (slot >= X0X_NBREAKS && slot < nloops)
-                               ? plat_slot(loop_slot[slot], loop_zone[slot], &ns, &rate, name) : 0;
-        if (d) {
-            L[w].adpcm = d;
-            L[w].nsamples = ns;
-            L[w].rate = rate;
-            L[w].bars = loop_bars(ns, rate);
-            breaks_set_loop(&brk, w, &L[w]);
-        } else {
-            breaks_set_loop(&brk, w, brk_builtin(slot < X0X_NBREAKS ? slot : 0));   /* built-in (or an empty user slot: the first) */
-        }
-    }
-    brk_hold = 0;
-}
 
 void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t *base)
 {
@@ -917,7 +705,6 @@ void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t
     drum808_init(&d808);
     bass303_init(&b303[0]);
     bass303_init(&b303[1]);
-    breaks_init(&brk);
     fxbus_init(&fx, dly_buf, DLY_LEN);
     master_init(&mst);
     seq_init(&seq, patterns);

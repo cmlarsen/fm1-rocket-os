@@ -279,14 +279,12 @@ typedef struct {
     tb3po_cfg_t gen;
 } bpart1_t;
 typedef struct {
-    uint32_t steps;
-    uint8_t set[BRK_NSET];
-    uint8_t slot_a, slot_b, rsv[2];
-} brkpart1_t;
+    uint8_t rsv_part[20];             /* the removed part's pattern1 fields (steps, 12 settings, 2 slots, 2 rsv) */
+} rsvpart1_t;
 typedef struct {
     dpart1_t drum[NKIT];
     bpart1_t bass[NBASS];
-    brkpart1_t brk;
+    rsvpart1_t rsv1;
     uint8_t swing, rsv[3];
 } pattern1_t;
 typedef struct {
@@ -316,11 +314,6 @@ static void pattern_from1(pattern_t *p, const pattern1_t *o)
         p->bass[k].transpose = o->bass[k].transpose;
         p->bass[k].gen = o->bass[k].gen;
     }
-    p->brk.steps = o->brk.steps;
-    for (k = 0; k < BRK_NSET; k++)
-        p->brk.set[k] = o->brk.set[k];
-    p->brk.slot_a = o->brk.slot_a;
-    p->brk.slot_b = o->brk.slot_b;
     p->swing = o->swing;
 }
 
@@ -479,11 +472,11 @@ int project_load(void)
 
 void project_apply_io(void)
 {
-    static const uint8_t DEF[5] = {9, 10, 1, 2, 3};   /* 909 10, 808 11, 303s 2 / 3, break 4 */
+    static const uint8_t DEF[NPARTS] = {9, 10, 1, 2};   /* 909 10, 808 11, 303s 2 / 3 */
     int p;
     seq.send_clock = proj.set.clk_out;
     seq.send_notes = proj.set.notes_out;
-    for (p = 0; p < 5; p++) {
+    for (p = 0; p < NPARTS; p++) {
         int v = proj.set.midi_ch[p];
         seq.ch[p] = (uint8_t)(!v ? DEF[p] : v > 16 ? SEQ_CH_OFF : v - 1);
     }
@@ -494,7 +487,7 @@ void project_apply_io(void)
 int project_save(void)
 {
     int p;
-    for (p = 0; p < 5; p++)
+    for (p = 0; p < NPARTS; p++)
         proj.set.midi_ch[p] = (uint8_t)(seq.ch[p] == SEQ_CH_OFF ? 17 : seq.ch[p] + 1);
     proj.set.bpm_x10 = (uint16_t)(seq.bpm * 10.0f + 0.5f);
     proj.set.accent_q7 = seq.accent_q7;

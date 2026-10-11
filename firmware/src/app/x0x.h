@@ -9,7 +9,6 @@
 #include "../seq/sequencer.h"
 #include "../seq/tb3po.h"
 #include "../seq/motion.h"
-#include "../dsp/breaks.h"
 #include "../dsp/fxbus.h"            /* FX_* param indices (the send pages) */
 
 #ifndef X0X_VERSION                     /* a release build passes its own (tools/build.py --release) */

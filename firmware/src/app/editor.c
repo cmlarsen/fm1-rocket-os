@@ -66,7 +66,6 @@ static int ed_smp_erase(uint32_t k, uint32_t all)
     uint32_t i, took;
     int rc = 0;
     usr_nz[k] = 0;
-    engine_brk_loops();                               /* nothing may read the slot now */
     for (i = 0; i < (all ? SMP_USER_SIZE / 0x1000u : 1u) && !rc; i++) {
         audio_silence();
         rc = fl_erase4k(ed_smp_slot(k) + i * 0x1000u, &took);
@@ -90,7 +89,6 @@ static int ed_smp_end(uint32_t k, const uint8_t *a, uint32_t na)
         return 4;
     ed_smp_inval(k);
     smp_user_scan(k);
-    engine_brk_loops();
     return usr_nz[k] ? 0 : 5;
 }
 

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* X0X pattern model: 32 patterns, each holding the 909, the 808, two 303s and the break.
+/* X0X pattern model: 32 patterns, each holding the 909, the 808 and two 303s.
  *
  * Plain data, no pointers, so a pattern copies with an assignment and the project
  * stores the bytes. The UI edits these in place from the main loop while the
@@ -57,21 +57,14 @@ typedef struct {
     uint8_t rsv[2];
 } dpart_t;
 
-/* BREAK: the generator's settings (dsp/breaks.h) and the steps it may play on */
-enum { BRK_COMPLEX, BRK_ANCHOR, BRK_ROLL, BRK_FILL, BRK_R2, BRK_R3, BRK_R4, BRK_R8,
-       BRK_PHRASE, BRK_BCHANCE, BRK_ALEN, BRK_BLEN, BRK_NSET };
-typedef struct {
-    uint32_t steps;                   /* bit s = the break may sound on 16th s of the bar */
-    uint8_t set[BRK_NSET];            /* breaks.h param values, in BRK_* order */
-    uint8_t slot_a, slot_b;           /* loop A / B: the built-in bank, then the user slots (engine_brk_slot_names) */
-    uint8_t rsv[2];
-    uint8_t slice[16];                /* per 16th: 0 = the generator chooses, 1..8 = loop A's slice 1..8 */
-} brkpart_t;
-
+/* The pattern's fifth part (the BREAK generator) was removed in T1. Its 36 bytes stay,
+ * zeroed, so the stored pattern's size and the byte after the 303s do not move: an older
+ * project loads unchanged and the packed stream's RAW_LEN is the same. */
+#define RSV_PART_N 36
 typedef struct {
     dpart_t drum[NKIT];
     bpart_t bass[NBASS];
-    brkpart_t brk;
+    uint8_t rsv_part[RSV_PART_N];
     uint8_t swing;                    /* 0..100: 0 = straight (50 %), 100 = 75 % shuffle */
     uint8_t rsv[3];
 } pattern_t;

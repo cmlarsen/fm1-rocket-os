@@ -10,8 +10,8 @@
  *     }
  * so a step lands on its exact sample, and engine code never sees time.
  *
- * Five parts, each with its own step counter (lengths and rates may differ):
- * 909, 808, 303 A, 303 B, BREAK (always 16ths, 16 to the bar). Each part plays its own
+ * Four parts, each with its own step counter (lengths and rates may differ):
+ * 909, 808, 303 A, 303 B. Each part plays its own
  * pattern (ppat[part]); track t is part t. The 909 part's length defines the bar: cued
  * patterns (or the next one of a chain, or the song's next bar) start when it wraps, and a
  * part whose pattern changed restarts on step 1 while the others keep running.
@@ -37,11 +37,10 @@
 #define FS 44100u
 #define TRK_DRUM 0                    /* + kit: 0 = 909, 1 = 808 */
 #define TRK_BASS0 NKIT
-#define TRK_BRK (NKIT + NBASS)
-#define NTRACKS (NKIT + NBASS + 1)
-/* mute bits: kit k voice v = k * NDRUM + v; then 303 A, 303 B, BREAK */
+#define NTRACKS (NKIT + NBASS)
+/* mute bits: kit k voice v = k * NDRUM + v; then 303 A, 303 B. Bit MUTE_BASS0 + NBASS is
+ * unused (it was the removed part), kept clear so the song's mute byte is unchanged */
 #define MUTE_BASS0 (NKIT * NDRUM)
-#define MUTE_BRK (MUTE_BASS0 + NBASS)
 
 /* the mute bits of part p (a drum machine: all its voices) */
 static inline uint32_t seq_part_mask(int p)
@@ -68,6 +67,7 @@ static inline void prob_cond(int k, int *a, int *b)
 #define SONG_REP(b) (((b)->mute >> 5) + 1)    /* a bar plays 1-8 times: mute's bits 5-7 (the parts use 0-4) */
 typedef struct {
     uint8_t pat[NTRACKS];             /* each part's pattern */
+    uint8_t rsv;                      /* was the removed part's pattern (0): the mute byte stays at 5 */
     uint8_t mute;                     /* bit p = part p muted */
 } song_bar_t;
 typedef struct {
@@ -80,8 +80,6 @@ typedef struct {
     int (*drum)(void *ctx, int kit, int voice, float vel);      /* 0: the hit did not play (its chance) */
     void (*bass_on)(void *ctx, int part, int note, int accent, int slide);
     void (*bass_off)(void *ctx, int part);
-    void (*brk)(void *ctx, int step16, int bar, float samples_per_16th, int enabled);
-    void (*brk_stop)(void *ctx);
     void (*midi)(void *ctx, uint8_t status, uint8_t d1, uint8_t d2);   /* clock / transport / notes out */
     void (*step)(void *ctx, int part, int step);                        /* UI playhead (optional) */
     void *ctx;
@@ -122,7 +120,7 @@ typedef struct {
     volatile uint8_t accent_q7;       /* drum velocity of a non-accented hit, of 127 */
     float bpm;                        /* internal tempo (UI writes; read per step) */
     float ext_bpm;                    /* tempo measured from the external clock */
-    seq_track_t t[NTRACKS];           /* TRK_DRUM, TRK_BASS0.., TRK_BRK */
+    seq_track_t t[NTRACKS];           /* TRK_DRUM, TRK_BASS0.. */
     uint32_t clk_to_next;             /* internal: samples to the next MIDI clock, Q8 */
     uint32_t ext_since;               /* samples since the last external clock (tempo estimate) */
     uint32_t ext_period;              /* smoothed samples per external clock, Q8 */
