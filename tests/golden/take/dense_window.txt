@@ -1,0 +1,4 @@
+# case dense_window
+nevents=1002 full=0 replay_events=1002
+first_off=0 last_off=1000 per_window_max=2
+# ok=1

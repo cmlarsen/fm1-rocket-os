@@ -26,6 +26,12 @@ Related: [architecture](architecture.md) · [screen design](screen-design.md) ·
 | 8. Binary check | `make emu-binary` | Run the real `.fwsc` in [fm1-emulator](https://github.com/simonjohansson/fm1-emulator) (QEMU) headless with an input script, capture the LCD at fixed guest times, and compare against the host goldens. | ~1 min |
 | 9. Hardware | owner | RC0–RC3 gates: flash, smoke test, measure CPU headroom and text legibility | — |
 
+The host tiers run on the Mac: `make unit` (the host unit suites), `make scenarios` (every
+`tests/scenarios/*.x0x` into `build/scenarios/<name>/`, compared against `tests/golden/<name>/`
+where one exists), `make screens` (the screen tour plus `build/screens/contact.png`, every shot at
+1:1) and `make parity` (WASM vs native, sample for sample). Regenerate goldens with
+`GOLDEN_UPDATE=1`; `tests/golden.sh` prints the first mismatch per file.
+
 ## Scenario script format (planned, modelled on X0X and ChoralRoot)
 ```
 # tests/scenarios/launch_quantized.scn
@@ -46,6 +52,16 @@ expect audio.peak_db_min -30
 - Time is simulated, so tests are deterministic and run faster than real time.
 - `expect` reads named fields from the core state dump.
 - Each scenario documents a single behaviour. **When you fix a bug, add a scenario that reproduces it first.**
+
+The harness commands (T2a) beyond the above:
+- `dump FILE.json` writes transport (`playing`, `bpm`, `bar`, `beat`, `step`, `sample`), each part's
+  `ppat`/`pcue`/`mute`, the view and the LED state. `sample` (frames rendered since boot) is the
+  clock; `bar` counts the 909's wraps since the transport started.
+- `wait-bar N` runs until N bar boundaries (the 909's wrap) have passed.
+- `events FILE.txt` / `eventsstop` log every engine command (note on/off, parameter change) and
+  every cue and mute, one per line with its sample time.
+- `expect bar N`, `expect beat N`, `expect key K L` (L: 0 off, 1 dim, 2 bright) and
+  `expect button B L` check the transport and the lights.
 
 ## The loop for one change
 1. Read the relevant docs: [requirements](../product/requirements.md), [UX principles](../product/ux-principles.md), [interaction model](../product/interaction-model.md) and [architecture](architecture.md).

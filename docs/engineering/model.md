@@ -29,3 +29,8 @@ Takes record X0X's 32-bit engine command word, `type:4 | a:8 | b:8 | c:12` (`eng
 | 15 | `TAKE_MARK`: a = 0 start / 1 end / 2 tempo, c = value (tempo ×10 split over b:c when needed) |
 
 FM6 and NOISE (T5i) use the existing parameter-target and note-on/off types with new part numbers; they don't add command types.
+
+## Undo limits (v1)
+- **Take replace:** one level per song. Undo brings back the previous take; a second undo says "can't undo".
+- **Delete song:** undo works until another save reuses that storage. After that it says "can't undo" rather than restoring something wrong.
+- **Deletes and take undos are durable:** they are written as new records, so a reboot keeps the result.

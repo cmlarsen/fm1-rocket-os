@@ -1,0 +1,16 @@
+# case record_replay
+state=0 nevents=6 length=96000 full=0
+log 0 0xf0000000 mark start
+log 0 0xc0c00002 launch clip=12 queue role=2
+log 5 0xc0d01002 launch clip=13 now role=2
+log 5 0xd0101000 mute role=1 on=1
+log 40000 0xe0001000 fx id=0 on
+log 96000 0xf0100000 mark end
+play 0 0xf0000000 mark start
+play 0 0xc0c00002 launch clip=12 queue role=2
+play 5 0xc0d01002 launch clip=13 now role=2
+play 5 0xd0101000 mute role=1 on=1
+play 40000 0xe0001000 fx id=0 on
+play 96000 0xf0100000 mark end
+# replay_events=6
+# replay_pass2=6
