@@ -218,7 +218,22 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-engines unit-store unit-take unit-midi unit-fx unit-name
+unit-core: unit-clip unit-live unit-engines unit-store unit-take unit-midi unit-fx unit-name
+
+# T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
+# FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens
+# (which keep the 48 kHz default) are untouched.
+.PHONY: unit-live
+unit-live:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 \
+	    -o build/host/live_bridge_test \
+	    tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c
+	build/host/live_bridge_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 \
+	    -o build/host/live_bridge_test_san \
+	    tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c
+	build/host/live_bridge_test_san
 .PHONY: unit-midi
 unit-midi:
 	@mkdir -p build/host

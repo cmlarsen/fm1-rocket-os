@@ -1,0 +1,44 @@
+# T3 review #2: a short press on PLAY acts on RELEASE (released before the 600 ms threshold); a
+# long press switches the mode and never starts or stops either transport. Tested in STUDIO and
+# in LIVE, entering and leaving.
+wait 300
+# STUDIO: during a short press the transport has not started; it starts on release
+press PLAY
+wait 100
+expect playing 0
+release PLAY
+wait 60
+expect playing 1
+tap PLAY
+wait 60
+expect playing 0
+# STUDIO long press: never starts the transport, enters LIVE
+press PLAY
+wait 300
+expect playing 0
+wait 400
+expect mode 1
+wait 400
+release PLAY
+wait 20
+expect playing 0
+shot live_press.png
+# LIVE: a short press starts the clip transport only on release
+press PLAY
+wait 100
+expect playing 0
+release PLAY
+wait 60
+expect playing 1
+tap PLAY
+wait 60
+expect playing 0
+# LIVE long press: never toggles the clip transport, leaves LIVE
+press PLAY
+wait 300
+expect playing 0
+wait 400
+expect mode 0
+release PLAY
+wait 20
+expect view 1

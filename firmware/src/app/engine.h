@@ -42,6 +42,9 @@ enum { PR_909, PR_808, PR_303A, PR_303B, PR_FX, PR_MST, PR_SEQ, ENG_PROF_N };
 extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames;
 void engine_motion_enable(int on);                          /* off: lanes do not play (the PERF test) */
 void engine_motion_reset(void);                             /* lanes replaced (undo): knobs to their own values */
+/* T3: stop X0X's transport and release every 303 gate at the start of the next block (main loop:
+ * LIVE taking the transport). */
+void engine_all_off(void);
 /* overload guard (engine.c): the platform reports each block's load after rendering it */
 void engine_load(uint32_t pct, uint32_t frames);           /* ISR, after engine_render */
 void engine_guard_enable(int on);                           /* off: full quality always (the PERF test) */

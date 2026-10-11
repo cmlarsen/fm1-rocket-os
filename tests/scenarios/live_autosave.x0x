@@ -1,0 +1,25 @@
+# T3 review #5: no flash write happens while LIVE is active (playing or not); saving resumes after
+# leaving LIVE, once STUDIO is stopped and quiet.
+wait 300
+tapkey w0
+expect store_writes 0
+# enter LIVE before the 4 s autosave can fire
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 1
+# play for 10 s: the dirty project is still not written
+tap PLAY
+wait 10000
+expect store_writes 0
+shot live_autosave.png
+tap PLAY
+# leave LIVE; the autosave resumes once STUDIO is stopped and quiet
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 0
+wait 5000
+expect store_writes >0

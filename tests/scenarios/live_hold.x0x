@@ -1,0 +1,32 @@
+# T3 review #4: a key held across a layer or focus change releases the note that key started.
+# The note is tracked per key, so SCL and ALGORITHM do not retarget it.
+wait 300
+# a 303 A and a 303 B line, so BASS and LEAD have clips
+turn ALGO 2
+tapkey w0
+turn ALGO 1
+tapkey w0
+turn ALGO -3
+# enter LIVE and switch to the PLAY layer
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 1
+tap SEL
+expect layer 1
+shot live_hold.png
+events live_hold_events.txt
+# hold a BASS note, switch the layer to PADS, release: the BASS note releases (no hang)
+key 0 down
+tap SEL
+expect layer 0
+key 0 up
+# back to PLAY; hold a note, change the focused role with ALGORITHM, release: the original releases
+tap SEL
+expect layer 1
+key 2 down
+turn ALGO 1
+key 2 up
+wait 100
+eventsstop

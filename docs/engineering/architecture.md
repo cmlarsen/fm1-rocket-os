@@ -91,3 +91,5 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 | **Left after the 8 KiB spare** | **about 18 KB** |
 
 Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new large buffer goes in the pool through X0X's pool mechanism. Any task that adds more than 1 KB of RAM must update this table.
+
+**Measured after T3** (`make fw` on deltron): the POOL is **254,636 B of 344,064** (was 328,052 B) and `.data+.bss` is **95,124 B of 98,304** (was 95,044 B). The 1.0 s delay line freed ~86 KiB; the LIVE `song_t` (14,352 B) and the clip engine (440 B), both in the `.pool`, take ~15 KiB of it back, leaving roughly 89 KiB of pool against the 8 KiB spare.

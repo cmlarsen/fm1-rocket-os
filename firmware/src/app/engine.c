@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* X0X audio engine; see engine.h. */
 #include "engine.h"
+#include "live_bridge.h"          /* T3: the LIVE clip engine, rendered in place of the sequencer */
 #include "plat.h"
 #include "../dsp/drum909.h"
 #include "../dsp/drum808.h"
@@ -30,7 +31,10 @@ static drum808_t d808 POOL;
 static bass303_t b303[NBASS] POOL;
 static fxbus_t fx POOL;
 static master_t mst;
-#define DLY_LEN 88200
+/* T3: the delay line is 1.0 s (was 2.0 s, 88,200) — the RAM plan in architecture.md frees
+ * 88,200 B for the LIVE song and clip engine. fxbus's delay time halves itself to fit dlen,
+ * so the longest synced delay is now 1.0 s (check the POOL numbers in reports/T3.md). */
+#define DLY_LEN 44100
 static int16_t dly_buf[DLY_LEN] POOL;
 static motion_t mot;
 static const sound_t *mot_base_snd;    /* the knobs' own values (the project's mirror) */
@@ -40,6 +44,12 @@ static uint8_t mot_was_on = 1;
 void engine_motion_enable(int on) { mot_on = (uint8_t)(on != 0); }   /* the ISR releases the knobs */
 static volatile uint8_t mot_release_req;
 void engine_motion_reset(void) { mot_release_req = 1; }   /* lanes changed under it (undo): knobs back */
+
+/* T3: stop X0X's sequencer and release every gate/voice, at the start of the next block. The
+ * main loop asks for it when LIVE takes the transport; doing it in the ISR keeps the 303s (and
+ * the sequencer's own flags) consistent without touching DSP state from the main loop. */
+static volatile uint8_t all_off_req;
+void engine_all_off(void) { all_off_req = 1; }
 
 /* overload guard: past the CPU (a block over 92%, or 85% on average) the two 303s drop their
  * oversampling (~12% of the CPU: a little aliasing on bright notes) and the 808's voices end at
@@ -101,6 +111,9 @@ enum { C_PARAM_T0 = 0, C_DRUM = 8, C_BON, C_BOFF, C_NOP };
 #define CQ 1024u
 static uint32_t cq[CQ];
 static volatile uint32_t cq_w, cq_r;
+#ifdef X0X_HOST
+static volatile int in_isr;             /* T3: traps a cq_put from the audio path (engine_render) */
+#endif
 
 /* T2a event tap: see engine.h. The host runner sets it for `events`; T9 will set it on the device */
 void (*engine_tap)(uint32_t sample, uint32_t cmd);
@@ -108,6 +121,10 @@ void (*engine_tap)(uint32_t sample, uint32_t cmd);
 static void cq_put(uint32_t type, uint32_t a, uint32_t b, uint32_t c)
 {
     uint32_t w = cq_w;
+#ifdef X0X_HOST
+    if (in_isr)                         /* T3: the ISR calls the voices directly, never cq_put */
+        __builtin_trap();
+#endif
     if (w - cq_r >= CQ)
         return;                        /* full: drop (a param flood; the mirror still has it) */
     cq[w % CQ] = (type << 28) | ((a & 0xFFu) << 20) | ((b & 0xFFu) << 12) | (c & 0xFFFu);
@@ -639,6 +656,88 @@ static void render_sub(float *out_l, float *out_r, uint32_t n)
     }
 }
 
+/* ---- T3: the LIVE clip engine's events, applied directly in the ISR at their sample offsets.
+ * cq_put is the main loop's; the ISR never touches it (see cq_put's host trap). ---- */
+
+typedef struct {
+    uint32_t base;            /* absolute sample of the window's first frame */
+    uint32_t done;            /* frames already rendered */
+    uint32_t n;
+    float *out_l, *out_r;
+} live_ctx_t;
+
+static void live_tap(uint32_t sample, uint32_t cmd)
+{
+    if (engine_tap)                                   /* the host `events` log; T9's device tap */
+        engine_tap(sample, cmd);
+}
+
+static void live_apply(const live_ev_t *e, live_ctx_t *c)
+{
+    uint32_t abs = c->base + e->sample;
+    switch (e->kind) {
+    case LIVE_EV_DRUM:
+        if (e->role == LIVE_DRUMS) {
+            float v = e->b ? 1.0f : (float)seq.accent_q7 / 127.0f;
+            s_drum(0, 0, e->a, v);
+            live_tap(abs, (C_DRUM << 28) | ((uint32_t)e->a << 12) | ((uint32_t)(v * 4095.0f) & 0xFFFu));
+        }
+        break;
+    case LIVE_EV_NOTE_ON: {
+        int part = e->role == LIVE_BASS ? 0 : e->role == LIVE_LEAD ? 1 : -1;
+        if (part >= 0) {
+            int acc = (e->b & 0x7Fu) >= 100;          /* vel: bit 7 slides, the rest is the velocity */
+            int sl = (e->b & 0x80u) != 0;
+            s_bon(0, part, e->a, acc, sl);
+            live_tap(abs, (C_BON << 28) | ((uint32_t)part << 20) | ((uint32_t)e->a << 12) |
+                          (uint32_t)(acc | (sl << 1)));
+        }
+        break;
+    }
+    case LIVE_EV_NOTE_OFF: {
+        int part = e->role == LIVE_BASS ? 0 : e->role == LIVE_LEAD ? 1 : -1;
+        if (part >= 0) {
+            s_boff(0, part);
+            live_tap(abs, (C_BOFF << 28) | ((uint32_t)part << 20));
+        }
+        break;
+    }
+    case LIVE_EV_MOTION:
+        apply_param((int)(e->b >> 4), (int)(e->b & 15u), (int)e->a, (int)e->c);
+        live_tap(abs, ((uint32_t)(e->b >> 4) << 28) | ((uint32_t)(e->b & 15u) << 20) |
+                      ((uint32_t)e->a << 12) | (uint32_t)e->c);
+        break;
+    default:
+        break;
+    }
+}
+
+static void live_sink(void *ctx, const live_ev_t *e)
+{
+    live_ctx_t *c = (live_ctx_t *)ctx;
+    if (e->sample > c->done) {                        /* render the stretch before this event */
+        render_sub(c->out_l + c->done, c->out_r + c->done, e->sample - c->done);
+        c->done = e->sample;
+    }
+    live_apply(e, c);
+}
+
+/* T3: LIVE takes the transport. Release the 303 gates and stop X0X's sequencer now, so entering
+ * LIVE from a playing STUDIO cannot leave a note hung (the request is handled at a block start). */
+static void all_off_now(void)
+{
+    int t;
+    all_off_req = 0;
+    bass303_note_off(&b303[0]);
+    bass303_note_off(&b303[1]);
+    seq.playing = 0;
+    seq.req_start = seq.req_stop = seq.req_cont = 0;
+    for (t = 0; t < NTRACKS; t++) {
+        seq.t[t].sounding = 0;
+        seq.t[t].held_note = 0;
+    }
+}
+
 void engine_render(int32_t *out_lr, uint32_t n)
 {
     static float out_l[256], out_r[256];
@@ -647,6 +746,9 @@ void engine_render(int32_t *out_lr, uint32_t n)
     int p;
     if (n > 256u)
         n = 256u;
+#ifdef X0X_HOST
+    in_isr = 1;                                        /* T3: a cq_put below now traps */
+#endif
     eng_prof_frames += n;
     if ((mot_was_on && !mot_on) || mot_release_req) {   /* motion off, or its lanes replaced: knobs back */
         mot_release_req = 0;
@@ -654,16 +756,38 @@ void engine_render(int32_t *out_lr, uint32_t n)
     }
     mot_was_on = mot_on;
     guard_apply();
+    if (all_off_req)                                   /* T3: LIVE entered: stop X0X and release */
+        all_off_now();
     {
         PROF_T(pt);
         drain();
-        if (mot_on)
-            motion_tick(&mot, n);
-        fxbus_set_bpm(&fx, seq_tempo(&seq));
-        seq_advance(&seq, 0, &SINK);
+        if (live_bridge_active()) {
+            /* T3: LIVE owns the transport. The clip engine's events are applied directly, at
+             * their sample offsets (live_sink below); X0X's sequencer does not advance. */
+            fxbus_set_bpm(&fx, (float)live_bridge_bpm_x10() / 10.0f);
+        } else {
+            if (mot_on)
+                motion_tick(&mot, n);
+            fxbus_set_bpm(&fx, seq_tempo(&seq));
+            seq_advance(&seq, 0, &SINK);
+        }
         PROF_ADD(PR_SEQ, pt);
     }
-    while (done < n) {
+    if (live_bridge_active()) {
+        live_ctx_t c;
+        live_sink_t sink;
+        c.base = eng_prof_frames - n;                  /* absolute sample of the window's first frame */
+        c.done = 0;
+        c.n = n;
+        c.out_l = out_l;
+        c.out_r = out_r;
+        sink.ev = live_sink;
+        sink.ctx = &c;
+        live_bridge_render(n, &sink);
+        if (c.done < n)                                /* the tail after the last event */
+            render_sub(out_l + c.done, out_r + c.done, n - c.done);
+        done = n;
+    } else while (done < n) {
         uint32_t k = seq_until_event(&seq, n - done);
         render_sub(out_l + done, out_r + done, k);
         {
@@ -696,6 +820,9 @@ void engine_render(int32_t *out_lr, uint32_t n)
             eng_peak[p] = (uint16_t)q;
         part_peak[p] = 0.0f;
     }
+#ifdef X0X_HOST
+    in_isr = 0;
+#endif
 }
 
 float engine_gr_db(void) { return mst.gr_view; }
@@ -718,6 +845,7 @@ void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t
     mot.base = mot_base;
     mot.apply = mot_apply;
     mot_base_snd = base;
+    live_bridge_init();                                /* T3: the LIVE clip engine */
     for (p = 0; p < NPARTS; p++) {
         mix_level[p] = 1.0f;
         mix_rev[p] = mix_dly[p] = 0.0f;
