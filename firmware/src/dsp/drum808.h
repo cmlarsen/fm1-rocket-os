@@ -210,3 +210,5 @@ int drum808_get(const drum808_t *d, int track, int i);
 
 /* true while any voice is still sounding */
 int drum808_active(const drum808_t *d);
+/* T2c: how many lanes are still sounding (one per track voice) */
+int drum808_voices_active(const drum808_t *d);

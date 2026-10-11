@@ -150,6 +150,8 @@ void bass303_init(bass303_t *b);
 void bass303_note_on(bass303_t *b, int note, int accent, int slide);
 void bass303_note_off(bass303_t *b);
 void bass303_all_off(bass303_t *b);
+/* T2c: 1 while a note is held or the voice has not yet gone idle (silent) */
+int bass303_voices_active(const bass303_t *b);
 void bass303_render(bass303_t *b, float *out, int n);
 /* the engine's overload guard: 1 = no oversampling from the next block (~12 % of the worst case
  * on the FM-1; some aliasing on bright, resonant notes), 0 = back to BASS303_OS */

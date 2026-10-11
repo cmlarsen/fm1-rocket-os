@@ -1,0 +1,107 @@
+# T2c review follow-up: a UI crash the fuzzer found (seed 180). A switch page drew a knob whose
+# value outran its names array (pref_value_of read names[v] out of bounds). Minimised by the
+# shrinker; before the fix this segfaults, after it the release tail leaves no voice.
+noreset
+tap GLO
+tap SEL
+press PLAY
+wait 700
+release PLAY
+press PLAY
+wait 1017
+release PLAY
+turn ALGO 1 70
+press PLAY
+wait 700
+release PLAY
+press PLAY
+wait 244
+wait 256
+wait 215
+turn ALGO 2 117
+tap REC
+release PLAY
+tap REC
+tap PLAY
+tap EDIT
+key 21 down
+tap OCT+
+turn SELECT -1 61
+press HOME
+tap REC
+turn ALGO -1 46
+tap ARP
+press PLAY
+wait 818
+release PLAY
+press PLAY
+wait 700
+release PLAY
+press PLAY
+wait 1027
+release PLAY
+press PLAY
+wait 700
+release PLAY
+press PLAY
+wait 700
+release PLAY
+press PLAY
+wait 700
+release PLAY
+tap EDIT
+release HOME
+tap EDIT
+tap SEQ
+press PLAY
+wait 700
+release PLAY
+press PLAY
+wait 700
+tap EDIT
+key 14 down
+turn K2 1 108
+key 0 up
+key 1 up
+key 2 up
+key 3 up
+key 4 up
+key 5 up
+key 6 up
+key 7 up
+key 8 up
+key 9 up
+key 10 up
+key 11 up
+key 12 up
+key 13 up
+key 14 up
+key 15 up
+key 16 up
+key 17 up
+key 18 up
+key 19 up
+key 20 up
+key 21 up
+key 22 up
+key 23 up
+key 24 up
+key 25 up
+key 26 up
+release FX
+release SEL
+release ENV
+release LFO
+release EDIT
+release GLO
+release HOME
+release SAVE
+release ARP
+release SEQ
+release PLAY
+release REC
+release OCT-
+release OCT+
+stop
+wait 3000
+expect voices 0

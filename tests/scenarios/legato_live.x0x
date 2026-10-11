@@ -1,0 +1,21 @@
+# T2c round 2: the same mono-part rule on LIVE's PLAY layer. Two BASS keys held, the first
+# released: BASS keeps sounding (voices 1). When the last key is released it stops (voices 0).
+wait 300
+press PLAY
+wait 700
+release PLAY
+expect mode 1
+tap SEL
+expect layer 1
+events legato_live_events.txt
+key 0 down
+wait 100
+key 2 down
+wait 100
+key 0 up
+wait 3000
+expect voices 1
+key 2 up
+wait 3000
+expect voices 0
+eventsstop
