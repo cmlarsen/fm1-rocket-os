@@ -1,0 +1,26 @@
+# case chord_and_hold
+# script:
+clip 19 melodic 8
+note 19 0 60 100 8
+note 19 2 64 90 1
+note 19 2 67 90 1
+note 19 2 71 90 1
+play
+launch 19 0
+runto 60000
+
+# events:
+0 clip_queued chords 0 0 19
+0 playing bass 0 0 0
+0 clip_started chords 0 0 19
+0 note_on chords 60 100 19
+12000 note_on chords 64 90 19
+12000 note_on chords 67 90 19
+12000 note_on chords 71 90 19
+18000 note_off chords 64 0 0
+18000 note_off chords 67 0 0
+18000 note_off chords 71 0 0
+48000 note_off chords 60 0 0
+48000 note_on chords 60 100 19
+
+# events=12

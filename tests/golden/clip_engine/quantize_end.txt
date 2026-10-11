@@ -1,0 +1,23 @@
+# case quantize_end
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+clip 13 melodic 4
+note 13 0 62 100 1
+play
+launch 12 0
+run 6000
+launch 13 2
+runto 30000
+
+# events:
+0 clip_queued lead 0 0 12
+0 playing bass 0 0 0
+0 clip_started lead 0 0 12
+0 note_on lead 60 100 12
+6000 clip_queued lead 0 0 13
+6000 note_off lead 60 0 0
+24000 clip_started lead 0 0 13
+24000 note_on lead 62 100 13
+
+# events=8
