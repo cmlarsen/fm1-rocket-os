@@ -8,13 +8,16 @@
  *
  *   Recorder. take_arm(t, now) starts recording at the next bar boundary. take_feed(t, sample,
  *   cmd) appends one event stamped `sample - start`; it is called from the engine tap, one call
- *   per drained command, in ISR context: constant time, no heap. take_stop(t, now) ends the take
- *   on the next bar boundary so loops line up. When the buffer fills, recording stops cleanly
- *   with a TAKE_MARK end and take_full() is set for the UI.
+ *   per drained command, in ISR context: constant time, no heap. A feed stamped before `start`
+ *   is dropped (the prelude already set the state at offset 0). take_stop(t, now) requests the
+ *   take end on the next bar boundary; only the ISR's take_tick() writes the end, exactly once.
+ *   When the buffer fills, recording stops cleanly with a TAKE_MARK end and take_full() is set.
  *
  *   Prelude. Inside take_arm the caller's prelude callback writes the current state at offset 0
  *   through take_setup_event(): the playing clip per role (TAKE_LAUNCH now), mutes, tempo and
- *   the current value of every parameter. Replay then starts from the same state.
+ *   the current value of every parameter. Replay then starts from the same state. The log and
+ *   the prelude are built while state == IDLE, so an ISR feed cannot interleave with them; the
+ *   arm publishes start and then the state behind a compiler barrier.
  *
  *   Player. take_play(t, now) starts replaying. take_render(t, nframes, sink) then advances the
  *   replay clock exactly like clip_engine_render(): the sink sees each event at its exact window
@@ -80,11 +83,12 @@ typedef struct take {
     uint16_t     n;                           /* events written, == hdr.nevents */
     uint8_t      state;                       /* TAKE_IDLE / _ARMED / _REC / _PLAY */
     uint8_t      full;                        /* the buffer filled: the UI can show it */
-    uint8_t      stop_set;                    /* take_stop() is waiting for stop_at */
-    uint8_t      rsv;
+    uint8_t      stop_set;                    /* take_stop() requested: end on stop_at */
+    uint8_t      arming;                      /* take_arm() is building the offset-0 log */
+    uint8_t      ended;                       /* take_end() ran: the END mark is written once */
+    uint8_t      rsv[3];
     uint32_t     start;                       /* absolute sample recording starts / started */
     uint32_t     stop_at;                     /* absolute boundary take_stop() ends on */
-    uint32_t     play_start;                  /* absolute sample take_play() began at */
     uint32_t     play_pos;                    /* samples replayed so far */
     uint16_t     play_i;                      /* next event to replay */
     take_bar_fn     bar;
@@ -111,12 +115,12 @@ void take_setup_event(take_t *t, uint32_t cmd);          /* offset-0 event, from
 
 void take_arm(take_t *t, uint32_t now);                  /* start at the next bar boundary */
 void take_feed(take_t *t, uint32_t sample, uint32_t cmd);/* ISR: append one drained command */
-void take_stop(take_t *t, uint32_t now);                 /* end at the next bar boundary */
-void take_tick(take_t *t, uint32_t now);                 /* advance arm/stop without an event */
+void take_stop(take_t *t, uint32_t now);                 /* request the end at the next boundary */
+void take_tick(take_t *t, uint32_t now);                 /* call every block: arm/stop, END here */
 
 /* ---- player -------------------------------------------------------------- */
 
-void take_play(take_t *t, uint32_t now);                 /* start replaying */
+void take_play(take_t *t, uint32_t now);                 /* reset the cursor, start replaying */
 void take_render(take_t *t, uint32_t nframes, const take_sink_t *sink);
 void take_stop_play(take_t *t);
 
