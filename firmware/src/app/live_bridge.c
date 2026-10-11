@@ -166,9 +166,8 @@ static void map_chords_fx(live_song_t *sg)
     }
 }
 
-void live_bridge_map(const pattern_t *pats, void *songp)
+static void map_impl(const pattern_t *pats, int npats, live_song_t *sg)
 {
-    live_song_t *sg = (live_song_t *)songp;
     int i, nd = 0, nb = 0, nl = 0;
     uint8_t k;
 
@@ -203,7 +202,7 @@ void live_bridge_map(const pattern_t *pats, void *songp)
         sg->key_clip[k] = k;                          /* the default: identity */
 
     /* the 909: the first 7 non-empty patterns become DRUMS A-G */
-    for (i = 0; i < NPAT && nd < (int)ROLE_CLIPS_DRUMS; i++) {
+    for (i = 0; i < npats && nd < (int)ROLE_CLIPS_DRUMS; i++) {
         const dpart_t *d = &pats[i].drum[0];
         clip_t *c;
         int lane, w, len;
@@ -224,7 +223,7 @@ void live_bridge_map(const pattern_t *pats, void *songp)
     }
 
     /* 303 A: the first 5 non-empty patterns become BASS clips; 303 B: the first 7 become LEAD */
-    for (i = 0; i < NPAT; i++) {
+    for (i = 0; i < npats; i++) {
         int first = ROLE_CLIPS_DRUMS;
         if (nb < (int)ROLE_CLIPS_BASS && bass_used(&pats[i].bass[0])) {
             map_line(&pats[i].bass[0], &sg->clip[first + nb]);
@@ -248,6 +247,12 @@ void live_bridge_map(const pattern_t *pats, void *songp)
                 sg->clip[i].motion[m].v[s] = MOTION_NONE;
         }
     }
+}
+
+void live_bridge_map(const pattern_t *pats, void *songp) { map_impl(pats, NPAT, (live_song_t *)songp); }
+void live_bridge_map_n(const pattern_t *pats, int npats, void *songp)
+{
+    map_impl(pats, npats, (live_song_t *)songp);
 }
 
 /* ---------------------------------------------------------------- runtime --- */
@@ -282,7 +287,7 @@ uint32_t live_bridge_song_hash(void) { return g_pat_hash; }
 /* Re-derive the clips from the project. The song's own fields (the key map, the LIVE SETUP options,
  * the tempo and the name) are the performer's and survive a rebuild; the clips and roles are the
  * project's. */
-static void rebuild_clips(const pattern_t *pats)
+static void rebuild_clips(const pattern_t *pats, int npats)
 {
     uint8_t keys[NKEYS];
     char name[SONG_NAME_LEN];
@@ -294,7 +299,7 @@ static void rebuild_clips(const pattern_t *pats)
         keys[k] = g_song.key_clip[k];
     for (k = 0; k < (int)SONG_NAME_LEN; k++)
         name[k] = g_song.name[k];
-    live_bridge_map(pats, &g_song);
+    live_bridge_map_n(pats, npats, &g_song);
     for (k = 0; k < (int)NKEYS; k++)
         g_song.key_clip[k] = keys[k];
     for (k = 0; k < (int)SONG_NAME_LEN; k++)
@@ -310,8 +315,24 @@ static void rebuild_clips(const pattern_t *pats)
 
 uint32_t live_bridge_rebuild(const pattern_t *pats)
 {
-    rebuild_clips(pats);
+    rebuild_clips(pats, NPAT);
     g_pat_hash = live_bridge_pats_hash(pats);
+    g_song_ready = 1;
+    return g_pat_hash;
+}
+
+/* T10i: rebuild from the first npats patterns (rc_debug's stress content is one pattern, so it
+ * does not carry a full NPAT array in the pool). */
+uint32_t live_bridge_rebuild_n(const pattern_t *pats, int npats)
+{
+    rebuild_clips(pats, npats);
+    {
+        const uint8_t *p = (const uint8_t *)pats;
+        uint32_t h = 2166136261u, n;
+        for (n = 0; n < (uint32_t)sizeof(pattern_t) * (uint32_t)npats; n++)
+            h = (h ^ p[n]) * 16777619u;
+        g_pat_hash = h;
+    }
     g_song_ready = 1;
     return g_pat_hash;
 }
@@ -347,6 +368,7 @@ void live_bridge_exit(void)
     if (!g_active)
         return;
     clip_engine_transport_stop(&g_eng);
+    clip_engine_mute_clear(&g_eng);                    /* T10i: leaving LIVE clears every mute */
     engine_bass_off(0);                                /* release any held 303 A/B note (and log it) */
     engine_bass_off(1);
     engine_all_off();                                  /* T5i: release FM6/NOISE (and stop X0X) too */
@@ -431,6 +453,51 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
+
+/* T10i: the next 1/8 and 1/16 grid distances. The clip engine's step math is
+ *     step_sample(k + m) = step_sample + m*step_L + (step_frac + m*step_f) / bpm_x10
+ * (exact: the Bresenham remainder is removed then re-added; see clip_engine.c). The 1/16 grid is
+ * the next step; the 1/8 grid is the next even step (a bar or a beat always lands on an even 16th,
+ * so a swung odd step never moves one). */
+static uint32_t grid_at(const clip_engine_t *e, uint32_t m)
+{
+    return e->step_sample + m * e->step_L + (e->step_frac + m * e->step_f) / e->bpm_x10;
+}
+void live_bridge_grid(uint32_t *next_8, uint32_t *next_16)
+{
+    uint32_t now = g_eng.elapsed, d16, d8, m8;
+    if (!g_eng.playing || g_eng.bpm_x10 == 0u) {
+        if (next_8)
+            *next_8 = 0xFFFFFFFFu;
+        if (next_16)
+            *next_16 = 0xFFFFFFFFu;
+        return;
+    }
+    d16 = grid_at(&g_eng, 1u) - now;
+    m8 = ((g_eng.global_step + 1u) & 1u) ? 2u : 1u;   /* the next even step (unswung) */
+    d8 = grid_at(&g_eng, m8) - now;
+    if (next_8)
+        *next_8 = d8;
+    if (next_16)
+        *next_16 = d16;
+}
+
+void live_bridge_mute(uint8_t role, int on)
+{
+    if (role < NROLES)
+        clip_engine_mute(&g_eng, role, on);
+}
+int live_bridge_muted(uint8_t role) { return clip_engine_muted(&g_eng, role); }
+void live_bridge_mute_all(int on)                    /* leaving LIVE clears every mute */
+{
+    if (on) {
+        uint8_t r;
+        for (r = 0; r < NROLES; r++)
+            clip_engine_mute(&g_eng, r, 1);
+    } else {
+        clip_engine_mute_clear(&g_eng);              /* synchronous: the engine may stop rendering */
+    }
+}
 
 /* ----- queries ----- */
 

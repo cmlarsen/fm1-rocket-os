@@ -65,6 +65,7 @@ uint32_t live_bridge_song_hash(void);                    /* the hash the current
 /* Re-derive the clips from the project, keeping the song's own fields (key map, LIVE SETUP, tempo,
  * name); returns the new hash. `song_baseline` says a loaded song's clips match this hash. */
 uint32_t live_bridge_rebuild(const pattern_t *pats);
+uint32_t live_bridge_rebuild_n(const pattern_t *pats, int npats);   /* T10i: the first npats */
 void     live_bridge_song_baseline(uint32_t pat_hash);
 
 /* T7a: make the bridge the audio source (the clip engine). The clip transport is not reset, so
@@ -102,6 +103,17 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
 void live_bridge_set_bpm(uint16_t bpm_x10);
 uint16_t live_bridge_bpm_x10(void);
 
+/* T10i: the sample distances from the transport's current position to its next 1/8 and 1/16 grid
+ * boundaries (unswung, like the quantize points), for the punch FX. Only meaningful while the
+ * transport is playing; engine.c passes PERFORM_NO_GRID when it is stopped. */
+void live_bridge_grid(uint32_t *next_8, uint32_t *next_16);
+
+/* T10i: role mutes, through the clip engine (T10i's CLIP_CMD_MUTE). Muting releases the role's
+ * sounding notes and suppresses new ones; the transport keeps running. */
+void live_bridge_mute(uint8_t role, int on);
+int  live_bridge_muted(uint8_t role);
+void live_bridge_mute_all(int on);                  /* leaving LIVE clears every mute */
+
 /* UI queries. */
 uint8_t live_bridge_playing_clip(uint8_t role);   /* CLIP_NONE when stopped */
 uint8_t live_bridge_queued_clip(uint8_t role);    /* CLIP_NONE when nothing is queued */
@@ -120,3 +132,6 @@ int live_bridge_key_clip(int key);                /* song.key_clip[key] */
  * it is `void *` here only so this header can be included from ui.c. Fills all 27 clips and the
  * roles; CHORDS and FX stay empty. */
 void live_bridge_map(const pattern_t *pats, void *song);
+/* T10i: the same, over the first `npats` patterns. rc_debug's stress content is a single pattern,
+ * so it need not carry a full NPAT array in the pool. */
+void live_bridge_map_n(const pattern_t *pats, int npats, void *song);
