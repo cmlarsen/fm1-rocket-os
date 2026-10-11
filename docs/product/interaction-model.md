@@ -182,9 +182,13 @@ Deferred: HOME+SAVE capture, OCT± clip banks, and the Gate clip mode.
   their LIVE SETUP rows are a follow-up, so the defaults are **omni** and **PC launch off**.
 - T11i: **CC 120 and CC 123** release everything external MIDI holds, plus the engine's all-off.
 - T11i: **CLOCK IN**, a GLOBAL row, is **Auto** (follow the incoming clock when present) or
-  **Internal** (ignore it). With Auto, F8 ticks set the tempo, Start / Continue / Stop drive the
-  transport, and a small **EXT** indicator shows while the clock is being followed; when the clock
-  stops the transport keeps playing at the last tempo and EXT goes away.
+  **Internal** (ignore it, and keep the song's own tempo). With Auto, F8 ticks set the tempo, and
+  a small **EXT** indicator shows while the clock is being followed; when the clock stops the
+  transport keeps playing at the last tempo and EXT goes away. Switching to Internal restores the
+  song's own `bpm_x10` (the clock never overwrites it).
+- T11i: **Start** (0xFA) restarts at bar 1, step 0, relaunching what was playing; **Continue**
+  (0xFB) resumes from the stop point; **Stop** (0xFC) stops. Song Position Pointer is not
+  supported (the clip engine has no seek).
 - T11i: external MIDI notes, Program Change and the clock reach the app in **STUDIO and LIVE**;
   in **Classic** X0X's own per-part MIDI channels and clock keep working instead.
 

@@ -99,6 +99,8 @@ Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new 
 
 **Measured after TRAM** (`make fw` and `make fw-debug` on deltron): the release POOL is **325,196 B of 344,064** (**18,868 B** spare) and `.data+.bss` is **96,128 B of 98,304**; the debug POOL is **326,988 B of 344,064** (**17,076 B** spare) and `.data+.bss` is **96,228 B**. TRAM shares **one** `song_t` scratch (14,352 B) between `song_io`'s open / clip-count path and the store's recommit path (`sst_recommit_song`); before it each held its own, so the pool carried two (T8i had brought the second). The two paths are main-loop only and never nest: a host/debug-build guard (`song_store_scratch_acquire`) traps a nested acquire. Both builds clear the 8 KiB requirement and the TRAM target of 10,240 B; steps 2 (a separate lz work buffer) and 3 (the undo ring) were not needed.
 
+**Measured after T11i** (`make fw` and `make fw-debug` on deltron): the release POOL is **328,300 B of 344,064** (**15,764 B** spare) and `.data+.bss` is **95,936 B of 98,304**; the debug POOL is **330,092 B of 344,064** (**13,972 B** spare) and `.data+.bss` is **96,052 B**. T11i's MIDI rings — the 256-slot input ring with its arrival stamps and the 256-slot output ring, 3,072 B — are in the pool (the input ring was 64 slots in `.bss`; the extra `midi_live` state, about 320 B, is the only `.bss` growth, so `.bss` actually fell). Both builds keep the 8 KiB pool spare.
+
 ## Invariant: no hung notes (2026-10-11)
 Reviews found hung notes in T3, T7a and T7a's re-review, each through a different view or mode change. The rule:
 - **Every note a key starts lives in one held-note table.** Releasing the key releases that note, whatever view is showing.
