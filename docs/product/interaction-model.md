@@ -148,8 +148,8 @@ The keyboard splits at its natural gaps, the places where two lower keys meet wi
 - **K2** is Space, **K3** is Echo and **K4** is Drive.
 - **FX held or double-tapped** turns the first six lower keys into punch FX: **repeat 1/8, repeat 1/16, tape stop, filter dive, echo throw, freeze**.
   - Tap to latch, hold for momentary.
-  - Upper keys mute roles.
-  - HOME+FX resets everything.
+  - Upper keys mute roles, through the clip engine: a role muted mid-note releases its notes, and unmuting rejoins the clip in time.
+  - HOME+FX resets everything, and leaving LIVE releases every effect and clears every mute.
 - **K1–K4 changes you didn't record revert** when you leave LIVE.
 
 ## STUDIO tasks (R15)
