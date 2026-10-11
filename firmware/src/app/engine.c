@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* X0X audio engine; see engine.h. */
 #include "engine.h"
+#include "live_bridge.h"          /* T3: the LIVE clip engine, rendered in place of the sequencer */
 #include "plat.h"
 #include "../dsp/drum909.h"
 #include "../dsp/drum808.h"
@@ -30,7 +31,10 @@ static drum808_t d808 POOL;
 static bass303_t b303[NBASS] POOL;
 static fxbus_t fx POOL;
 static master_t mst;
-#define DLY_LEN 88200
+/* T3: the delay line is 1.0 s (was 2.0 s, 88,200) — the RAM plan in architecture.md frees
+ * 88,200 B for the LIVE song and clip engine. fxbus's delay time halves itself to fit dlen,
+ * so the longest synced delay is now 1.0 s (check the POOL numbers in reports/T3.md). */
+#define DLY_LEN 44100
 static int16_t dly_buf[DLY_LEN] POOL;
 static motion_t mot;
 static const sound_t *mot_base_snd;    /* the knobs' own values (the project's mirror) */
@@ -657,13 +661,25 @@ void engine_render(int32_t *out_lr, uint32_t n)
     {
         PROF_T(pt);
         drain();
-        if (mot_on)
-            motion_tick(&mot, n);
-        fxbus_set_bpm(&fx, seq_tempo(&seq));
-        seq_advance(&seq, 0, &SINK);
+        if (live_bridge_active()) {
+            /* T3: LIVE owns the transport. The clip engine's events are mapped to this engine's
+             * commands (engine_drum / engine_bass_on / engine_set) and drained here so they land
+             * in this block; X0X's sequencer does not advance. */
+            live_bridge_render(n);
+            drain();
+            fxbus_set_bpm(&fx, (float)live_bridge_bpm_x10() / 10.0f);
+        } else {
+            if (mot_on)
+                motion_tick(&mot, n);
+            fxbus_set_bpm(&fx, seq_tempo(&seq));
+            seq_advance(&seq, 0, &SINK);
+        }
         PROF_ADD(PR_SEQ, pt);
     }
-    while (done < n) {
+    if (live_bridge_active()) {
+        render_sub(out_l, out_r, n);
+        done = n;
+    } else while (done < n) {
         uint32_t k = seq_until_event(&seq, n - done);
         render_sub(out_l + done, out_r + done, k);
         {
@@ -718,6 +734,7 @@ void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t
     mot.base = mot_base;
     mot.apply = mot_apply;
     mot_base_snd = base;
+    live_bridge_init();                                /* T3: the LIVE clip engine */
     for (p = 0; p < NPARTS; p++) {
         mix_level[p] = 1.0f;
         mix_rev[p] = mix_dly[p] = 0.0f;

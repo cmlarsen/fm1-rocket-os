@@ -42,7 +42,10 @@ CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-fu
 FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 # the DSP, the sequencer and the audio engine: separate units at -O2
 O2_UNITS = ["dsp/drum909.c", "dsp/drum808.c", "dsp/bass303.c", "dsp/fxbus.c", "dsp/master.c",
-            "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c"]
+            "seq/sequencer.c", "seq/tb3po.c", "seq/pattern.c", "seq/motion.c", "app/engine.c",
+            "app/live_bridge.c"]
+# the new core modules live at the repo root's core/, not under firmware/src
+CORE_UNITS = ["core/seq/clip_engine.c"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
 # SDK files of AC79NN_SDK_V1.2.1_2023-12-13 (the tested version)
@@ -205,7 +208,7 @@ def build_loader():
 # ---- app
 
 def build_app():
-    flags = [*CFLAGS, *FPU, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
+    flags = [*CFLAGS, *FPU, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen", "-I."]
     if VERSION and os.environ.get("X0X_DEBUG") == "1":
         raise SystemExit("X0X_DEBUG=1 (register peek / poke over USB) is for development builds only")
     for flag in ("X0X_CDC", "X0X_DEBUG"):
@@ -216,6 +219,7 @@ def build_app():
     if VERSION:
         flags.append(f'-DX0X_VERSION="{VERSION}"')
     o2 = [f if f != "-Os" else "-O2" for f in flags]
+    o2.append("-DCLIP_ENGINE_FS=44100")   # T3: the audio sample counter's rate (sequencer.h FS)
     units = [("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
              ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
              ("cc", "-c", FW / "hal" / "fm1_isr.S", "-o", OUT / "fm1_isr.o"),
@@ -226,6 +230,10 @@ def build_app():
     for u in O2_UNITS:
         o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
         units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
+        objs.append(o)
+    for u in CORE_UNITS:
+        o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
+        units.append(("cc", *o2, "-c", SRC / u, "-o", o))
         objs.append(o)
     tc_all(*units)
     elf = OUT / "x0x.elf"
