@@ -507,6 +507,8 @@ int song_validate(const song_t *s)
         return -1;                            /* 20.0 .. 300.0 BPM */
     if (s->swing > 100 || s->quant_default >= NQUANT || s->live_channel > 16)
         return -1;
+    if (s->key > 11 || s->scale >= NSCALES)
+        return -1;
     if (s->pc_launch > 1 || s->stage_lock > 1 || s->has_take > 1)
         return -1;
     nul = 0;                                  /* the name must be terminated inside SONG_NAME_LEN */

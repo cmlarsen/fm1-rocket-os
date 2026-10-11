@@ -8,6 +8,7 @@ enum { ROLE_DRUMS, ROLE_BASS, ROLE_LEAD, ROLE_CHORDS, ROLE_FX, NROLES };
 enum { ENG_909, ENG_808, ENG_303, ENG_FM6, ENG_NOISE, NENGINES };
 enum { CLIP_LOOP, CLIP_ONCE };
 enum { Q_BAR, Q_BEAT, Q_END, NQUANT };
+enum { SCALE_MAJOR, SCALE_MINOR, SCALE_DORIAN, SCALE_PENTA, SCALE_CHROMATIC, NSCALES };
 
 #define ROLE_CLIPS_DRUMS 7u
 #define ROLE_CLIPS_BASS 5u
@@ -95,7 +96,8 @@ typedef struct {
     uint8_t pc_launch;
     uint8_t stage_lock;
     uint8_t has_take;
-    uint8_t rsv[2];
+    uint8_t key;
+    uint8_t scale;
     role_t role[NROLES];
     uint8_t key_clip[NKEYS];
     uint8_t rsv2[1];
