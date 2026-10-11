@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Measure the factory mix against a big-beat reference (Chemical Brothers, Fatboy Slim): a funk
-break up front, a 909 kick under it, clap on 2 and 4, open hats on the off-beats, a 303 line.
+"""Measure the factory mix against a big-beat reference (Chemical Brothers, Fatboy Slim): a 909
+kick, clap on 2 and 4, open hats on the off-beats, an 808, and a 303 line.
 Played through the simulator with the factory sound, rendered whole and part by part (the 909
 voice by voice), then each render's loudness, peak, crest and tonal balance.
 
   tools/mix_report.py [OUTDIR]          (default build/mix; needs build/host/x0x_host)
 
-The break is a real one, for measuring only: build/breaks/ (tools/import_breaks.py from BB Gen's
-samples) loaded into user slot 1 as the simulator would after tools/upload_breaks.py. Without
-those files the built-in 909 loop plays instead. The 808 plays the same groove for its own solo.
-303 A plays its factory TB-3PO line (303 B its own, solo only). Default tempo.
+The 808 plays the same groove for its own solo. 303 A plays its factory TB-3PO line (303 B its
+own, solo only). Default tempo.
 
 Loudness is ITU-R BS.1770 (K-weighted, ungated over the loop): LU, comparable between the
 renders. Peaks are against the codec's full scale (the output is limited at -6 dBFS, Felucca's
@@ -27,7 +25,7 @@ from scipy import signal
 SRC = Path(__file__).resolve().parents[1]
 HOST = SRC / "build" / "host" / "x0x_host"
 FS = 44100
-PARTS = ["909", "808", "303A", "303B", "BREAK"]
+PARTS = ["909", "808", "303A", "303B"]
 
 
 def white(ws):
@@ -36,9 +34,6 @@ def white(ws):
 
 def voice(b, steps):                  # select drum track b, toggle its steps
     return [f"tapkey b{b}"] + white(steps)
-
-
-BREAKS = [SRC / "build" / "breaks" / f"{n}.wav" for n in ("THINK", "FUNKY")]
 
 
 def groove_909(voices=None):
@@ -54,20 +49,11 @@ def groove_808():
             + voice(9, [2, 6, 10, 14]) + voice(7, [3, 11]) + ["turn ALGO -1"])
 
 
-def break_on():
-    s = ["turn ALGO 4"] + white(range(16))
-    if all(b.exists() for b in BREAKS):               # the real breaks: loops A and B
-        s += ["turn SELECT 3", "turn K1 2", "turn K2 2", "turn SELECT -3"]
-    return s + ["turn ALGO -4"]
-
-
-def script(wav, voices=None, play=("909", "303A", "BREAK"), bars=8, raw=False):
+def script(wav, voices=None, play=("909", "303A"), bars=8, raw=False):
     s = ["wait 300"]
     if raw:                           # the balance before the master: its compressor and PUMP off
         s += ["param 6 0 1 0", "param 6 0 6 0"]
-    if all(b.exists() for b in BREAKS):
-        s.append("slot 0 BRK " + " ".join(str(b) for b in BREAKS))
-    s += groove_909(voices) + groove_808() + break_on() + ["tap HOME"]
+    s += groove_909(voices) + groove_808() + ["tap HOME"]
     for i, p in enumerate(PARTS):     # every part not playing: muted on HOME
         if p not in play:
             s.append(f"tapkey b{i}")
@@ -115,7 +101,7 @@ def main():
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else SRC / "build" / "mix"
     out.mkdir(parents=True, exist_ok=True)
     jobs = {"MIX": dict(), "MIX + 808, 303B": dict(play=PARTS), "MIX, raw": dict(raw=True),
-            "BREAK": dict(play=("BREAK",), raw=True), "909": dict(play=("909",), raw=True),
+            "909": dict(play=("909",), raw=True),
             "303A": dict(play=("303A",), raw=True), "303B": dict(play=("303B",), raw=True),
             "808": dict(play=("808",), raw=True)}
     for v in ("BD", "CP", "OH"):

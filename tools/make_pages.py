@@ -6,8 +6,6 @@
   emu/                        X0X in the browser (web/emu: build/emu, from web/emu/build.sh)
   install/index.html          the web installer (web/x0x_installer.html, with fm1pkg.js, fm1ota.js
                               and the package's metadata inlined; Chrome or Edge, Web MIDI)
-  breaks/index.html           your own break loops onto the FM-1 (web/x0x_breaks.html with
-                              x0x_breaks.js inlined; Chrome or Edge, Web MIDI)
   manual/index.html, img/     the manual (tools/manual_html.py, from docs/MANUAL.md)
   new/index.html, img/new/    what's new in each version (the same, from docs/NEW.md)
   firmware/x0x-VERSION.fwsc   the package the installer writes; also the download
@@ -36,7 +34,7 @@ LANDING = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>X0X for the FM-1</title>
-<meta name="description" content="Groovebox firmware for the M-VAVE FM-1: a 909, an 808, two 303s and a breakbeat player.">
+<meta name="description" content="Groovebox firmware for the M-VAVE FM-1: a 909, an 808 and two 303s.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Semi+Condensed:wght@600;700&display=swap">
@@ -71,8 +69,8 @@ a { color: var(--accent); }
 <body>
 <main>
 <h1>X0X</h1>
-<p class="lede">Groovebox firmware for the M-VAVE FM-1. A 909, an 808, two 303s with the TB-3PO
-line generator, and a breakbeat player, all running at once, with patterns, a song mode and
+<p class="lede">Groovebox firmware for the M-VAVE FM-1. A 909, an 808 and two 303s with the TB-3PO
+line generator, all running at once, with patterns, a song mode and
 recorded knob moves.</p>
 <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/cZLYrZaLDUk" title="X0X running on the FM-1"
   allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe></div>
@@ -82,7 +80,6 @@ at your own risk.</div>
   <a href="emu/"><strong>Try it in the browser</strong><span>The same code the FM-1 runs, with sound. Mouse, touch or keyboard; no FM-1 needed.</span></a>
   <div class="card"><strong><a href="install/">Install v__VERSION__</a> <a class="new" href="new/">What's new?</a></strong><span>From Chrome or Edge, with the FM-1 connected by USB. Nothing to install on the computer.</span></div>
   <a href="manual/"><strong>Manual</strong><span>Getting started in ten steps, then everything else.</span></a>
-  <a href="breaks/"><strong>Your own breaks</strong><span>Drop in loops and send them to the BREAK part, from Chrome or Edge.</span></a>
   <a href="firmware/__PKG__"><strong>Download __PKG__</strong><span>For the command-line installer: <code>python3 tools/fm1_install.py __PKG__</code></span></a>
   <a href="__REPO__"><strong>Source</strong><span>GitHub, GPL-3.0. Built on Felucca by Hügelton Instruments.</span></a>
 </nav>
@@ -105,7 +102,7 @@ def main(pkg, version, out):
     name = f"x0x-{re.sub(r'[^A-Za-z0-9.-]', '-', version)}.fwsc"
     if out.exists():
         shutil.rmtree(out)
-    for d in ("install", "manual", "firmware", "breaks", "new"):
+    for d in ("install", "manual", "firmware", "new"):
         (out / d).mkdir(parents=True)
     shutil.copy(pkg, out / "firmware" / name)
     # the installer
@@ -117,12 +114,6 @@ def main(pkg, version, out):
         if page.count(mark) != 1:
             raise SystemExit(f"x0x_installer.html must contain {mark} once")
     (out / "install" / "index.html").write_text(page.replace("/*LIB*/", lib).replace("/*META*/", meta), encoding="utf-8")
-    # the break loop uploader
-    page = (SRC / "web" / "x0x_breaks.html").read_text(encoding="utf-8")
-    if page.count("/*LIB*/") != 1:
-        raise SystemExit("x0x_breaks.html must contain /*LIB*/ once")
-    lib = strip_module((SRC / "web" / "x0x_breaks.js").read_text(encoding="utf-8"))
-    (out / "breaks" / "index.html").write_text(page.replace("/*LIB*/", lib), encoding="utf-8")
     # the manual (a complete page; its images beside it)
     subprocess.run([sys.executable, str(SRC / "tools" / "manual_html.py"), str(SRC / "docs" / "MANUAL.md"),
                     str(out / "manual" / "index.html")], check=True, capture_output=True)
