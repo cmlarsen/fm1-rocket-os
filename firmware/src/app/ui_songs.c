@@ -159,6 +159,9 @@ static void sr_open_new(songs_ui_t *u)
     u->row = (uint8_t)u->tmpl;
 }
 
+/* the menu song's clip count (one flash read when the menu opens, not per frame) */
+static int sr_clip_count(const songs_ui_t *u, int slot);
+
 static void sr_create(songs_ui_t *u, int *action, uint32_t ms)
 {
     int ns;
@@ -224,12 +227,21 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
         return action;
     }
 
-    /* HOME + REC: undo a delete (the store's durable undo) */
+    /* HOME + REC: undo a delete (SONGS owns the one-level delete undo; clip undo is cleared
+     * when the song changes, so outside SONGS it never reaches a delete). */
     if ((down & (1u << B_REC)) && (ev->btn & (1u << B_HOME))) {
-        int rc = u->ops->undelete ? u->ops->undelete(u->ops->ctx) : 0;
+        int can = u->ops->can_undelete ? u->ops->can_undelete(u->ops->ctx) : 0;
+        int rc = can ? (u->ops->undelete ? u->ops->undelete(u->ops->ctx) : 0) : 0;
         u->home_used = 1;              /* the release must not go back */
         ui_songs_refresh(u);
         sr_say(u, rc == 1 ? "RESTORED" : "CANNOT UNDO", ev->ms);
+        u->prev_btn = ev->btn;
+        u->prev_keys = ev->keys;
+        return action;
+    }
+    /* HOME + PLAY: nothing here (no redo of a delete), and the HOME release must not go back */
+    if ((down & (1u << B_PLAY)) && (ev->btn & (1u << B_HOME))) {
+        u->home_used = 1;
         u->prev_btn = ev->btn;
         u->prev_keys = ev->keys;
         return action;
@@ -259,6 +271,7 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
                 u->slot = (uint8_t)(u->row - 1);
                 u->screen = SO_MENU;
                 u->row = 0;
+                u->menu_clips = sr_clip_count(u, u->slot);   /* cache: no flash read per draw */
             } else if (u->row == 0) {
                 sr_open_new(u);
             }
@@ -594,10 +607,10 @@ static void sr_menu_meta(char *out, uint32_t cap, const songs_ui_t *u)
 {
     const song_row_t *r = &u->rows[u->slot];
     char *q = out;
-    int n = sr_clip_count(u, u->slot);
+    int n = u->menu_clips;                 /* cached when the menu opened: no flash read per draw */
     q = sr_itoa(q, n < 0 ? 0 : n);
     q = sr_cat(q, " clips ");
-    q = sr_cat(q, r->has_take ? "1 take" : "0 take");
+    q = sr_cat(q, r->has_take ? "1 take" : "0 takes");
     (void)cap;
 }
 static void sr_menu(const songs_ui_t *u)
@@ -647,7 +660,7 @@ static void sr_delete(const songs_ui_t *u, uint32_t ms)
     const song_row_t *r = &u->rows[u->slot];
     char meta[24];
     int pct = 0;
-    cv_rect(0, SY(30), 240, 150, TOK_BG);   /* blank the rows behind the dialog's edges */
+    cv_rect(0, SY(30), 240, 184, TOK_BG);   /* blank the rows and the menu behind the dialog */
     sr_rrect(14, 34, 212, 140, 6, TOK_SURF);
     sr_frame(14, 34, 212, 140, TOK_LINE);
     if (u->del_done)
@@ -660,8 +673,8 @@ static void sr_delete(const songs_ui_t *u, uint32_t ms)
     sr_text(96, sr_vc(&AF_M, 64, 18), &AF_M, r->name[0] ? r->name : "SONG", TOK_THEME);
     sr_menu_meta(meta, sizeof meta, u);
     sr_text(96, sr_vc(&AF_S, 86, 14), &AF_S, meta, TOK_MID);
-    sr_text_c(120, sr_vc(&AF_S, 184, 14), &AF_S, "UNDO BRINGS IT BACK", TOK_MID);
-    sr_text_c(120, sr_vc(&AF_S, 198, 14), &AF_S, "UNTIL THE NEXT DELETE", TOK_MID);
+    sr_text_c(120, sr_vc(&AF_S, 146, 14), &AF_S, "UNDO BRINGS IT BACK", TOK_MID);
+    sr_text_c(120, sr_vc(&AF_S, 160, 14), &AF_S, "UNTIL THE NEXT DELETE", TOK_MID);
 }
 static void sr_footer_list(void)
 {

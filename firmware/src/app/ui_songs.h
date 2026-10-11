@@ -53,6 +53,7 @@ typedef struct {
     uint8_t  slot;                     /* the song the menu / rename / delete acts on */
     song_row_t rows[SONGS_SLOTS];
     int      nused;                    /* songs in use (the meter's numerator) */
+    int      menu_clips;               /* the menu song's clip count, cached when it opens */
 
     /* SO_NEW */
     uint8_t  tmpl;                     /* 0 Empty, 1 Starter, 2 Copy current */
