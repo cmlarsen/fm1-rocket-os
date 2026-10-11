@@ -122,29 +122,12 @@ int plat_song_program(uint32_t off, const void *src, uint32_t n)
     return st_prog(off, src, n);
 }
 
-/* the FM6 patch sector (T5i): read in place through the XIP window, as the user samples are */
+/* the FM6 patch sector (T5i): read in place through the XIP window */
 const uint8_t *plat_fm6_vbank(uint32_t *len)
 {
     if (len)
         *len = PLAT_FM6_VBANK_LEN;
     return flash_ok ? fm1_xip_ptr(PLAT_FM6_VBANK_OFF) : 0;
-}
-
-int plat_slot_zones(int k) { return (k >= 0 && k < SMP_USER_SLOTS) ? usr_nz[k] : 0; }
-
-const uint8_t *plat_slot(int k, int z, uint32_t *nsamples, uint32_t *rate, char name[9])
-{
-    const smp_user_hdr_t *h;
-    uint32_t i;
-    if (k < 0 || k >= SMP_USER_SLOTS || z < 0 || z >= usr_nz[k])
-        return 0;
-    h = (const smp_user_hdr_t *)smp_user_xip((uint32_t)k);
-    for (i = 0; i < 8u; i++)
-        name[i] = h->name[i] >= 32 && h->name[i] < 127 ? h->name[i] : 0;
-    name[8] = 0;
-    *nsamples = h->zone[z].n;
-    *rate = (h->zone[z].rate * 44100u + 32768u) >> 16;
-    return smp_user_xip((uint32_t)k) + SMP_USER_DATA + h->zone[z].off;
 }
 
 static volatile uint32_t audio_cpu_pct, audio_xruns, audio_peak_pct;

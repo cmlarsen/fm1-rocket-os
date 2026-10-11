@@ -79,6 +79,7 @@ typedef struct {
     uint32_t song_seq;           /* sequence number of the slot's song record */
     uint32_t take_seq;
     uint32_t prev_take_seq;
+    uint32_t song_tag;           /* T6i: the tag saved with the record (the project pattern hash) */
     uint8_t has_song;
     uint8_t deleted;             /* the newest record carries the deleted flag (persists) */
 } song_store_slot_t;
@@ -87,6 +88,9 @@ typedef struct {
     song_flash_t fb;
     song_store_slot_t slot[SONG_STORE_SLOTS];
     uint32_t next_seq;
+    /* T6i: an extent a save failed on, this session only, so the next save picks another
+     * (a power cut or a bad block must not keep retrying the same extent). */
+    uint8_t song_ext_bad[SONG_STORE_SONG_EXTENTS];
     uint8_t ready;
 } song_store_t;
 
@@ -104,6 +108,12 @@ typedef struct {
 int song_store_init(song_store_t *st, const song_flash_t *fb);
 
 int song_store_save(song_store_t *st, int slot, const song_t *song);
+/* T6i: save with a 32-bit tag kept in the record header (song_io stores the X0X project's pattern
+ * hash, so a boot knows whether the song's clips still match the project). `song_store_save` is
+ * this with tag 0. */
+int song_store_save_tag(song_store_t *st, int slot, const song_t *song, uint32_t tag);
+/* the tag of the slot's newest valid song record (0 when none) */
+uint32_t song_store_tag(const song_store_t *st, int slot);
 int song_store_load(song_store_t *st, int slot, song_t *out);      /* 0 = loaded; a deleted slot reads as free */
 int song_store_delete(song_store_t *st, int slot);                 /* re-commits with the deleted flag; survives reboot */
 int song_store_undelete(song_store_t *st, int slot);               /* re-commits with the flag cleared */

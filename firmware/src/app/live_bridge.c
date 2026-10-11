@@ -24,9 +24,8 @@
 static live_song_t g_song LIVE_POOL;
 static clip_engine_t g_eng LIVE_POOL;
 static uint8_t g_active;
-static uint8_t g_song_locked;                         /* T6i: slot 0 holds the song: LIVE must not remap */
-static uint8_t g_song_mapped;                         /* T6i: the project has been mapped into g_song at least once */
-static uint32_t g_pat_hash;                           /* the mapped project's pattern hash */
+static uint8_t g_song_ready;                          /* T6i: g_song holds a loaded song or a mapped project */
+static uint32_t g_pat_hash;                           /* the project pattern hash the clips match */
 static uint8_t g_stop_q[NROLES];                      /* a stop on the role is pending (for the LED) */
 
 /* T10: the clip engine's step length is fixed at compile time, so it must be built at the same
@@ -255,27 +254,65 @@ void live_bridge_map(const pattern_t *pats, void *songp)
 void live_bridge_init(void)
 {
     g_active = 0;
-    g_song_locked = 0;                                /* T6i: remap from the project until a song is stored */
-    g_song_mapped = 0;
+    g_song_ready = 0;                                 /* T6i: nothing mapped or loaded yet */
     clip_engine_init(&g_eng, &g_song);
 }
 
-/* T6i: the current song, owned here. song_io reads and edits it and locks it once slot 0 is in
- * charge, so LIVE uses the stored song instead of a fresh mapping. */
+/* T6i: the current song, owned here. song_io reads and edits it and tracks the project pattern hash
+ * the clips were derived from, so LIVE rebuilds them when the project changes. */
 void *live_bridge_song(void) { return &g_song; }
 void live_bridge_song_reload(void) { clip_engine_init(&g_eng, &g_song); }
-void live_bridge_lock_song(int on) { g_song_locked = (uint8_t)(on != 0); }
-
-/* T6i: the derived clips only depend on the project's patterns, so LIVE rebuilds them from the
- * project when those change, and otherwise uses the current song (its key map and other edits
- * survive). A stored song (g_song_locked) is never rebuilt. */
-static uint32_t pats_hash(const pattern_t *pats)
+uint32_t live_bridge_pats_hash(const pattern_t *pats)
 {
     const uint8_t *p = (const uint8_t *)pats;
     uint32_t h = 2166136261u, n;
     for (n = 0; n < (uint32_t)sizeof(pattern_t) * NPAT; n++)
         h = (h ^ p[n]) * 16777619u;
     return h;
+}
+uint32_t live_bridge_song_hash(void) { return g_pat_hash; }
+
+/* Re-derive the clips from the project. The song's own fields (the key map, the LIVE SETUP options,
+ * the tempo and the name) are the performer's and survive a rebuild; the clips and roles are the
+ * project's. */
+static void rebuild_clips(const pattern_t *pats)
+{
+    uint8_t keys[NKEYS];
+    char name[SONG_NAME_LEN];
+    uint16_t bpm = g_song.bpm_x10;
+    uint8_t q = g_song.quant_default, lc = g_song.live_channel, pc = g_song.pc_launch;
+    uint8_t sl = g_song.stage_lock, ht = g_song.has_take;
+    int k;
+    for (k = 0; k < (int)NKEYS; k++)
+        keys[k] = g_song.key_clip[k];
+    for (k = 0; k < (int)SONG_NAME_LEN; k++)
+        name[k] = g_song.name[k];
+    live_bridge_map(pats, &g_song);
+    for (k = 0; k < (int)NKEYS; k++)
+        g_song.key_clip[k] = keys[k];
+    for (k = 0; k < (int)SONG_NAME_LEN; k++)
+        g_song.name[k] = name[k];
+    g_song.bpm_x10 = bpm;
+    g_song.quant_default = q;
+    g_song.live_channel = lc;
+    g_song.pc_launch = pc;
+    g_song.stage_lock = sl;
+    g_song.has_take = ht;
+    g_song.swing = pats[0].swing ? pats[0].swing : 0;  /* the 909's shuffle is the song's */
+}
+
+uint32_t live_bridge_rebuild(const pattern_t *pats)
+{
+    rebuild_clips(pats);
+    g_pat_hash = live_bridge_pats_hash(pats);
+    g_song_ready = 1;
+    return g_pat_hash;
+}
+
+void live_bridge_song_baseline(uint32_t pat_hash)
+{
+    g_pat_hash = pat_hash;                            /* a stored song's clips match this project */
+    g_song_ready = 1;
 }
 
 static uint16_t clamp_bpm(uint16_t b)
@@ -285,21 +322,13 @@ static uint16_t clamp_bpm(uint16_t b)
     return b;
 }
 
-void live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
+int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
 {
-    uint32_t h = pats_hash(pats);
-    if (!g_song_locked && (!g_song_mapped || h != g_pat_hash)) {
-        uint8_t keys[NKEYS];                           /* T6i: a re-map keeps the key assignments */
-        int k;
-        for (k = 0; k < (int)NKEYS; k++)
-            keys[k] = g_song.key_clip[k];
-        live_bridge_map(pats, &g_song);
-        if (g_song_mapped)
-            for (k = 0; k < (int)NKEYS; k++)
-                g_song.key_clip[k] = keys[k];
-        g_song.swing = pats[0].swing ? pats[0].swing : 0;  /* the 909's shuffle is the song's */
-        g_pat_hash = h;
-        g_song_mapped = 1;
+    uint32_t h = live_bridge_pats_hash(pats);
+    int rebuilt = 0;
+    if (!g_song_ready || h != g_pat_hash) {           /* the project changed, or nothing built yet */
+        live_bridge_rebuild(pats);
+        rebuilt = 1;
     }
     g_song.bpm_x10 = clamp_bpm(bpm_x10 ? bpm_x10 : 1200u);
     clip_engine_init(&g_eng, &g_song);
@@ -310,6 +339,7 @@ void live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
         for (i = 0; i < NROLES; i++)
             g_stop_q[i] = 0;
     }
+    return rebuilt;
 }
 
 void live_bridge_exit(void)

@@ -50,7 +50,10 @@ static void live_enter(void)
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
     live_clear_held();
-    live_bridge_enter(&proj.pat[0], bpm); /* stops X0X's transport and releases its voices (engine_all_off) */
+    if (live_bridge_enter(&proj.pat[0], bpm))   /* stops X0X's transport and releases its voices
+                                                 * (engine_all_off); 1 = it rebuilt the clips from the
+                                                 * project, so the song changed (T6i) */
+        song_io_mark_dirty();
     set_view(V_LIVE);
     say("LIVE", 0);
 }

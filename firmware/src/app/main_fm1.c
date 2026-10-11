@@ -270,15 +270,13 @@ static void safe_main(void)
 static void fm1_main(void)
 {
     int32_t knob = 512 * 16;
-    uint32_t last_frame = 0, k;
+    uint32_t last_frame = 0;
     {
         uint32_t f = irq_save();
         flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
         irq_restore(f);
         if (flash_ok) {
-            fl_plain_window_init();                 /* user sample slots read as plaintext through XIP */
-            for (k = 0; k < SMP_USER_SLOTS; k++)
-                smp_user_scan(k);
+            fl_plain_window_init();                 /* the FM6 patch sector reads as plaintext through XIP */
             ota_boot_cleanup();
         }
     }
@@ -341,6 +339,7 @@ static void fm1_main(void)
     fm1_delay_ms(300);
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui_init();
+    song_io_boot(&proj.pat[0], proj.set.bpm_x10);   /* T6i: the current song, from flash or the project */
 
     for (;;) {
         fm1_wdt_feed();
@@ -387,6 +386,9 @@ static void fm1_main(void)
         if (usb.ota_req) {
             usb.ota_req = 0;
             seq_stop(&seq);
+            if (!live_bridge_active())
+                song_io_flush();                    /* T6i: save a dirty song if it is safe; never re-init
+                                                     * the store here (ui_init below leaves it alone) */
             if (flash_ok)
                 ota_session();                      /* returns only if nothing was committed */
             lcd_fill(0, 0, 240, 240, C_BLACK);

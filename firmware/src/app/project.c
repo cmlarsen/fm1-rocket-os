@@ -16,6 +16,7 @@
 #include "../dsp/drum909.h"            /* DR_SD (the sound's revisions) */
 #include "../dsp/master.h"             /* MST_* (the sound's revisions) */
 #include "song_io.h"                   /* T6i: the song store, saved beside the project */
+#include "live_bridge.h"               /* T6i: keep the song's clips in step with the project */
 #include "lz.c"
 
 project_t proj;
@@ -58,9 +59,8 @@ void project_defaults(void)
 /* how full the stream's room is, in % (GLO > ABOUT) */
 int project_mem_pct(void) { return (int)((packed_len * 100u + STREAM_CAP - 1u) / STREAM_CAP); }
 
-/* object payload: format word + body (T6i: in .pool, so song_store.c's own lz.c copy does not
- * push .bss past the 96 KiB RAM region) */
-static uint8_t io_buf[PLAT_STORE_MAX] X0X_POOL __attribute__((aligned(4)));
+/* object payload: format word + body */
+static uint8_t io_buf[PLAT_STORE_MAX] __attribute__((aligned(4)));
 
 /* what each object last held on the flash (a hash of its payload), so a save writes only the
  * objects that changed: an autosave usually erases one or two sectors, not six */
@@ -523,6 +523,13 @@ int project_save(void)
         int rc = save_stream();
         if (rc)
             return rc;              /* -7 (or a write error): nothing more was written */
+    }
+    /* T6i: the project just changed. Re-derive the song's clips from it so the persisted song
+     * (saved next, with the matching hash) keeps STUDIO edits reaching LIVE across a reboot. Only
+     * when they actually differ; the song's own fields (key map, LIVE SETUP, tempo) are kept. */
+    if (live_bridge_pats_hash(&proj.pat[0]) != live_bridge_song_hash()) {
+        live_bridge_rebuild(&proj.pat[0]);
+        song_io_mark_dirty();
     }
     return song_io_flush();         /* T6i: the song, after the project, in the same idle window */
 }

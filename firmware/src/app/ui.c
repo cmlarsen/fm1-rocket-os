@@ -3938,7 +3938,6 @@ void ui_init(void)
     for (i = 0; i < 4; i++)
         blit_hash[i] = 0;
     build_pages();
-    song_io_boot(&proj.pat[0], proj.set.bpm_x10);   /* T6i: the current song, from flash or the project */
     undo_start();                                   /* the project as loaded is where undo stops */
 }
 
@@ -3957,7 +3956,7 @@ static void autosave(void)
         save_project();
         return;
     }
-    if ((!ui.dirty && !song_io_dirty()) || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop || ui.rec || perf_testing() ||
+    if ((!ui.dirty && !song_io_wants_save()) || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop || ui.rec || perf_testing() ||
         ui.overlay == O_ASK || now - ui.act_t < AUTOSAVE_QUIET || (ui.saved_t && now - ui.saved_t < AUTOSAVE_GAP))
         return;
     ui.saved_t = now;

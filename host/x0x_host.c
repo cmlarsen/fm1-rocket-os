@@ -18,8 +18,6 @@
  *                                VEL 0 is a note off. Through the C_BON / C_BOFF command path (the
  *                                engine clamps NOTE to 0..127, so a test may pass more).
  *   alloff                       the panic all-notes-off (engine_all_off)
- *   slot K NAME A.wav [B.wav..]  user sample slot K (0..2): one loop (zone) per WAV, encoded here
- *   slotimg K F.hdr F.bin       slot K from tools/fm1_sample_upload.py's image (the device format)
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
  *   wav FILE | wavstop           start / stop recording the output
  *   load N                       the overload guard sees every block cost N% (-1: as measured)
@@ -165,6 +163,7 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
 static uint8_t song_flash[HOST_SONG_SIZE];
 static uint32_t song_writes;                  /* erase + program ops (the scenarios count these) */
 static long song_cut = -1, song_ops;          /* songcut N: die at op N (-1 = no cut) */
+static int song_fail_prog;                     /* songfail: the next program op fails once */
 
 static int in_song_region(uint32_t off, uint32_t n)
 {
@@ -198,6 +197,10 @@ int plat_song_program(uint32_t off, const void *src, uint32_t n)
     if (!in_song_region(off, n) || n == 0 || n > 256u || ((off & 0xFFu) + n) > 256u)
         return -1;
     song_writes++;
+    if (song_fail_prog) {                                 /* T6i: a bad block: refuse this program once */
+        song_fail_prog = 0;
+        return -9;
+    }
     if (song_cut >= 0 && song_ops >= song_cut) {          /* the power died inside the page */
         for (i = 0; i < n / 2u; i++)
             song_flash[off - HOST_SONG_BASE + i] &= s[i];
@@ -211,60 +214,6 @@ int plat_song_program(uint32_t off, const void *src, uint32_t n)
 }
 /* the FM6 patch sector: the simulator has no such sector (T5i), so the engine uses its ROM voices */
 const uint8_t *plat_fm6_vbank(uint32_t *len) { if (len) *len = 0; return 0; }
-
-/* sample slots, two ways in:
- *  - slotimg: a slot image exactly as tools/fm1_sample_upload.py writes it, read by the firmware's own
- *    slots.c (the device path: what the upload tool writes is what the firmware parses);
- *  - slot: WAVs encoded here, one zone each (quick, for scenarios that do not test the format). */
-static uint8_t slot_img[3][0x14000];
-static int slot_is_img[3];
-#define SMP_USER_XIP(k) ((const uint8_t *)slot_img[k])
-static uint32_t st_crc32(const void *p, uint32_t n)
-{
-    const uint8_t *b = p;
-    uint32_t c = 0xFFFFFFFFu, k;
-    while (n--) {
-        c ^= *b++;
-        for (k = 0; k < 8; k++)
-            c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-    }
-    return ~c;
-}
-#include "../firmware/src/app/slots.c"
-
-/* WAV slots */
-static uint8_t *slot_data[PLAT_NSLOTS][PLAT_SLOT_ZONES];
-static uint32_t slot_n[PLAT_NSLOTS][PLAT_SLOT_ZONES], slot_rate[PLAT_NSLOTS][PLAT_SLOT_ZONES];
-static int slot_nz[PLAT_NSLOTS];
-static char slot_name[PLAT_NSLOTS][9];
-int plat_slot_zones(int k)
-{
-    if (k < 0 || k >= PLAT_NSLOTS)
-        return 0;
-    return slot_is_img[k] ? usr_nz[k] : slot_nz[k];
-}
-const uint8_t *plat_slot(int k, int z, uint32_t *ns, uint32_t *rate, char name[9])
-{
-    if (k >= 0 && k < PLAT_NSLOTS && slot_is_img[k]) {    /* plat_fm1.c's plat_slot, verbatim */
-        const smp_user_hdr_t *h;
-        uint32_t i;
-        if (z < 0 || z >= usr_nz[k])
-            return 0;
-        h = (const smp_user_hdr_t *)smp_user_xip((uint32_t)k);
-        for (i = 0; i < 8u; i++)
-            name[i] = h->name[i] >= 32 && h->name[i] < 127 ? h->name[i] : 0;
-        name[8] = 0;
-        *ns = h->zone[z].n;
-        *rate = (h->zone[z].rate * 44100u + 32768u) >> 16;
-        return smp_user_xip((uint32_t)k) + SMP_USER_DATA + h->zone[z].off;
-    }
-    if (k < 0 || k >= PLAT_NSLOTS || z < 0 || z >= slot_nz[k])
-        return 0;
-    *ns = slot_n[k][z];
-    *rate = slot_rate[k][z];
-    memcpy(name, slot_name[k], 9);
-    return slot_data[k][z];
-}
 
 static uint32_t cpu_pct, cpu_peak;
 static int load_force = -1;                      /* script "load N": the guard sees N%, -1 measured */
@@ -582,6 +531,7 @@ static void boot(void)
     project_apply_io();                             /* clock and notes out, the MIDI channels, the output */
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui_init();
+    song_io_boot(&proj.pat[0], proj.set.bpm_x10);   /* T6i: the current song, from flash or the project */
 }
 
 static void run_ms(uint32_t ms)
@@ -675,122 +625,6 @@ static int key_of(const char *s)
     if (s[0] == 'b')
         return BLACK_K[atoi(s + 1) % 11];
     return atoi(s);
-}
-
-/* IMA ADPCM encoder (tools/sampleio.py's) */
-static const int16_t IMA_STEP_T[89] = {
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
-    107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
-    876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428,
-    4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350,
-    22385, 24623, 27086, 29794, 32767};
-static const int8_t IMA_IDX_T[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
-static void ima_encode(const int16_t *x, uint32_t n, uint8_t *out)
-{
-    int pred = 0, idx = 0;
-    uint32_t i;
-    for (i = 0; i < n; i++) {
-        int step = IMA_STEP_T[idx], diff = x[i] - pred, code = 0, vd = step >> 3;
-        if (diff < 0) {
-            code = 8;
-            diff = -diff;
-        }
-        if (diff >= step) {
-            code |= 4;
-            diff -= step;
-            vd += step;
-        }
-        if (diff >= step >> 1) {
-            code |= 2;
-            diff -= step >> 1;
-            vd += step >> 1;
-        }
-        if (diff >= step >> 2) {
-            code |= 1;
-            vd += step >> 2;
-        }
-        pred = code & 8 ? pred - vd : pred + vd;
-        pred = pred > 32767 ? 32767 : pred < -32768 ? -32768 : pred;
-        idx += IMA_IDX_T[code & 7];
-        idx = idx < 0 ? 0 : idx > 88 ? 88 : idx;
-        if (i & 1)
-            out[i >> 1] |= (uint8_t)(code << 4);
-        else
-            out[i >> 1] = (uint8_t)code;
-    }
-}
-
-static int load_slot(int k, int z, const char *path)
-{
-    FILE *f = fopen(path, "rb");
-    uint8_t h[12];
-    uint32_t rate = 44100, n = 0;
-    uint16_t ch = 1, bits = 16;
-    int16_t *x = 0;
-    if (!f)
-        return -1;
-    if (fread(h, 1, 12, f) != 12 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) {
-        fclose(f);
-        return -1;
-    }
-    for (;;) {
-        uint8_t c[8];
-        uint32_t sz;
-        if (fread(c, 1, 8, f) != 8)
-            break;
-        sz = (uint32_t)c[4] | (uint32_t)c[5] << 8 | (uint32_t)c[6] << 16 | (uint32_t)c[7] << 24;
-        if (!memcmp(c, "fmt ", 4)) {
-            uint8_t fm[16];
-            if (fread(fm, 1, 16, f) != 16)
-                break;
-            ch = (uint16_t)(fm[2] | fm[3] << 8);
-            rate = (uint32_t)fm[4] | (uint32_t)fm[5] << 8 | (uint32_t)fm[6] << 16 | (uint32_t)fm[7] << 24;
-            bits = (uint16_t)(fm[14] | fm[15] << 8);
-            fseek(f, (long)(sz - 16 + (sz & 1)), SEEK_CUR);
-        } else if (!memcmp(c, "data", 4)) {
-            uint32_t frames = sz / (ch * (bits / 8u));
-            uint8_t *raw = malloc(sz);
-            if (fread(raw, 1, sz, f) != sz) {
-                free(raw);
-                break;
-            }
-            /* to mono 22050 (the slots' rate): average channels, decimate by 2 when 44.1k */
-            {
-                uint32_t step = rate >= 44100 ? 2 : 1, j;
-                x = malloc(sizeof(int16_t) * (frames / step + 1));
-                for (j = 0; j + step <= frames; j += step) {
-                    int32_t acc = 0;
-                    uint32_t s, cc;
-                    for (s = 0; s < step; s++)
-                        for (cc = 0; cc < ch; cc++) {
-                            const uint8_t *p = raw + ((j + s) * ch + cc) * (bits / 8u);
-                            int32_t v = bits == 16 ? (int16_t)(p[0] | p[1] << 8) : (int32_t)((p[0] | p[1] << 8 | p[2] << 16) << 8) >> 16;
-                            acc += v;
-                        }
-                    x[n++] = (int16_t)(acc / (int32_t)(step * ch));
-                }
-                rate /= step;
-            }
-            free(raw);
-            break;
-        } else {
-            fseek(f, (long)(sz + (sz & 1)), SEEK_CUR);
-        }
-    }
-    fclose(f);
-    if (!x || !n)
-        return -1;
-    if (n > 2u * (0x14000u - 512u))
-        n = 2u * (0x14000u - 512u);                  /* an 80 KiB slot */
-    free(slot_data[k][z]);
-    slot_data[k][z] = calloc(1, (n + 1) / 2 + 1);
-    ima_encode(x, n, slot_data[k][z]);
-    slot_n[k][z] = n;
-    slot_rate[k][z] = rate;
-    if (z + 1 > slot_nz[k])
-        slot_nz[k] = z + 1;
-    free(x);
-    return 0;
 }
 
 static bpart_t line_snap[NBASS];                  /* "snapline" */
@@ -919,6 +753,8 @@ static int expect(const char *what, const char *val)
         got = song_io_saves();
     else if (!strcmp(what, "songdirty"))           /* T6i: the current song changed since the last save */
         got = song_io_dirty();
+    else if (!strcmp(what, "songfailed"))          /* T6i: the last song save failed; no retry until an edit */
+        got = song_io_failed();
     else if (!strcmp(what, "songloaded"))          /* T6i: the current song came from slot 0 */
         got = song_io_loaded();
     else if (!strncmp(what, "keyclip", 7))         /* T6i: keyclipK, the current song's key -> clip map */
@@ -1177,45 +1013,7 @@ int main(int argc, char **argv)
             run_ms(1);
         } else if (!strcmp(cmd, "master"))
             master = (uint32_t)atoi(a);
-        else if (!strcmp(cmd, "slot")) {                /* slot K NAME a.wav [b.wav ...]: one zone each */
-            char *tok, *rest = line + 4;
-            int k, z = 0;
-            strtok(rest, " \t\n");                          /* K */
-            k = atoi(a);
-            tok = strtok(0, " \t\n");                      /* NAME */
-            snprintf(slot_name[k], sizeof slot_name[k], "%s", tok ? tok : "");
-            slot_nz[k] = 0;
-            while ((tok = strtok(0, " \t\n")) && z < PLAT_SLOT_ZONES) {
-                if (load_slot(k, z++, tok)) {
-                    printf("line %d: cannot load %s\n", lineno, tok);
-                    return 2;
-                }
-            }
-        } else if (!strcmp(cmd, "slotimg")) {          /* slotimg K FILE.hdr FILE.bin: as uploaded */
-            int k = atoi(a);
-            FILE *fh = fopen(b, "rb"), *fd = fopen(c, "rb");
-            size_t nh, nd;
-            if (!fh || !fd || k < 0 || k > 2) {
-                printf("line %d: cannot read the slot image\n", lineno);
-                return 2;
-            }
-            memset(slot_img[k], 0xFF, sizeof slot_img[k]);       /* erased flash */
-            nh = fread(slot_img[k], 1, sizeof(smp_user_hdr_t), fh);   /* SMP_END writes the header, */
-            nd = fread(slot_img[k] + SMP_USER_DATA, 1, sizeof slot_img[k] - SMP_USER_DATA, fd);   /* SMP_WRITE the data */
-            fclose(fh);
-            fclose(fd);
-            (void)nh;
-            {
-                const smp_user_hdr_t *h = (const smp_user_hdr_t *)slot_img[k];
-                if (st_crc32(slot_img[k] + SMP_USER_DATA, h->data_len) != h->crc || nd < h->data_len) {
-                    printf("line %d: slot image CRC mismatch (the device would refuse it)\n", lineno);
-                    return 2;
-                }
-            }
-            slot_is_img[k] = 1;
-            smp_user_scan((uint32_t)k);
-            printf("  slot %d: %d zone(s) from the image\n", k, usr_nz[k]);
-        } else if (!strcmp(cmd, "midi")) {
+        else if (!strcmp(cmd, "midi")) {
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
             min_q[mi_w++ % MQ] = cin | s << 8 | d1 << 16 | d2 << 24;
@@ -1408,6 +1206,8 @@ int main(int argc, char **argv)
             }
         } else if (!strcmp(cmd, "songcut")) {           /* T6i: the power dies at song flash op N */
             song_cut = (long)atoi(a);
+        } else if (!strcmp(cmd, "songfail")) {          /* T6i: the next song program fails once */
+            song_fail_prog = 1;
         } else if (!strcmp(cmd, "songops")) {           /* T6i: report the song flash op counter */
             printf("  song ops %ld writes %u\n", song_ops, song_writes);
         } else if (!strcmp(cmd, "reboot")) {

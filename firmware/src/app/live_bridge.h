@@ -54,15 +54,23 @@ typedef struct {
 void live_bridge_init(void);
 
 /* T6i: the current song. `song_io` reads and edits it (a model.h `song_t *`, void here so this
- * header keeps X0X's own `song_t` out), re-inits the clip engine after a change, and locks it so
- * LIVE stops rebuilding from the project once slot 0 holds the song. */
+ * header keeps X0X's own `song_t` out), re-inits the clip engine after a change, and keeps a hash
+ * of the project's patterns the song's clips were derived from, so LIVE (and a boot) can rebuild
+ * them when the project changed. */
 void *live_bridge_song(void);
 void  live_bridge_song_reload(void);
-void  live_bridge_lock_song(int on);
+uint32_t live_bridge_pats_hash(const pattern_t *pats);   /* FNV-1a over proj.pat */
+uint32_t live_bridge_song_hash(void);                    /* the hash the current clips match */
+/* Re-derive the clips from the project, keeping the song's own fields (key map, LIVE SETUP, tempo,
+ * name); returns the new hash. `song_baseline` says a loaded song's clips match this hash. */
+uint32_t live_bridge_rebuild(const pattern_t *pats);
+void     live_bridge_song_baseline(uint32_t pat_hash);
 
 /* Build the song from the project's patterns and make the bridge the audio source. The clip
- * transport starts stopped. `pats` is proj.pat (NPAT patterns), `bpm_x10` the project tempo. */
-void live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10);
+ * transport starts stopped. `pats` is proj.pat (NPAT patterns), `bpm_x10` the project tempo.
+ * T6i: returns 1 when it rebuilt the clips from the project (its patterns changed since the last
+ * rebuild), 0 when the current song was already the project's. */
+int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10);
 
 /* Stop the clip transport, release every sounding note and hand the audio back to X0X. */
 void live_bridge_exit(void);

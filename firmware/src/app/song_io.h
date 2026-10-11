@@ -23,6 +23,8 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10);
 
 int  song_io_loaded(void);          /* 1: the current song came from slot 0 (not mapped from the project) */
 int  song_io_dirty(void);           /* the current song changed since the last save */
+int  song_io_failed(void);          /* the last save failed; no retry until the next edit (T6i item 3) */
+int  song_io_wants_save(void);      /* dirty and not failed: what the autosave gate acts on */
 void song_io_mark_dirty(void);
 int  song_io_saves(void);           /* successful saves since boot (tests/scenarios) */
 

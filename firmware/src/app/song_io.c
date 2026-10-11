@@ -31,7 +31,7 @@ static const song_flash_t FB = { fb_read, fb_erase, fb_program, 0 };
 
 static song_store_t store SONG_POOL;
 static undo_stack_t undo SONG_POOL;
-static uint8_t ready, dirty, loaded;
+static uint8_t ready, dirty, loaded, failed;
 static uint32_t saves;
 
 static song_t *song(void) { return (song_t *)live_bridge_song(); }
@@ -43,18 +43,23 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10)
     ready = 0;
     loaded = 0;
     dirty = 0;
+    failed = 0;
     if (song_store_load(&store, 0, song()) == 0) {      /* slot 0 holds a valid, undeleted song */
         loaded = 1;
-        live_bridge_lock_song(1);                       /* LIVE uses it as it is; no fresh mapping */
+        if (live_bridge_pats_hash(pats) != song_store_tag(&store, 0)) {
+            live_bridge_rebuild(pats);                  /* the project changed since the song was saved */
+            dirty = 1;
+        } else {
+            live_bridge_song_baseline(song_store_tag(&store, 0));
+        }
     } else {
-        live_bridge_lock_song(0);
-        live_bridge_map(pats, song());
+        live_bridge_rebuild(pats);                      /* built from the project */
         if (bpm_x10 < 200u)
             bpm_x10 = 200u;
         else if (bpm_x10 > 3000u)
             bpm_x10 = 3000u;
         song()->bpm_x10 = bpm_x10;
-        dirty = 1;                                      /* built from the project: write it back */
+        dirty = 1;                                      /* it must be written back */
     }
     ready = 1;
     live_bridge_song_reload();                          /* the clip engine follows the new song */
@@ -62,25 +67,30 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10)
 
 int song_io_loaded(void) { return loaded != 0; }
 int song_io_dirty(void) { return dirty != 0; }
+int song_io_failed(void) { return failed != 0; }
+int song_io_wants_save(void) { return dirty && !failed; }
 int song_io_saves(void) { return (int)saves; }
-void song_io_mark_dirty(void) { dirty = 1; }
+void song_io_mark_dirty(void) { dirty = 1; failed = 0; }   /* a new edit re-enables saving */
 
 int song_io_save(void)
 {
     int rc;
     if (!ready)
         return -1;
-    rc = song_store_save(&store, 0, song());
+    rc = song_store_save_tag(&store, 0, song(), live_bridge_song_hash());
     if (rc == 0) {
         dirty = 0;
+        failed = 0;
         saves++;
+    } else {
+        failed = 1;                                     /* no retry until the next edit (item 3) */
     }
     return rc;
 }
 
 int song_io_flush(void)
 {
-    if (!dirty)
+    if (!dirty || failed)
         return 0;
     return song_io_save();
 }
@@ -93,6 +103,7 @@ void song_io_set_key_clip(int key, int clip)
         return;
     song()->key_clip[key] = (uint8_t)clip;
     dirty = 1;
+    failed = 0;
 }
 
 /* ---- undo ---------------------------------------------------------------- */
@@ -115,6 +126,7 @@ static int undo_run(int redo)
     int rc = redo ? undo_stack_redo(&undo, song(), &store, 0) : undo_stack_undo(&undo, song(), &store, 0);
     if (rc == UNDO_DONE) {
         dirty = 1;                                      /* the song changed: write it back on the next save */
+        failed = 0;
         live_bridge_song_reload();
     }
     return rc;

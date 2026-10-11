@@ -8,7 +8,23 @@
  * already includes lz.c. */
 #include <stdint.h>
 #include "song_store.h"
+
+/* T6i: this unit carries its own copy of lz.c (project.c has the other). On the device its 4 KB
+ * lz_head goes to the shared .pool instead of .bss, so the table is not paid for twice in the
+ * 96 KiB RAM region; the host builds (no .pool section) leave it an ordinary static. */
+#if !defined(X0X_HOST)
+#define LZ_HEAD_ATTR __attribute__((section(".pool")))
+#endif
 #include "../../firmware/src/app/lz.c"
+
+/* T6i: the store's own song scratch. The recommit path (delete/undelete) used to hold a 14 KB
+ * song_t on the stack; it lives in .pool now, like the store itself. */
+#if defined(X0X_HOST)
+#define SST_POOL
+#else
+#define SST_POOL __attribute__((section(".pool")))
+#endif
+static song_t sst_recommit_scratch SST_POOL;
 
 #define SST_MAGIC 0x31545353u                 /* "SST1" */
 #define SST_HDR ((uint32_t)sizeof(sst_hdr_t))
@@ -28,17 +44,18 @@ typedef struct {
     uint32_t seq;
     uint32_t len;                             /* stored (song: compressed) payload bytes */
     uint32_t crc;                             /* CRC-32 of the stored payload */
+    uint32_t phash;                           /* T6i: caller tag (song: the project pattern hash) */
     char name[SONG_NAME_LEN];                 /* song name, so list() need not decompress */
     uint32_t hcrc;                            /* CRC-32 of this header up to hcrc */
 } sst_hdr_t;
 
-_Static_assert(sizeof(sst_hdr_t) == 40, "sst_hdr_t");
+_Static_assert(sizeof(sst_hdr_t) == 44, "sst_hdr_t");
 _Static_assert(SONG_STORE_BASE >= 0x9F000u + SONG_STORE_SECTOR, "clear of the FM6 patch sector");
 _Static_assert(SONG_STORE_BASE + SONG_STORE_SECTORS * SONG_STORE_SECTOR <= 0xDC000u, "clear of PANEL/MOTION");
 _Static_assert((SONG_STORE_SONG_EXTENTS * SONG_STORE_SONG_SECTORS +
                 SONG_STORE_TAKE_EXTENTS * SONG_STORE_TAKE_SECTORS) <= SONG_STORE_SECTORS, "extents fit");
-_Static_assert(SST_SONG_EXT_BYTES - 40u >= 14465u, "worst-case song (incompressible) fits in a song extent");
-_Static_assert(SST_TAKE_EXT_BYTES - 40u >= 8u + TAKE_MAX_EVENTS * 8u, "worst-case take fits in a take extent");
+_Static_assert(SST_SONG_EXT_BYTES - SST_HDR >= 14465u, "worst-case song (incompressible) fits in a song extent");
+_Static_assert(SST_TAKE_EXT_BYTES - SST_HDR >= 8u + TAKE_MAX_EVENTS * 8u, "worst-case take fits in a take extent");
 
 /* ---- CRC-32 (zlib) ------------------------------------------------------ */
 
@@ -123,7 +140,7 @@ static uint32_t sst_take_ext_off(uint32_t j)
 #define SST_FLAG_DELETED 1u
 
 static uint32_t sst_put_hdr(sst_hdr_t *h, uint16_t kind, uint8_t slot, uint8_t flags, uint32_t seq,
-                            uint32_t rawlen, uint32_t len, uint32_t crc, const char *name)
+                            uint32_t rawlen, uint32_t len, uint32_t crc, uint32_t phash, const char *name)
 {
     int i;
     h->magic = SST_MAGIC;
@@ -135,6 +152,7 @@ static uint32_t sst_put_hdr(sst_hdr_t *h, uint16_t kind, uint8_t slot, uint8_t f
     h->seq = seq;
     h->len = len;
     h->crc = crc;
+    h->phash = phash;
     for (i = 0; i < (int)SONG_NAME_LEN; i++)
         h->name[i] = name ? name[i] : 0;
     h->hcrc = sst_crc_of(h, (uint32_t)((const uint8_t *)&h->hcrc - (const uint8_t *)h));
@@ -309,7 +327,7 @@ static uint32_t sst_sectors_for(uint32_t payload, uint32_t max_sectors)
 }
 
 static int sst_write_song(song_store_t *st, uint32_t off, uint8_t slot, uint8_t flags, uint32_t seq,
-                          const song_t *song)
+                          const song_t *song, uint32_t phash)
 {
     sst_wr_t w;
     lz_sink_t sink;
@@ -338,7 +356,7 @@ static int sst_write_song(song_store_t *st, uint32_t off, uint8_t slot, uint8_t 
     if (lz_compress((const uint8_t *)song, sizeof(song_t), &sink) || sst_wr_flush(&w) || w.err)
         return -1;
     crc = ~w.crc;
-    sst_put_hdr(&h, SST_KIND_SONG, slot, flags, seq, sizeof(song_t), w.len, crc, song->name);
+    sst_put_hdr(&h, SST_KIND_SONG, slot, flags, seq, sizeof(song_t), w.len, crc, phash, song->name);
     return sst_commit(st, off, &h);
 }
 
@@ -357,7 +375,7 @@ static int sst_write_take(song_store_t *st, uint32_t off, uint8_t slot, uint32_t
     if (hdr->nevents)
         if (sst_write_raw(st, off + SST_HDR + 8u, (const uint8_t *)ev, hdr->nevents * 8u, &c))
             return -1;
-    sst_put_hdr(&h, SST_KIND_TAKE, slot, 0u, seq, payload, payload, ~c, 0);
+    sst_put_hdr(&h, SST_KIND_TAKE, slot, 0u, seq, payload, payload, ~c, 0u, 0);
     return sst_commit(st, off, &h);
 }
 
@@ -410,7 +428,7 @@ static int sst_pick_free_ext(const song_store_t *st, int is_take)
     uint32_t best_seq = 0;
     for (i = 0; i < n; i++) {
         int used = is_take ? sst_take_ext_used(st, i) : sst_song_ext_used(st, i);
-        if (used)
+        if (used || (!is_take && st->song_ext_bad[i]))
             continue;
         if (best < 0) {
             best = i;
@@ -546,6 +564,7 @@ static void sst_slot_reset(song_store_t *st, int s)
     st->slot[s].song_seq = 0u;
     st->slot[s].take_seq = 0u;
     st->slot[s].prev_take_seq = 0u;
+    st->slot[s].song_tag = 0u;
     st->slot[s].has_song = 0u;
     st->slot[s].deleted = 0u;
 }
@@ -568,6 +587,8 @@ int song_store_init(song_store_t *st, const song_flash_t *fb)
         return -1;
     for (s = 0; s < (int)SONG_STORE_SLOTS; s++)
         sst_slot_reset(st, s);
+    for (i = 0; i < (int)SONG_STORE_SONG_EXTENTS; i++)
+        st->song_ext_bad[i] = 0u;
     st->next_seq = 1u;
     st->ready = 0u;
     st->fb = *fb;
@@ -583,6 +604,7 @@ int song_store_init(song_store_t *st, const song_flash_t *fb)
         if (!st->slot[h.slot].has_song || h.seq > st->slot[h.slot].song_seq) {
             st->slot[h.slot].song_ext = (int8_t)i;
             st->slot[h.slot].song_seq = h.seq;
+            st->slot[h.slot].song_tag = h.phash;
             st->slot[h.slot].has_song = 1u;
             st->slot[h.slot].deleted = (h.flags & SST_FLAG_DELETED) ? 1u : 0u;
         }
@@ -712,7 +734,7 @@ int song_store_load(song_store_t *st, int slot, song_t *out)
 
 /* ---- save / delete / list ---------------------------------------------- */
 
-int song_store_save(song_store_t *st, int slot, const song_t *song)
+int song_store_save_tag(song_store_t *st, int slot, const song_t *song, uint32_t tag)
 {
     int ext;
     uint32_t seq, off;
@@ -725,14 +747,29 @@ int song_store_save(song_store_t *st, int slot, const song_t *song)
         return -3;
     seq = st->next_seq;
     off = sst_song_ext_off((uint32_t)ext);
-    if (sst_write_song(st, off, (uint8_t)slot, 0u, seq, song))
+    if (sst_write_song(st, off, (uint8_t)slot, 0u, seq, song, tag)) {
+        st->song_ext_bad[ext] = 1u;           /* this extent failed; the retry picks another */
         return -4;
+    }
     st->next_seq = seq + 1u;
     st->slot[slot].song_ext = (int8_t)ext;    /* the old extent is now unowned, its bytes kept */
     st->slot[slot].song_seq = seq;
+    st->slot[slot].song_tag = tag;
     st->slot[slot].has_song = 1u;
     st->slot[slot].deleted = 0u;
     return 0;
+}
+
+int song_store_save(song_store_t *st, int slot, const song_t *song)
+{
+    return song_store_save_tag(st, slot, song, 0u);
+}
+
+uint32_t song_store_tag(const song_store_t *st, int slot)
+{
+    if (!st || slot < 0 || slot >= (int)SONG_STORE_SLOTS)
+        return 0u;
+    return st->slot[slot].song_tag;
 }
 
 /* Re-commit a slot's song with a new header flag and sequence number. The write
@@ -742,16 +779,18 @@ static int sst_recommit_song(song_store_t *st, int slot, uint8_t flags)
 {
     int ext;
     uint32_t seq, off;
-    song_t s;
-    if (sst_load_song(st, slot, &s))          /* the current record's data (ignores the flag) */
+    song_t *s = &sst_recommit_scratch;            /* .pool (T6i): no 14 KB stack frame */
+    if (sst_load_song(st, slot, s))               /* the current record's data (ignores the flag) */
         return -1;
     ext = sst_pick_free_ext(st, 0);
     if (ext < 0)
         return -2;
     seq = st->next_seq;
     off = sst_song_ext_off((uint32_t)ext);
-    if (sst_write_song(st, off, (uint8_t)slot, flags, seq, &s))
+    if (sst_write_song(st, off, (uint8_t)slot, flags, seq, s, st->slot[slot].song_tag)) {
+        st->song_ext_bad[ext] = 1u;               /* the next save picks another extent */
         return -3;
+    }
     st->next_seq = seq + 1u;
     st->slot[slot].song_ext = (int8_t)ext;
     st->slot[slot].song_seq = seq;

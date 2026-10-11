@@ -87,6 +87,16 @@ int main(void)
     /* the song region sits inside the store, so the driver's own FL_STORE_OK also accepts it */
     want_allow(0xA0000u, 0x3C000u, "the song region inside the store");
     want_refuse(0xA0000u, 0x40001u, "a song read that would run past the store");
+    /* T6i: the other guarded windows (the OTA staging the loader uses, the settings block) must
+     * never cover the song region: only the song backend may write it */
+    if (FL_IN(0xA0000u, 0x1000u, FL_OTA_LO, FL_OTA_HI) || FL_IN(0xDB000u, 0x1000u, FL_OTA_LO, FL_OTA_HI)) {
+        printf("FAIL: the OTA window covers the song region\n");
+        fails++;
+    }
+    if (FL_IN(0xA0000u, 0x1000u, FL_GLOB_LO, FL_GLOB_HI) || FL_IN(0xDB000u, 0x1000u, FL_GLOB_LO, FL_GLOB_HI)) {
+        printf("FAIL: the settings window covers the song region\n");
+        fails++;
+    }
 
     if (fails) {
         printf("flash guard: %d FAILED\n", fails);
