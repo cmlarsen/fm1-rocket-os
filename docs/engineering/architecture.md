@@ -88,6 +88,7 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 | TRAM: one shared `song_t` scratch for `song_io`'s open/clip-count and the store's recommit, not two | **+14,352** freed |
 | `take_t` | −16,436 |
 | Undo ring | −12,240 |
+| T7b clip editor: the clip engine's per-role playing copy and launch staging (`clip_t play[5]` + `next[5]`) | −5,280 |
 | FM6 + NOISE state, moved to the pool if `.bss` is tight | about −3,000 |
 | **Left after the 8 KiB spare** | **about 18 KB** |
 

@@ -1,0 +1,30 @@
+# T7b: editing a playing clip is ISR-safe. The clip engine reads its own copy of the playing clip
+# (a double-buffer swap at a launch / loop boundary / reload), never the song the UI edits. Here a
+# DRUMS clip plays while a hit is added on the grid; the clip keeps looping and the edited hit
+# plays back, and the event stream stays sane.
+wait 300
+cursor 0 0
+tap SEQ
+tapkey b0
+tapkey w0
+tapkey w4
+tap HOME
+tap SEL
+tap PLAY
+wait-bar 1
+expect liveclip0 0
+# re-open the grid and edit while it plays
+tap SEQ
+expect view 13
+expect editclip 0
+tapkey b0
+tapkey w8
+expect drumget0.0.8 1
+events studio_clipliveedit_events.txt
+wait-bar 3
+expect liveclip0 0
+expect drumget0.0.8 1
+eventsstop
+wait 1400
+shot studio_clipliveedit.png
+dump studio_clipliveedit.json

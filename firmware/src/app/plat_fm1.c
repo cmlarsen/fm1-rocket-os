@@ -111,11 +111,7 @@ void plat_midi_out(uint32_t pkt) { midi_out_event(pkt); }
  * so a TIMER5 that preempted a publish returns the previous value instead of spinning. */
 static sample_clock_t sc;
 void plat_sample_sync(void) { sample_clock_publish(&sc, eng_prof_frames, fm1_ticks()); }
-uint32_t plat_sample_now(void)
-{
-    static uint32_t last;
-    return sample_clock_now(&sc, fm1_ticks(), &last);
-}
+uint32_t plat_sample_now(void) { return sample_clock_now(&sc, fm1_ticks()); }
 
 int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? st_load(obj, dst, max) : -1; }
 int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
@@ -206,6 +202,10 @@ uint32_t plat_irq_stack_used(void)
         p++;
     return (uint32_t)((const char *)top - (const char *)p);
 }
+
+/* T7b: the clip engine's snapshot critical section, on X0X's own irq_save / irq_restore */
+uint32_t plat_crit_enter(void) { return irq_save(); }
+void plat_crit_exit(uint32_t state) { irq_restore(state); }
 
 uint32_t plat_cpu_peak_pct(void)
 {

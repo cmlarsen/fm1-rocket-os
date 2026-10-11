@@ -1,0 +1,28 @@
+# T7b: a long clip paged with OCT. A DRUMS clip is set to two bars in SETTINGS; on the drum grid
+# OCT+ and OCT- page the visible 16 steps, so the same white key toggles different steps.
+wait 300
+cursor 0 0
+tap SEQ
+tap SEQ
+tap SEQ
+expect view 11
+spin K1 16
+expect cliplen0 32
+tap HOME
+tap SEQ
+expect view 13
+expect cliplen0 32
+tapkey b0
+tapkey w0
+expect drumget0.0.0 1
+tap OCT+
+tapkey w0
+expect drumget0.0.16 1
+expect drumget0.0.0 1
+tap OCT-
+tapkey w1
+expect drumget0.0.1 1
+expect drumget0.0.16 1
+wait 1400
+shot studio_cliplong.png
+dump studio_cliplong.json

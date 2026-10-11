@@ -1,0 +1,20 @@
+# T7b re-review 1: a recorded clip starts exactly on the close boundary, not a 16th late. The
+# transport starts at REC (step 0); REC closes at the next bar so rec.close = 32 (a 2-bar take); the
+# clip starts at step 32 and its progress at step 48 is 16/32 = 128/256.
+wait 300
+cursor 1 0
+tap REC
+expect recrec 1
+wait-bar 1
+expect globalstep 16
+tap REC
+wait-bar 1
+expect globalstep 32
+expect liveclip1 7
+expect liveprog1 0
+wait-bar 1
+expect globalstep 48
+expect liveprog1 128
+wait 1400
+shot studio_cliprec_at.png
+dump studio_cliprec_at.json

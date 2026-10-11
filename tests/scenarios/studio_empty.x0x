@@ -1,5 +1,5 @@
 # T7a STUDIO 2 + 5: the cursor on an empty slot shows the empty-slot card; SEQ creates an empty clip
-# (used, 16 steps, the role's default) and opens its settings.
+# (used, 16 steps, the role's default) and opens the editor; SEQ again reaches motion, settings.
 wait 300
 expect view 10
 expect studioclip 0
@@ -7,11 +7,15 @@ expect clipused0 0
 wait 1400
 shot studio_empty.png
 tap SEQ
-expect view 11
+expect view 13
 expect clipused0 1
 expect cliplen0 16
 expect clipmode0 0
 expect clipquant0 0
+tap SEQ
+expect view 14
+tap SEQ
+expect view 11
 wait 1400
 shot studio_clipset.png
 dump studio_empty.json

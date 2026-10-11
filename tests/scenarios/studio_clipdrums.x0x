@@ -1,0 +1,49 @@
+# T7b STUDIO 4: the drum grid. SEQ on the empty DRUMS A creates the clip and opens DRUM. A black
+# key picks the lane, a white key toggles the visible step, HOME + a white key toggles the accent.
+# The grid reopens while the clip plays (the playhead), and the edited hits play as engine events.
+wait 300
+cursor 0 0
+tap SEQ
+expect view 13
+expect editclip 0
+expect clipused0 1
+expect drumget0.0.0 0
+tapkey b0
+tapkey w0
+tapkey w4
+tapkey w8
+expect drumget0.0.0 1
+expect drumget0.0.4 1
+expect drumget0.0.8 1
+# toggle one back off
+tapkey w8
+expect drumget0.0.8 0
+# a second lane
+tapkey b1
+tapkey w4
+expect drumget0.1.4 1
+expect drumget0.0.4 1
+# HOME + a white key toggles the accent at that step
+press HOME
+tapkey w0
+release HOME
+expect drumacc0.0 1
+expect drumacc0.4 0
+wait 1400
+shot studio_clipdrums_grid.png
+dump studio_clipdrums_state.json
+# launch it, then reopen the grid while it plays (the playhead)
+tap HOME
+tap SEL
+tap PLAY
+expect liveclip0 0
+tap SEQ
+expect view 13
+wait-bar 1
+events studio_clipdrums_events.txt
+wait-bar 2
+expect liveclip0 0
+eventsstop
+wait 1400
+shot studio_clipdrums_playing.png
+dump studio_clipdrums.json

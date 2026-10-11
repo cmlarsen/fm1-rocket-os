@@ -1,5 +1,5 @@
 # case full_buffer
-nevents=2048 full=1 state=0 last=0xf0100000
-last_off=2046 length=2046
-replay_events=2048
+nevents=1024 full=1 state=0 last=0xf0100000
+last_off=1022 length=1022
+replay_events=1024
 # ok=1

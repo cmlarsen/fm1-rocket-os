@@ -2,6 +2,10 @@
 # the changes mark the song dirty.
 wait 300
 tap SEQ
+expect view 13
+tap SEQ
+expect view 14
+tap SEQ
 expect view 11
 # LENGTH: 16 -> 32 steps (two bars)
 spin K1 16

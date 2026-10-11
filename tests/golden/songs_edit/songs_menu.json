@@ -6,7 +6,7 @@
     {"part": 2, "ppat": 0, "pcue": -1, "mute": 0},
     {"part": 3, "ppat": 0, "pcue": -1, "mute": 0}
   ],
-  "view": 13,
+  "view": 15,
   "studio": {"role": 0, "col": 0, "clip": 0, "classic": 0},
   "songs": {"up": 1, "used": 1, "current": 0, "free": 1, "canundo": 0, "rows": [
     {"slot": 0, "used": 1, "take": 0, "current": 1, "name": "STARTER"},

@@ -145,9 +145,14 @@ void song_io_set_key_clip(int key, int clip)
 /* Every edit marks the song dirty and re-enables saving (a new edit is what lifts the failed state). */
 static clip_t *clip_at(int c) { return (c >= 0 && c < (int)NCLIPS) ? &song()->clip[c] : 0; }
 static void edited(void) { dirty = 1; failed = 0; }
+/* T7b: after an edit, hand the clip to the clip engine so it writes the playing copy (and a staged
+ * launch copy) with the audio IRQs masked; the ISR never reads song->clip[]. */
+static void synced(int c) { live_bridge_clip_changed((uint8_t)c); }
 /* the undo push helpers are defined below */
 void song_io_push_clear(int clip, const void *old_clip);
+void song_io_push_record(int clip, const void *old_clip);
 void song_io_push_copy(int dst, int src, const void *old_dst);
+void song_io_edit_push(void);
 
 int song_io_clip_used(int c) { clip_t *k = clip_at(c); return k ? k->used != 0 : 0; }
 int song_io_clip_len(int c)
@@ -193,18 +198,33 @@ void song_io_clip_create(int c, int len, int mode, int quant)
             k->motion[m].v[s] = MOTION_NONE;
     }
     edited();
+    synced(c);
+}
+
+/* T7b: create the clip as part of the open editor session, so undo restores the empty slot (the
+ * slot stops playing too). The caller has called song_io_edit_begin(clip). */
+void song_io_clip_create_undoable(int c, int len, int mode, int quant)
+{
+    if (!clip_at(c) || song_io_clip_used(c))
+        return;
+    song_io_edit_push();                                /* the empty slot is the session's pre-state */
+    song_io_clip_create(c, len, mode, quant);
 }
 
 void song_io_clip_clear(int c)
 {
     clip_t *k = clip_at(c);
-    int i;
+    int i, role = song_io_clip_role(c);
     if (!k || !k->used)
         return;
     song_io_push_clear(c, k);
     for (i = 0; i < (int)sizeof *k; i++)
         ((uint8_t *)k)[i] = 0;
     edited();
+    synced(c);
+    if (role >= 0 && live_bridge_playing_clip((uint8_t)role) == (uint8_t)c &&
+        !live_bridge_stop_queued(role))
+        live_bridge_stop((uint8_t)role);                /* the clip is gone: stop the role (once) */
 }
 
 void song_io_clip_copy(int dst, int src)
@@ -215,6 +235,7 @@ void song_io_clip_copy(int dst, int src)
     song_io_push_copy(dst, src, d);                     /* the old destination, for undo */
     *d = *s;
     edited();
+    synced(dst);
 }
 
 void song_io_clip_set_len(int c, int v)
@@ -224,6 +245,7 @@ void song_io_clip_set_len(int c, int v)
         return;
     k->len = (uint8_t)(v < 1 ? 1 : v > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : v);
     edited();
+    synced(c);
 }
 void song_io_clip_set_mode(int c, int v)
 {
@@ -232,6 +254,7 @@ void song_io_clip_set_mode(int c, int v)
         return;
     k->mode = (uint8_t)(v ? 1 : 0);
     edited();
+    synced(c);
 }
 void song_io_clip_set_quant(int c, int v)
 {
@@ -242,6 +265,7 @@ void song_io_clip_set_quant(int c, int v)
     if (v > (int)NQUANT - 1) v = (int)NQUANT - 1;
     k->quant = (uint8_t)v;
     edited();
+    synced(c);
 }
 int song_io_swing(void) { return (int)song()->swing; }
 void song_io_set_swing(int v)
@@ -269,6 +293,210 @@ void song_io_name(char *out, int n)
 }
 int song_io_key(void) { return (int)song()->key; }
 int song_io_scale(void) { return (int)song()->scale; }
+
+/* ---- T7b: the clip editor's edits ---------------------------------------- */
+
+static int edit_open = -1, edit_pushed;
+void song_io_edit_begin(int clip) { edit_open = clip; edit_pushed = 0; }
+void song_io_edit_end(void) { edit_open = -1; edit_pushed = 0; }
+void song_io_edit_push(void)
+{
+    if (edit_open < 0 || edit_pushed)
+        return;
+    song_io_push_record(edit_open, &song()->clip[edit_open]);   /* the pre-session clip */
+    edit_pushed = 1;
+}
+
+int song_io_clip_is_drum(int c) { return clip_role((uint8_t)c) == ROLE_DRUMS; }
+
+int song_io_drum_get(int c, int lane, int step)
+{
+    clip_t *k = clip_at(c);
+    if (!k || !k->used || lane < 0 || lane >= (int)DRUM_LANES || step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return 0;
+    return drum_get(&k->d.drum, (unsigned)lane, (unsigned)step);
+}
+int song_io_drum_accent(int c, int step)
+{
+    clip_t *k = clip_at(c);
+    if (!k || !k->used || step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return 0;
+    return (int)((k->d.drum.accent[step >> 5] >> (step & 31u)) & 1u);
+}
+void song_io_drum_set(int c, int lane, int step, int on)
+{
+    clip_t *k = clip_at(c);
+    if (!k || !k->used || clip_role((uint8_t)c) != ROLE_DRUMS)
+        return;
+    if (lane < 0 || lane >= (int)DRUM_LANES || step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return;
+    song_io_edit_push();
+    drum_set(&k->d.drum, (unsigned)lane, (unsigned)step, on ? 1 : 0);
+    edited();
+    synced(c);
+}
+void song_io_drum_set_accent(int c, int step, int on)
+{
+    clip_t *k = clip_at(c);
+    uint32_t m;
+    if (!k || !k->used || clip_role((uint8_t)c) != ROLE_DRUMS)
+        return;
+    if (step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return;
+    song_io_edit_push();
+    m = 1u << ((unsigned)step & 31u);
+    if (on)
+        k->d.drum.accent[step >> 5] |= m;
+    else
+        k->d.drum.accent[step >> 5] &= ~m;
+    edited();
+    synced(c);
+}
+
+int song_io_note_count(int c)
+{
+    clip_t *k = clip_at(c);
+    return (k && k->used && clip_role((uint8_t)c) != ROLE_DRUMS) ? (int)k->nnotes : 0;
+}
+int song_io_note_index(int c, int step, int note)
+{
+    clip_t *k = clip_at(c);
+    int i, n;
+    if (!k || !k->used || clip_role((uint8_t)c) == ROLE_DRUMS)
+        return -1;
+    n = (int)k->nnotes;
+    for (i = 0; i < n; i++)
+        if (k->d.notes[i].step == (uint8_t)step && k->d.notes[i].note == (uint8_t)note)
+            return i;
+    return -1;
+}
+int song_io_note_get(int c, int i, int *step, int *note, int *vel, int *len)
+{
+    clip_t *k = clip_at(c);
+    if (!k || !k->used || i < 0 || i >= (int)k->nnotes)
+        return 0;
+    if (step) *step = (int)k->d.notes[i].step;
+    if (note) *note = (int)k->d.notes[i].note;
+    if (vel)  *vel  = (int)k->d.notes[i].vel;
+    if (len)  *len  = (int)k->d.notes[i].len;
+    return 1;
+}
+int song_io_note_add(int c, int step, int note, int vel, int len)
+{
+    clip_t *k = clip_at(c);
+    note_t *nt;
+    int i = song_io_note_index(c, step, note);
+    if (i >= 0)
+        return i;                                  /* the same note is already there */
+    if (!k || !k->used || clip_role((uint8_t)c) == ROLE_DRUMS)
+        return -1;
+    if (k->nnotes >= (uint8_t)CLIP_MAX_NOTES || step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return -1;
+    song_io_edit_push();
+    nt = &k->d.notes[k->nnotes++];
+    nt->step = (uint8_t)step;
+    nt->note = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
+    nt->vel = (uint8_t)(vel < 1 ? 100 : vel > 127 ? 127 : vel);
+    nt->len = (uint8_t)(len < 1 ? 1 : len > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : len);
+    edited();
+    synced(c);
+    return (int)k->nnotes - 1;
+}
+int song_io_note_remove(int c, int step, int note)
+{
+    clip_t *k = clip_at(c);
+    int i = song_io_note_index(c, step, note), j;
+    if (i < 0)
+        return 0;
+    song_io_edit_push();
+    for (j = i + 1; j < (int)k->nnotes; j++)
+        k->d.notes[j - 1] = k->d.notes[j];
+    k->nnotes--;
+    edited();
+    synced(c);
+    return 1;
+}
+void song_io_note_set(int c, int i, int step, int note, int vel, int len)
+{
+    clip_t *k = clip_at(c);
+    note_t *nt;
+    if (!k || !k->used || i < 0 || i >= (int)k->nnotes)
+        return;
+    song_io_edit_push();
+    nt = &k->d.notes[i];
+    if (step >= 0 && step < (int)CLIP_MAX_STEPS) nt->step = (uint8_t)step;
+    if (note >= 0) nt->note = (uint8_t)(note > 127 ? 127 : note);
+    if (vel >= 0)  nt->vel  = (uint8_t)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
+    if (len >= 0)  nt->len  = (uint8_t)(len < 1 ? 1 : len > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : len);
+    edited();
+    synced(c);
+}
+
+int song_io_motion_param(int c, int lane)
+{
+    clip_t *k = clip_at(c);
+    if (!k || lane < 0 || lane >= (int)CLIP_MOTION_LANES || k->motion[lane].param == PARAM_NONE)
+        return -1;
+    return (int)k->motion[lane].param;
+}
+int song_io_motion_lane(int c, int param, int create)
+{
+    clip_t *k = clip_at(c);
+    int i;
+    if (!k || !k->used || param < 0 || param == (int)PARAM_NONE)
+        return -1;
+    for (i = 0; i < (int)CLIP_MOTION_LANES; i++)
+        if (k->motion[i].param == (uint16_t)param)
+            return i;
+    if (!create)
+        return -1;
+    for (i = 0; i < (int)CLIP_MOTION_LANES; i++)
+        if (k->motion[i].param == PARAM_NONE) {
+            song_io_edit_push();
+            k->motion[i].param = (uint16_t)param;
+            edited();
+            synced(c);
+            return i;
+        }
+    return -1;                                         /* two lanes at most */
+}
+int song_io_motion_get(int c, int lane, int step)
+{
+    clip_t *k = clip_at(c);
+    uint8_t v;
+    if (!k || lane < 0 || lane >= (int)CLIP_MOTION_LANES || step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return -1;
+    v = k->motion[lane].v[step];
+    return v == MOTION_NONE ? -1 : (int)v;
+}
+void song_io_motion_set(int c, int lane, int step, int v)
+{
+    clip_t *k = clip_at(c);
+    if (!k || !k->used || lane < 0 || lane >= (int)CLIP_MOTION_LANES ||
+        step < 0 || step >= (int)CLIP_MAX_STEPS)
+        return;
+    if (k->motion[lane].param == PARAM_NONE)
+        return;                                        /* the lane must be claimed first */
+    song_io_edit_push();
+    k->motion[lane].v[step] = (uint8_t)(v < 0 ? MOTION_NONE : v > 127 ? 127 : v);
+    edited();
+    synced(c);
+}
+void song_io_motion_clear(int c, int lane)
+{
+    clip_t *k = clip_at(c);
+    int s;
+    if (!k || !k->used || lane < 0 || lane >= (int)CLIP_MOTION_LANES)
+        return;
+    if (k->motion[lane].param == PARAM_NONE)
+        return;
+    song_io_edit_push();
+    k->motion[lane].param = PARAM_NONE;
+    for (s = 0; s < (int)CLIP_MAX_STEPS; s++)
+        k->motion[lane].v[s] = MOTION_NONE;
+    edited();
+    synced(c);
+}
 int song_io_undo_clip(void) { return undo.cur ? (int)undo.e[undo.cur - 1u].index : -1; }
 int song_io_redo_clip(void) { return undo.cur < undo.n ? (int)undo.e[undo.cur].index : -1; }
 int song_io_undo_depth(void) { return (int)undo.n; }
@@ -291,11 +519,21 @@ void song_io_push_copy(int dst, int src, const void *old_dst)
 
 static int undo_run(int redo)
 {
+    int type = redo ? (int)undo_stack_redo_type(&undo) : (int)undo_stack_undo_type(&undo);
+    int clip = redo ? (undo.cur < undo.n ? (int)undo.e[undo.cur].index : -1)
+                    : (undo.cur ? (int)undo.e[undo.cur - 1u].index : -1);
     int rc = redo ? undo_stack_redo(&undo, song(), &store, 0) : undo_stack_undo(&undo, song(), &store, 0);
     if (rc == UNDO_DONE) {
         dirty = 1;                                      /* the song changed: write it back on the next save */
         failed = 0;
-        live_bridge_song_reload();
+        if (type == UNDO_CLEAR_CLIP || type == UNDO_COPY_CLIP || type == UNDO_RECORD_CLIP) {
+            /* T7b re-review: stage the restored clip through the main-loop path; do NOT re-init the
+             * clip engine (that would stop the music while it plays). Only song open / load (stopped)
+             * re-inits. */
+            live_bridge_clip_changed((uint8_t)clip);
+            if (!song_io_clip_used(clip))
+                live_bridge_stop((uint8_t)clip_role((uint8_t)clip));   /* the clip vanished: stop it */
+        }
     }
     return rc;
 }

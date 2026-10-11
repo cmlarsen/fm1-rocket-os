@@ -21,3 +21,12 @@ The reviewer's tests are `/private/tmp/claude-502/-Users-caleb-CalebApps-fm1-roc
 5. `make fuzz-ui` now exists on `integration` (T2c). Merge `integration` again and run it.
 
 Then run the full ladder plus `make fuzz-ui`, and `tools/check_loader.sh` on both packages. Commit, update reports/T11i.md, and send worker_done.
+
+## Final check: the branch is approved. Now merge integration (T7b) with these fixes.
+A trial merge conflicts in `Makefile`, `clip_engine.h`, `live_bridge.c`, `ui.c`, `build_host.sh` and `web/emu/build.sh`. Merge `integration` into your branch and resolve:
+1. **[High]** Wrap `live_bridge_launch_quant` (Program Change) in `engine_crit_enter`/`engine_crit_exit`, like T7b's other launches. `clip_engine_launch_quant` now copies the clip into `next[]` from the main loop.
+2. **[Medium]** MIDI Start/Continue relaunch `s_cur` without refreshing `play[]`, so a clip edited while stopped plays its old copy. Start and Continue go through the same main-loop staging copy as a launch, under `engine_crit`, before the ring command.
+3. Merge both enums: T7b's `CLIP_CMD_LAUNCH_AT` alongside `SET_BPM_SOFT`, `RESTART` and `CONTINUE`. Merge the `unit-core` list (`unit-crit`, `unit-midilive`, `unit-sampleclk`) and `ui.c`'s `R_CLKIN` and `R_ED_*` entries.
+4. **[Low]** Stop also becomes a ring command, so Start then Stop in the same poll stops.
+5. **[Low]** Strengthen `sample_clock_test.c`: actually run the writer between the reader's own loads (step through every interleaving), and make the random check able to fail. Share `last` safely, or make it per-context.
+Then run the full ladder on the merged branch (`make unit unit-core scenarios fuzz-ui screens-lint parity check fw fw-debug`, and `tools/check_loader.sh` on both packages). Commit, update reports/T11i.md, and send worker_done.

@@ -96,3 +96,9 @@ uint32_t plat_irq_stack_used(void);      /* the deepest the interrupts' stack ha
 uint32_t plat_irq_stack_size(void);
 int plat_stalls(uint32_t s[3]);
 void plat_stalls_enable(int on);
+
+/* T7b: mask the audio/timer interrupts for a short main-loop critical section (the clip engine's
+ * 528-byte snapshot). The returned token restores the previous state; nested calls are fine. The
+ * device wraps X0X's own irq_save / irq_restore; the host is a no-op (single-threaded). */
+uint32_t plat_crit_enter(void);
+void plat_crit_exit(uint32_t state);
