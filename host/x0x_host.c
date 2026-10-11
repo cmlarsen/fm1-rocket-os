@@ -18,7 +18,7 @@
  *                                VEL 0 is a note off. Through the C_BON / C_BOFF command path (the
  *                                engine clamps NOTE to 0..127, so a test may pass more).
  *   alloff                       the panic all-notes-off (engine_all_off)
- *   stop                         stop both transports, then the all-notes-off (T2c)
+ *   stop                         stop both transports (no all-notes-off: a hung note must show) (T2c)
  *   fuzz SEED N                  T2c: N random key / button / encoder / wait events from the
  *                                deterministic SEED, starting at the song home and visiting the
  *                                sound pages, Classic and LIVE; then release every input, stop,
@@ -41,7 +41,8 @@
  *   events FILE.txt              start logging every engine command (drum and bass note on, note
  *                                off, parameter change) and every cue and mute, one per line with
  *                                its sample time; eventsstop stops it
- *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, voices, ...): exit
+ *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, voices,
+ *                                 heldnotes, ...): exit
  *                                1 on mismatch; VALUE "<N" / ">N" is a bound
  *   expect key K L               the LED level of key K (0 off, 1 dim, 2 bright); K as "key" takes
  *   expect button B L            (w0..w15, b0..b10 or 0..26); the lit state of button B, 0 or 1
@@ -847,6 +848,20 @@ static int expect(const char *what, const char *val)
         got = eng_fm6_voices_active();
     else if (!strcmp(what, "voices"))               /* T2c: every engine's sounding voices (the invariant) */
         got = engine_voices_active();
+    else if (!strcmp(what, "heldnotes")) {           /* T2c: entries in the held-note table (0 after a view change) */
+        int q;
+        got = 0;
+        for (q = 0; q < NKEYS; q++)
+            got += hn_on[q] != 0;
+    } else if (!strncmp(what, "staleheld", 9)) {       /* T2c: staleheldK, K's note lived through a view/mode change */
+        int k = atoi(what + 9) % NKEYS;
+        got = (hn_on[k] && hn_mode[k] != hn_mode_now()) ? 1 : 0;
+    } else if (!strncmp(what, "heldnote", 8)) {      /* T2c: heldnoteK, 1 while key K is in the held-note table */
+        got = hn_on[atoi(what + 8) % NKEYS] != 0;
+    } else if (!strcmp(what, "seqplaying"))           /* T2c: X0X's own sequencer (off when the clip engine owns it) */
+        got = seq.playing ? 1 : 0;
+    else if (!strcmp(what, "liveplaying"))            /* T2c: the clip engine's transport */
+        got = live_bridge_transport_playing();
     else if (!strcmp(what, "fm6held"))              /* T5i: FM6's held (not released) count */
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
@@ -1023,6 +1038,36 @@ static int fz_pick(uint32_t *m)
 static const int FZ_HOLD[] = {B_SEL, B_HOME, B_SEQ, B_EDIT, B_GLO, B_SAVE, B_FX, B_REC, B_ARP,
                               B_ENV, B_LFO, B_OCTUP, B_OCTDN, B_PLAY};
 
+/* T2c: key down -> one transition -> key up, with the key held across it (the review's list:
+ * HOME, GLO, LFO, EDIT, SEQ, long PLAY, SCL, an FX hold, a SAVE hold). The transition is applied
+ * while the key is down; fuzz_cmd then runs the heldnotes check when it changed the view. REC is
+ * armed first in some variants (and left armed, or disarmed again, in others). */
+static void fz_held_across(uint32_t *hk)
+{
+    int k = FZP(NKEYS), i, rec = FZP(3);
+    for (i = 0; i < NKEYS && ((*hk >> k) & 1u); i++)
+        k = (k + 1) % NKEYS;
+    if ((*hk >> k) & 1u)
+        return;                                       /* every key already held: nothing to add */
+    if (rec)
+        fz_add(FZ_BTN_TAP, B_REC, 0, 0);              /* REC-armed variant */
+    fz_add(FZ_KEY_DOWN, k, 0, 0);
+    switch (FZP(9)) {
+    case 0: fz_add(FZ_BTN_TAP, B_HOME, 0, 0); break;
+    case 1: fz_add(FZ_BTN_TAP, B_GLO, 0, 0); break;
+    case 2: fz_add(FZ_BTN_TAP, B_LFO, 0, 0); break;
+    case 3: fz_add(FZ_BTN_TAP, B_EDIT, 0, 0); break;
+    case 4: fz_add(FZ_BTN_TAP, B_SEQ, 0, 0); break;
+    case 5: fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0); break;            /* long PLAY */
+    case 6: fz_add(FZ_BTN_TAP, B_SEL, 0, 0); break;                /* SCL / launch */
+    case 7: fz_add(FZ_BTN_HOLD, B_FX, 900 + FZP(200), 0); break;   /* FX hold */
+    default: fz_add(FZ_BTN_HOLD, B_SAVE, 400 + FZP(200), 0); break;/* SAVE hold */
+    }
+    fz_add(FZ_KEY_UP, k, 0, 0);
+    if (rec == 2)
+        fz_add(FZ_BTN_TAP, B_REC, 0, 0);              /* disarm again */
+}
+
 static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
 {
     uint32_t hk = 0, hb = 0;
@@ -1039,18 +1084,20 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
     fz_add(FZ_KEY_UP, 2, 0, 0);
     fz_add(FZ_BTN_TAP, B_HOME, 0, 0);
     fz_add(FZ_TURN, EN_SELECT, -3, 80);
-    fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);
+    fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);             /* the 303A sound page */
     fz_add(FZ_KEY_DOWN, 1, 0, 0);
     fz_add(FZ_WAIT, 0, 80, 0);
+    fz_add(FZ_BTN_TAP, B_HOME, 0, 0);             /* a view change with the key still held: the mid-run check */
     fz_add(FZ_KEY_UP, 1, 0, 0);
-    fz_add(FZ_BTN_TAP, B_HOME, 0, 0);
     fz_add(FZ_BTN_TAP, B_GLO, 0, 0);
-    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
+    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);              /* into Classic */
+    fz_add(FZ_BTN_TAP, B_PLAY, 0, 0);             /* X0X's own transport plays... */
+    fz_add(FZ_WAIT, 0, 150, 0);
     fz_add(FZ_KEY_DOWN, 0, 0, 0);
     fz_add(FZ_WAIT, 0, 80, 0);
     fz_add(FZ_KEY_UP, 0, 0, 0);
-    fz_add(FZ_BTN_TAP, B_GLO, 0, 0);
-    fz_add(FZ_TURN, EN_SELECT, 20, 20);
+    fz_add(FZ_BTN_TAP, B_GLO, 0, 0);              /* ...and we leave Classic with it playing: */
+    fz_add(FZ_TURN, EN_SELECT, 20, 20);           /* the seqplaying check must find it stopped */
     fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
     fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);
     fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
@@ -1104,8 +1151,8 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
             if (!d)
                 d = 3;
             fz_add(FZ_SPIN, e, d, 0);
-        } else {                                      /* a coverage macro */
-            int m = FZP(4);
+        } else {                                      /* a coverage or held-across macro */
+            int m = FZP(6);
             if (m == 0) {
                 fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);  /* LIVE in / out */
             } else if (m == 1) {
@@ -1114,8 +1161,10 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
             } else if (m == 2) {
                 fz_add(FZ_TURN, EN_SELECT, FZP(5) - 2, 80);
                 fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);     /* a sound page for the cursor role */
-            } else {
+            } else if (m == 3) {
                 fz_add(FZ_BTN_TAP, B_SEL, 0, 0);      /* SCL / launch / list entry */
+            } else {
+                fz_held_across(&hk);                  /* a key held across a transition (REC variants) */
             }
         }
     }
@@ -1178,15 +1227,27 @@ static void fz_line(char *b, size_t sz, const fz_ev_t *e)
 }
 
 /* T2c: stop everything the way the `stop` command and the fuzz release tail do — abort a perf
- * test, stop both transports, release every voice. Shared so a reproduction and the fuzz run
- * leave the app in the same state. */
+ * test, stop both transports. It deliberately does NOT call engine_all_off(): the tail must not
+ * mask a hung note, so any voice a released key (or a stopped transport) leaves sounding remains
+ * for `expect voices 0` to catch. Shared so a reproduction and the fuzz run match. */
 static void host_all_stop(void)
 {
     if (perf.test != PT_IDLE)
         perf_test_abort();
     live_bridge_transport_stop();
-    engine_all_off();
+    seq_stop(&seq);
     run_ms(1);
+}
+
+/* T2c: entries in the held-note table (ui.c). After any view or mode change the table must be
+ * empty — every view/mode change releases what is held — so the fuzzer checks it mid-run and,
+ * when it holds a key across a transition, records `expect heldnotes 0` in the reproduction. */
+static int fz_tracked(void)
+{
+    int k, n = 0;
+    for (k = 0; k < NKEYS; k++)
+        n += hn_on[k] != 0;
+    return n;
 }
 
 /* the `fuzz SEED N` command: returns 1 when the invariant fails */
@@ -1195,57 +1256,91 @@ static int fuzz_cmd(const char *dir, int seed, int n)
     uint32_t hk = 0, hb = 0;
     char path[400];
     FILE *f;
-    int i;
+    int i, midfail = 0, fail = 0, wrote = 0;
     if (n < 0)
         n = 0;
     if (n > 100000)
         n = 100000;
     fz_build(seed, n, &hk, &hb);
+    (void)hk;
+    (void)hb;
     snprintf(path, sizeof path, "%s/seed_%d.full.x0x", dir, seed);
-    if ((f = fopen(path, "w"))) {                    /* written before the run: a crash still leaves it */
+    f = fopen(path, "w");                            /* written as the run goes: a crash still leaves it */
+    if (f) {
         fprintf(f, "# T2c UI fuzz: seed %d, %d events (reproduce with)\n", seed, n);
         fprintf(f, "#   build/host/x0x_host %s %s\n", path, dir);
         fputs("noreset\n", f);                       /* the replay excludes the factory reset, as the fuzz did */
-        for (i = 0; i < fz_n; i++) {
-            char lb[128];
-            fz_line(lb, sizeof lb, &fz_ev[i]);
-            fputs(lb, f);
-        }
-        for (i = 0; i < NKEYS; i++)                  /* the release tail the command runs */
-            if ((hk >> i) & 1u)
-                fprintf(f, "key %d up\n", i);
-        for (i = 0; i < NB; i++)
-            if ((hb >> i) & 1u)
-                fprintf(f, "release %s\n", BTN_N[i]);
-        fputs("stop\nwait 3000\nexpect voices 0\n", f);
-        fclose(f);
+        fflush(f);
+        wrote = 1;
     } else {
         snprintf(path, sizeof path, "(cannot write %s/seed_%d.full.x0x)", dir, seed);
     }
-    for (i = 0; i < fz_n; i++)
+    for (i = 0; i < fz_n && !midfail; i++) {
+        char lb[128];
+        uint8_t v0 = ui.view, c0 = ui.classic;
+        int la0 = live_bridge_active();
+        uint32_t held0 = held_keys;                  /* the keys physically down before the event */
+        fz_line(lb, sizeof lb, &fz_ev[i]);
+        if (wrote) {
+            fputs(lb, f);
+            fflush(f);
+        }
         fz_apply(&fz_ev[i]);
+        if (ui.view != v0 || ui.classic != c0 || live_bridge_active() != la0) {
+            int k;                                   /* a view / mode change releases what was held */
+            for (k = 0; k < NKEYS; k++) {
+                if (!((held0 >> k) & 1u))
+                    continue;                        /* only keys held *before* the change are checked */
+                if (wrote) {
+                    fprintf(f, "expect staleheld%d 0\n", k);
+                    fflush(f);
+                }
+                if (hn_on[k] && hn_mode[k] != hn_mode_now()) {
+                    printf("FAIL fuzz seed %d: a view/mode change left key %d's note held at event %d\n",
+                           seed, k, i);
+                    midfail = 1;
+                }
+            }
+        }
+    }
     for (i = 0; i < NKEYS; i++)                       /* release every key and button still held */
         if ((held_keys >> i) & 1u) {
+            if (wrote && !midfail)
+                fprintf(f, "key %d up\n", i);
             held_keys &= ~(1u << i);
             run_ms(2);
         }
     for (i = 0; i < NB; i++)
         if ((held_btn >> i) & 1u) {
+            if (wrote && !midfail)
+                fprintf(f, "release %s\n", BTN_N[i]);
             held_btn &= ~(1u << i);
             run_ms(2);
         }
-    host_all_stop();                                  /* stop the transport (and any perf test) */
+    if (wrote && !midfail) {
+        fputs("stop\nwait 3000\nexpect voices 0\nexpect heldnotes 0\n", f);
+        fflush(f);
+    }
+    if (wrote)
+        fclose(f);
+    if (midfail) {                                    /* already reported the mid-run check */
+        printf("  seed %d -> %s\n", seed, path);
+        return 1;
+    }
+    host_all_stop();                                  /* stop both transports (never the all-notes-off) */
     run_ms(3000);                                     /* wait 3 s */
     {
-        int v = engine_voices_active();
-        if (v != 0) {
-            printf("FAIL fuzz seed %d: %d voices still sounding after the release tail\n", seed, v);
+        int v = engine_voices_active(), h = fz_tracked();
+        if (v != 0 || h != 0) {
+            printf("FAIL fuzz seed %d: %d voice(s), %d held-note table entr%s after the release tail\n",
+                   seed, v, h, h == 1 ? "y" : "ies");
             printf("  seed %d -> %s\n", seed, path);
-            return 1;
+            fail = 1;
         }
     }
-    printf("  ok fuzz seed %d (%d events, voices 0)\n", seed, fz_n);
-    return 0;
+    if (!fail)
+        printf("  ok fuzz seed %d (%d events, voices 0, heldnotes 0)\n", seed, fz_n);
+    return fail;
 }
 
 #ifndef X0X_WEB

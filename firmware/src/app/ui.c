@@ -146,6 +146,13 @@ enum { RK_CLIP_LEN, RK_CLIP_MODE, RK_CLIP_QUANT, RK_CLIP_SWING };
  * what that key began, whatever view, layer or mode is showing. Home/SEQ handoffs, set_view and
  * the STUDIO/LIVE/Classic switches release everything still held. */
 static uint8_t hn_on[NKEYS], hn_role[NKEYS], hn_note[NKEYS];
+/* T2c: the view / mode the note started in. The fuzzer's held-across-transition check compares it
+ * with the current one: a note that is still in the table after a view/mode change is a bug. */
+static uint8_t hn_mode[NKEYS];
+static uint8_t hn_mode_now(void)
+{
+    return (uint8_t)(ui.view | (ui.classic ? 0x40u : 0u) | (live_bridge_active() ? 0x80u : 0u));
+}
 static void note_key_up(int k)
 {
     if (k < 0 || k >= NKEYS || !hn_on[k])
@@ -161,8 +168,24 @@ static void note_key_down(int k, uint8_t role, uint8_t note)
         note_key_up(k);                              /* a retrigger releases the old note first */
     hn_role[k] = role;
     hn_note[k] = note;
+    hn_mode[k] = hn_mode_now();
     hn_on[k] = 1;
     live_bridge_play_key(role, note, 1, 88);
+}
+/* T2c: register a note the caller has already started, without starting it again. The legacy 303
+ * keyboard and step-preview paths send their own engine_bass_on (for accent and slide), so they
+ * use this to put the note in the table; every release (key up, a view/mode change, a stop) then
+ * goes through note_key_up / note_release_all and the note cannot hang. */
+static void note_key_track(int k, uint8_t role, uint8_t note)
+{
+    if (k < 0 || k >= NKEYS)
+        return;
+    if (hn_on[k])
+        note_key_up(k);                              /* a retrigger releases the old note first */
+    hn_role[k] = role;
+    hn_note[k] = note;
+    hn_mode[k] = hn_mode_now();
+    hn_on[k] = 1;
 }
 static void note_release_all(void)
 {
@@ -670,7 +693,8 @@ static void pref_value_of(pref_t r, int v, char *num, char *unit)
     if (!d || r.kind == R_ACT)
         return;
     if (d->names) {
-        put_s(num, d->names[v]);
+        int idx = v < 0 ? 0 : v > (int)d->max ? (int)d->max : v;   /* a value can outrun a switch's range (T2c) */
+        put_s(num, d->names[idx]);
         return;
     }
     if (r.kind == R_TAPE) {
@@ -2073,6 +2097,7 @@ static void bass_kbd(int key, int down)
 {
     int b = bidx(), n = kbd_note(key);
     if (down) {
+        note_key_track(key, (uint8_t)(1 + b), (uint8_t)n);   /* T2c: the table owns the note-off */
         engine_bass_on(b, n, (ui.btn & (1u << B_ENV)) != 0, kbd_held_note[b] != 0);
         kbd_held_note[b] = (uint8_t)n;
         if (ui.rec && !seq.playing) {
@@ -2085,8 +2110,7 @@ static void bass_kbd(int key, int down)
             mark_dirty();
         }
     } else if (kbd_held_note[b] == n) {
-        engine_bass_off(b);
-        kbd_held_note[b] = 0;
+        kbd_held_note[b] = 0;                        /* the note-off is note_key_up's (key_event) */
     }
 }
 
@@ -2108,18 +2132,19 @@ static void bass_step_key(int white, int down)
             mark_dirty();
         }
         ui.step_preview = key_sounds();               /* as the drum keys */
-        if (ui.step_preview)
-            engine_bass_on(b, bp->step[s].note + bp->transpose - 24, (bp->step[s].flags & BS_ACCENT) != 0, 0);
+        if (ui.step_preview) {
+            int note = bp->step[s].note + bp->transpose - 24;
+            note_key_track(WHITE_KEY[white], (uint8_t)(1 + b), (uint8_t)note);   /* T2c: table owns the off */
+            engine_bass_on(b, note, (bp->step[s].flags & BS_ACCENT) != 0, 0);
+        }
     } else if (ui.held_step == s) {
         if (!ui.step_created && !ui.step_edited && plat_ms() - ui.step_t0 < STEP_TAP_MS) {   /* a tap takes it off */
             bp->step[s].flags = G_REST;
             mark_dirty();
         }
-        if (ui.step_preview)
-            engine_bass_off(b);
         if (ui.step_edited && lock_step() >= 0)
             lock_release();
-        ui.step_preview = 0;
+        ui.step_preview = 0;                          /* the note-off is note_key_up's (key_event) */
         ui.held_step = -1;
     }
 }
