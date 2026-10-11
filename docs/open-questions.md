@@ -17,6 +17,7 @@ These questions are still unresolved. When one is answered, record the answer in
 
 ## Resolved 2026-10-11 (plan review)
 - **Build host.** deltron.local: x86_64, Ubuntu 26.04, glibc 2.43, 12 cores, 30 GB RAM, 49 GB free, with Docker, gcc, rsync and qemu. SSH works as `caleb`. KVM doesn't speed up the pi32v2 emulator, because QEMU has to emulate the instructions in software.
+- **Classic patterns removed, delay 0.75 s** (owner, 2026-10-11): [ADR-0004](decisions/0004-remove-classic-shorten-delay.md). Frees about 39 KB of RAM pool; built in TCLS.
 - **The LIVE layer toggle is the SEL button** (owner, 2026-10-11): use the panel's printed label and X0X's name (`B_SEL`) everywhere. SEL confirms in menus and toggles the PADS/PLAY layers in LIVE. Only a long press on PLAY leaves LIVE. The SCL wording in docs, help cards and the LIVE footer is renamed in TPOL.
 - **One take per song** in v1.
 - **Save model.** One state per song, autosaved while stopped, and undo is the safety net.
@@ -48,11 +49,3 @@ These questions are still unresolved. When one is answered, record the answer in
 
 ## Core-1 data integrity with FM6 offloaded (2026-10-11, T5perf review)
 X0X's core-1 check word covers the job hand-off, not the data core 1 reads while it renders FM6. On a unit with a bad core 1, FM6 could click or hold a stuck-loud voice before the hand-off check trips the single-core fallback. Memory isn't corrupted: no pointers are loaded from that data. The 808 has the same exposure. Only a healthy unit has been measured. If owners report FM6 glitches, offer a GLOBAL option to keep FM6 on core 0.
-
-## The RAM budget is nearly spent (2026-10-11)
-After takes (T9i) and MIDI (T11i), the RAM pool has only a few KB above X0X's required 8 KB spare. To fit, takes were cut to 1,024 events and the undo ring to about 6 KB. Any further feature will need RAM from somewhere. The big remaining users:
-- **X0X's delay line: 88 KB for 1.0 s.** Cutting it to 0.75 s frees about 22 KB; the longest synced delay at 80 bpm stays a quarter note.
-- **X0X's project patterns, kept in RAM for Classic.** Loading them only when you enter Classic would free roughly 17 KB or more.
-- The punch FX history (32 KB).
-
-The first two are the candidates. Which trade do you prefer before v1 grows further?

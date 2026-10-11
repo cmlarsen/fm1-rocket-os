@@ -19,6 +19,7 @@ This folder is the project's memory: linked markdown documents that are the sour
 - [ADR-0001: Fork an existing GPL-3.0 firmware](decisions/0001-base-platform.md) (accepted; X0X proposed)
 - [ADR-0002: device code in C99](decisions/0002-language-c.md) (proposed)
 - [ADR-0003: Keep FM sound design, off the performance path](decisions/0003-sound-design-scope.md) (accepted)
+- [ADR-0004: Remove Classic patterns, delay 0.75 s](decisions/0004-remove-classic-shorten-delay.md) (accepted)
 
 ## Research (snapshot as of 2026-10-10)
 - [FM-1 hardware, toolchain and flashing](research/fm1-hardware.md)
