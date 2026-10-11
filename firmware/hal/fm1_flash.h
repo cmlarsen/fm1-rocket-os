@@ -230,8 +230,23 @@ static void fl_plain_window_init(void)
     __asm__ volatile("csync\n\tsti" ::: "memory");
 }
 
-static inline uint32_t irq_save(void) { __asm__ volatile("cli" ::: "memory"); return 0; }
-static inline void irq_restore(uint32_t f) { (void)f; __asm__ volatile("csync\n\tsti" ::: "memory"); }
+/* T7b: a nest-safe mask. The first irq_save disables, the last irq_restore re-enables; nested
+ * calls are counted in software (the pi32v2 status does not expose the interrupt-enable bit), so an
+ * inner restore never re-enables while an outer section still holds. */
+static uint32_t irq_nest;
+static inline uint32_t irq_save(void)
+{
+    uint32_t prev = irq_nest;
+    if (irq_nest++ == 0u)
+        __asm__ volatile("cli" ::: "memory");
+    return prev;
+}
+static inline void irq_restore(uint32_t f)
+{
+    irq_nest = f;
+    if (f == 0u)
+        __asm__ volatile("csync\n\tsti" ::: "memory");
+}
 
 static int fl_erase4k(uint32_t off, uint32_t *took_us)
 {

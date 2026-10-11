@@ -229,6 +229,7 @@ static void run_script(const char *script)
                 putf("muted %s=%d\n", ROLE[atoi_tok(t, 1) < NROLES ? atoi_tok(t, 1) : 0],
                      clip_engine_muted(&eng, (uint8_t)atoi_tok(t, 1)));
             else if (!strcmp(t[0], "unused"))    song.clip[atoi_tok(t, 1)].used = 0;
+            else if (!strcmp(t[0], "changed"))   clip_engine_clip_changed(&eng, (uint8_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "clip")) {
                 int idx = atoi_tok(t, 1), len = atoi_tok(t, 3);
                 if (!strcmp(t[2], "drum")) clip_drum(idx, len);
@@ -753,6 +754,43 @@ int main(void)
         "query\n"
         "runto 30000\n"
         "query\n");
+
+    /* T7b: the main loop owns the snapshot — the ISR reads only play[]. An edit reaches the audio
+     * when the main loop copies it in with clip_engine_clip_changed (masked); the ISR swaps a
+     * staged launch copy next -> play at the step boundary. */
+    run_case("edit_while_playing",
+        "clip 0 drum 4\n"
+        "hit 0 0 0\n"
+        "play\n"
+        "launch 0 0\n"
+        "run 30000\n"
+        "hit 0 0 2\n"                   /* edit the song's clip while it plays */
+        "changed 0\n"                   /* the main loop writes play[] (masked) */
+        "runto 150000\n");
+
+    /* a stress pass: toggle every step of the playing clip in turn, each with its own snapshot */
+    run_case("edit_every_step",
+        "clip 0 drum 16\n"
+        "play\n"
+        "launch 0 0\n"
+        "run 2000\n"
+        "hit 0 0 0\nchanged 0\nrun 3000\n"
+        "hit 0 0 1\nchanged 0\nrun 3000\n"
+        "hit 0 0 2\nchanged 0\nrun 3000\n"
+        "hit 0 0 3\nchanged 0\nrun 3000\n"
+        "hit 0 0 4\nchanged 0\nrun 3000\n"
+        "hit 0 0 5\nchanged 0\nrun 3000\n"
+        "hit 0 0 6\nchanged 0\nrun 3000\n"
+        "hit 0 0 7\nchanged 0\nrun 3000\n"
+        "hit 0 0 8\nchanged 0\nrun 3000\n"
+        "hit 0 0 9\nchanged 0\nrun 3000\n"
+        "hit 0 0 10\nchanged 0\nrun 3000\n"
+        "hit 0 0 11\nchanged 0\nrun 3000\n"
+        "hit 0 0 12\nchanged 0\nrun 3000\n"
+        "hit 0 0 13\nchanged 0\nrun 3000\n"
+        "hit 0 0 14\nchanged 0\nrun 3000\n"
+        "hit 0 0 15\nchanged 0\nrun 3000\n"
+        "runto 400000\n");
 
     drift_check();
     window_check();

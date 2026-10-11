@@ -36,6 +36,8 @@ void engine_perform_engage(int fx, int latch) { (void)fx; (void)latch; }
 void engine_perform_release(int fx) { (void)fx; }
 int engine_nvoices(int t) { (void)t; return 1; }
 int engine_nparams(int t, int v) { (void)t; (void)v; return 0; }
+uint32_t engine_crit_enter(void) { return 0; }        /* T7b: the test has no ISR */
+void engine_crit_exit(uint32_t s) { (void)s; }
 
 static int fails;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); fails++; } } while (0)

@@ -1,0 +1,29 @@
+# case edit_while_playing
+# script:
+clip 0 drum 4
+hit 0 0 0
+play
+launch 0 0
+run 30000
+hit 0 0 2
+changed 0
+runto 150000
+
+# events:
+0 clip_queued drums 0 0 0
+0 playing bass 0 0 0
+0 clip_started drums 0 0 0
+0 drum drums 0 0 0
+24000 drum drums 0 0 0
+36000 drum drums 0 0 0
+48000 drum drums 0 0 0
+60000 drum drums 0 0 0
+72000 drum drums 0 0 0
+84000 drum drums 0 0 0
+96000 drum drums 0 0 0
+108000 drum drums 0 0 0
+120000 drum drums 0 0 0
+132000 drum drums 0 0 0
+144000 drum drums 0 0 0
+
+# events=15

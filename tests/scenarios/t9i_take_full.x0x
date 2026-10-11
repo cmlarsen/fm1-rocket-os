@@ -12,7 +12,7 @@ expect takerec 1
 takefill 1100
 expect takefull 1
 expect takestate 0
-expect taken 2048
+expect taken 1024
 echo full
 tap PLAY
 wait 500

@@ -50,6 +50,8 @@ run uac sh -c "$CC -O2 -w -Ifirmware/src -Ifirmware/hal -o $OUT/uac_test tests/h
 run trs sh -c "$CC -O2 -w -Ifirmware/src -Ifirmware/hal -o $OUT/trs_test tests/host/trs_test.c && $OUT/trs_test"
 run undo sh -c "$CC -O2 -Wall -Wextra -Wno-unused-function -o $OUT/undo_test tests/host/undo_test.c && $OUT/undo_test"
 run lz sh -c "$CC $W -o $OUT/lz_test tests/host/lz_test.c && $OUT/lz_test"
+# T7b re-review: the host plat_crit nesting
+run crit sh -c "$CC $W -I. -o $OUT/crit_test tests/host/crit_test.c host/plat_crit_host.c && $OUT/crit_test"
 # T3: the LIVE bridge's pattern -> song mapping; clip_engine.c at the device FS (44.1 kHz)
 run live_bridge sh -c "$CC $W -I. -Ifirmware/src -DX0X_HOST -DCLIP_ENGINE_FS=44100 -o $OUT/live_bridge_test tests/host/live_bridge_test.c firmware/src/app/live_bridge.c core/seq/clip_engine.c core/seq/take.c && $OUT/live_bridge_test"
 # T6i: song_io over a RAM song flash (its own live_bridge stubs); song_store.c is its own unit
@@ -87,6 +89,8 @@ if [ -f build/x0x.fwsc ]; then
 else
     echo "  skip update-path tests (no build/x0x.fwsc: run ./build.sh)"
 fi
+# T11h: every gesture-table button in the interaction model has a help card
+run check-help python3 tools/check_help.py
 run host-build sh host/build_host.sh
 if [ "$UNIT_ONLY" = 1 ]; then
     [ $FAIL -eq 0 ] && echo "unit tests passed" || echo "UNIT TESTS FAILED"

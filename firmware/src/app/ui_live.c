@@ -549,8 +549,9 @@ static void live_draw_header(void)
         cv_text(4 + w + 11, vc(&AF_S, 3, 14), &AF_S, "REC", C_BLACK);
     } else {
         cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
-                take_open ? "TAKE" : fx_layer_active() ? "FX" : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
-                (take_open || fx_layer_active()) ? TOK_ACCENT : TOK_MID);
+                help_shift_active() ? "SHIFT" : take_open ? "TAKE" : fx_layer_active() ? "FX"
+                                   : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
+                (take_open || fx_layer_active()) && !help_shift_active() ? TOK_ACCENT : TOK_MID);
     }
     x = 104;
     if (playing)

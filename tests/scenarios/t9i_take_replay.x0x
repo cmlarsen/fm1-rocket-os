@@ -33,11 +33,11 @@ release FX
 wait-bar 2
 waitbarabs 7
 eventsstop
-takedump take_rec.txt
 tap REC
 wait-bar 2
 expect takehas 1
 expect takestate 0
+takedump take_rec.txt
 echo recorded
 # replay: stop, then play the take and log the same note/drum stream
 tap PLAY

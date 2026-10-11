@@ -319,6 +319,10 @@ static int studio_handle_button(int b)
             return 1;
         case B_SEL:
             return 1;
+        case B_SEQ:                                      /* T7b: the cycle ends back at the song home */
+            set_view(V_STUDIO);
+            studio_enter();
+            return 1;
         case B_ARP:
             say("CLASSIC: GLO", 0);
             return 1;
@@ -337,13 +341,11 @@ static int studio_handle_button(int b)
     case B_EDIT:
         studio_open_sound();
         return 1;
-    case B_SEQ: {                                        /* STUDIO 2/5: create the clip, open settings */
+    case B_SEQ: {                                        /* STUDIO 2/3/4: create the clip, open the editor */
         int c = st_cursor_clip();
         if (c >= 0) {
-            if (!live_bridge_clip_used(c))
-                song_io_clip_create(c, 16, 0 /*Loop*/, 0 /*Bar*/);
-            set_view(V_CLIPSET);
-            say("CLIP SETTINGS", 0);
+            clip_open(c);                                /* T7b: creates an empty slot (undoably) + NOTES */
+            say("CLIP EDIT", 0);
         }
         return 1;
     }
@@ -353,7 +355,13 @@ static int studio_handle_button(int b)
     case B_REC:
         if (ui.btn & (1u << B_HOME))
             return 0;                                    /* HOME + REC: undo, handled by ui.c */
-        say(ui.rec ? "REC OFF" : "REC: T7B", 0);         /* T7b records the clip */
+        {                                                /* T7b: record into the cursor clip */
+            int c = st_cursor_clip();
+            if (c >= 0) {
+                clip_record_open(c);                     /* creates an empty slot: one undo entry */
+                say("REC", 0);
+            }
+        }
         return 1;
     default:
         return 0;                                        /* FX, LFO, GLO, PLAY, SAVE ... */
@@ -693,7 +701,7 @@ static void studio_draw_header(void)
             st_name(st_cursor_clip(), nm);
             layer = nm;
         } else {
-            layer = st.copy_src != 0xFF ? "COPY" : "SONG";
+            layer = help_shift_active() ? "SHIFT" : st.copy_src != 0xFF ? "COPY" : "SONG";
         }
         cv_text(lx, vc(&AF_S, 3, 14), &AF_S, layer, TOK_MID);
         x = lx + tw(&AF_S, layer) + 2;               /* T7a D6: 2 px clearance from the transport */

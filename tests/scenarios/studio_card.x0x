@@ -4,6 +4,8 @@ wait 300
 expect songkey 0
 expect songscale 0
 tap SEQ
+tap SEQ
+tap SEQ
 spin K1 -4
 expect cliplen0 12
 spin K2 1

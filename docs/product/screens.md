@@ -36,7 +36,7 @@ Related: [interaction model](interaction-model.md) · [UX principles](ux-princip
 | STUDIO | 1 Song home | Song card, selected clip, role × clip grid with cursor |
 | STUDIO | 2 Empty slot | Cursor on an empty slot. REC records, SEQ steps it in. |
 | STUDIO | 3 Clip, notes | Piano roll, step cursor, playhead, STEP/NOTE/VEL/LEN cards |
-| STUDIO | 4 Clip, drums | 8-lane grid. White keys are steps 1–16; black keys pick the lane. |
+| STUDIO | 4 Clip, drums | An 11-lane grid (14 px rows, scrolled). White keys are steps 1–16; black keys pick the lane; HOME + a white key toggles the accent; REC turns white keys 1–11 into finger drumming (HOME accents a hit). |
 | STUDIO | 5 Clip settings | Length, mode (Loop/Once), launch on (beat, bar, end of clip), swing |
 | STUDIO | 6 Sound browser | Role-filtered presets with an engine tag. EDIT opens the deep editor. |
 | STUDIO | 7 Songs | New song row, the list, storage meter |

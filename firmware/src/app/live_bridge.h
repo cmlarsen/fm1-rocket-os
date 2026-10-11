@@ -26,6 +26,12 @@ enum { LIVE_PADS, LIVE_PLAY };
 
 #define LIVE_NCLIPS 27u          /* core/model/model.h's NCLIPS (asserted in live_bridge.c) */
 #define LIVE_CLIP_NONE 0xFFu     /* core/model/model.h's CLIP_NONE */
+#define LIVE_MAX_STEPS 64u       /* model.h CLIP_MAX_STEPS */
+#define LIVE_STEPS_PER_BAR 16u   /* model.h STEPS_PER_BAR */
+#define LIVE_DRUM_LANES 11u      /* model.h DRUM_LANES */
+#define LIVE_MAX_NOTES 96u       /* model.h CLIP_MAX_NOTES */
+#define LIVE_MOTION_LANES 2u     /* model.h CLIP_MOTION_LANES */
+#define LIVE_PARAM_NONE 0xFFFFu  /* model.h PARAM_NONE */
 
 /* Behavior of a clip's motion lane's `param` field, which model.h leaves free: it is the
  * engine.h (target, voice, index) triple, packed so the low byte is the index and the high
@@ -93,6 +99,7 @@ int  live_bridge_transport_playing(void);
 /* Clip launching, straight through to the clip engine's ring (main-loop safe). */
 void live_bridge_launch(uint8_t clip);      /* at the clip's own quantize */
 void live_bridge_launch_now(uint8_t clip);  /* HOME + key: the next step */
+void live_bridge_launch_at(uint8_t clip, uint32_t at_step);   /* T7b: exactly on a global step */
 void live_bridge_stop(uint8_t role);        /* stop the role at its quantize */
 
 /* PLAY layer: a key down/up on the focused role, through X0X's engine commands. `note` is the
@@ -102,6 +109,13 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
 /* Tempo, in the clip engine's single source of truth. */
 void live_bridge_set_bpm(uint16_t bpm_x10);
 uint16_t live_bridge_bpm_x10(void);
+
+/* T7b: after an edit to a clip, write it into the engine's playing copy (and a staged launch
+ * copy) with the audio IRQs masked; and the transport position for recording. */
+void live_bridge_clip_changed(uint8_t clip);
+uint32_t live_bridge_global_step(void);
+uint8_t live_bridge_step_phase(void);          /* 0..255 into the current 16th */
+uint8_t live_bridge_clip_step(uint8_t role);   /* the step inside a role's playing clip */
 
 /* T10i: the sample distances from the transport's current position to its next 1/8 and 1/16 grid
  * boundaries (unswung, like the quantize points), for the punch FX. Only meaningful while the
