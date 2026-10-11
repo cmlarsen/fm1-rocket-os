@@ -1,0 +1,55 @@
+# T8 (pending): the songs list, New > Empty/Starter and the 5-slot limit.
+#
+# SAVE held opens SONGS (the T8i hook). New songs are written to the first free slot
+# and opened; a sixth is refused with "5 SONGS MAX: DELETE ONE".
+# Not run by `make scenarios` yet: see pending/README.md.
+wait 300
+press SAVE
+wait 700
+release SAVE
+wait 20
+expect songscreen LIST
+expect songused 0
+shot s01_list.png
+
+# New > Empty in the first free slot
+tap SEL
+wait 20
+expect songscreen NEW
+shot s02_new.png
+turn ALGO -1
+tap SEL
+wait 20
+expect songscreen LIST
+expect songslot 0 "NEW SONG"
+expect songused 1
+expect songloaded 1
+shot s03_empty_created.png
+
+# New > Starter
+tap SEL
+wait 20
+turn ALGO 1
+tap SEL
+wait 20
+expect songslot 1 "STARTER"
+expect songused 2
+shot s04_starter_created.png
+
+# three more, then the sixth is refused
+tap SEL
+wait 20
+tap SEL
+wait 20
+tap SEL
+wait 20
+tap SEL
+wait 20
+tap SEL
+wait 20
+expect songused 5
+expect songslot 5 EMPTY
+shot s05_five_max.png
+
+tap HOME
+wait 20

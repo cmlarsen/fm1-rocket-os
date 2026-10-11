@@ -14,6 +14,9 @@ These questions are still unresolved. When one is answered, record the answer in
 - **Save model.** One state per song, autosaved while stopped, and undo is the safety net.
 - **Scope cuts:** quantize is Bar, Beat or End; modes are Loop or Once; six punch FX; one pad map; no scenes. The full list is in [build-plan](engineering/build-plan.md#deferred-past-v1).
 
+## Resolved 2026-10-11 (T8 review)
+- **The song's key and scale.** `song_t` gained `key` (0–11) and `scale` (`SCALE_*`) in the former `rsv[2]`, validated on load; the New-song screen stores them and the Starter's chords follow progressions in them. See [model](engineering/model.md).
+
 ## Owner decisions
 1. **Confirm the fork target: X0X.** It is recommended, and FM6, NOISE and the newer gfx would be ported from Felucca. See [fork evaluation](research/fork-evaluation.md).
 2. **Default pad map.** The proposal is keyboard zones (see [screens](product/screens.md#design-decisions-made-while-drawing)). It is waiting for the owner's review on the design canvas.
