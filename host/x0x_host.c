@@ -155,6 +155,60 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
     store_writes++;
     return 0;
 }
+
+/* T6i: the song store's flash, 0xA0000..0xDBFFF (60 sectors), kept across a simulated reboot.
+ * Erase -> 0xFF, program only clears bits and never wraps a page, and a cut (the "songcut"
+ * command) can die inside an op, leaving junk: exactly what the store's power-safety is for. */
+#define HOST_SONG_BASE 0xA0000u
+#define HOST_SONG_SECTORS 60u
+#define HOST_SONG_SIZE (HOST_SONG_SECTORS * 4096u)
+static uint8_t song_flash[HOST_SONG_SIZE];
+static uint32_t song_writes;                  /* erase + program ops (the scenarios count these) */
+static long song_cut = -1, song_ops;          /* songcut N: die at op N (-1 = no cut) */
+
+static int in_song_region(uint32_t off, uint32_t n)
+{
+    return off >= HOST_SONG_BASE && (off - HOST_SONG_BASE) <= HOST_SONG_SIZE &&
+           n <= HOST_SONG_SIZE - (off - HOST_SONG_BASE);
+}
+int plat_song_read(uint32_t off, void *dst, uint32_t n)
+{
+    if (!in_song_region(off, n))
+        return -1;
+    memcpy(dst, song_flash + (off - HOST_SONG_BASE), n);
+    return 0;
+}
+int plat_song_erase(uint32_t off)
+{
+    if (!in_song_region(off, 4096u) || (off & 0xFFFu))
+        return -1;
+    song_writes++;
+    if (song_cut >= 0 && song_ops >= song_cut) {          /* the power died mid-erase */
+        song_cut = -1;
+        return -1;
+    }
+    song_ops++;
+    memset(song_flash + (off - HOST_SONG_BASE), 0xFF, 4096u);
+    return 0;
+}
+int plat_song_program(uint32_t off, const void *src, uint32_t n)
+{
+    const uint8_t *s = (const uint8_t *)src;
+    uint32_t i;
+    if (!in_song_region(off, n) || n == 0 || n > 256u || ((off & 0xFFu) + n) > 256u)
+        return -1;
+    song_writes++;
+    if (song_cut >= 0 && song_ops >= song_cut) {          /* the power died inside the page */
+        for (i = 0; i < n / 2u; i++)
+            song_flash[off - HOST_SONG_BASE + i] &= s[i];
+        song_cut = -1;
+        return -9;
+    }
+    song_ops++;
+    for (i = 0; i < n; i++)
+        song_flash[off - HOST_SONG_BASE + i] &= s[i];
+    return 0;
+}
 /* the FM6 patch sector: the simulator has no such sector (T5i), so the engine uses its ROM voices */
 const uint8_t *plat_fm6_vbank(uint32_t *len) { if (len) *len = 0; return 0; }
 
@@ -255,6 +309,7 @@ void plat_stalls_enable(int on) { (void)on; }
 
 /* -------------------------------------------------------------- app --- */
 #include "../firmware/src/app/x0x.h"
+#include "../firmware/src/app/song_io.h"
 #include "../firmware/src/app/project.c"
 #include "../firmware/src/app/ui.c"
 
@@ -851,6 +906,16 @@ static int expect(const char *what, const char *val)
         got = (int)note_ons;
     else if (!strcmp(what, "store_writes"))
         got = (int)store_writes;
+    else if (!strcmp(what, "songwrites"))          /* T6i: erase + program ops on the song region */
+        got = (int)song_writes;
+    else if (!strcmp(what, "songsaves"))           /* T6i: song_io's successful saves */
+        got = song_io_saves();
+    else if (!strcmp(what, "songdirty"))           /* T6i: the current song changed since the last save */
+        got = song_io_dirty();
+    else if (!strcmp(what, "songloaded"))          /* T6i: the current song came from slot 0 */
+        got = song_io_loaded();
+    else if (!strncmp(what, "keyclip", 7))         /* T6i: keyclipK, the current song's key -> clip map */
+        got = live_bridge_key_clip(atoi(what + 7));
     else if (!strcmp(what, "peak_db_max")) {
         double db = 20.0 * log10(peak_out > 1e-9f ? peak_out : 1e-9f);
         if (db > atof(val)) {
@@ -1015,6 +1080,7 @@ int main(int argc, char **argv)
     }
     snprintf(out, sizeof out, "%s/midi_out.txt", dir);
     midi_log = fopen(out, "w");
+    memset(song_flash, 0xFF, sizeof song_flash);      /* T6i: an erased song region at power-on */
     boot();
     while (fgets(line, sizeof line, sc)) {
         char cmd[32] = {0}, a[256] = {0}, b[64] = {0}, c[64] = {0}, line_d[64] = {0};
@@ -1296,6 +1362,20 @@ int main(int argc, char **argv)
                 proj.arr.lane[i].used = 0;
         } else if (!strcmp(cmd, "cpu2")) {              /* cpu2 0|1: the simulated second core */
             plat_cpu2_set(atoi(a));
+        } else if (!strcmp(cmd, "assignkey")) {         /* T6i: T10's assign-keys, through song_io */
+            song_io_set_key_clip(atoi(a), atoi(b));
+        } else if (!strcmp(cmd, "songcorrupt")) {       /* T6i: flip every song record's magic */
+            uint32_t o;
+            for (o = 0; o + 4u <= HOST_SONG_SIZE; o += 4096u) {
+                uint32_t m = (uint32_t)song_flash[o] | (uint32_t)song_flash[o + 1u] << 8 |
+                             (uint32_t)song_flash[o + 2u] << 16 | (uint32_t)song_flash[o + 3u] << 24;
+                if (m == 0x31545353u)
+                    song_flash[o] = 0;
+            }
+        } else if (!strcmp(cmd, "songcut")) {           /* T6i: the power dies at song flash op N */
+            song_cut = (long)atoi(a);
+        } else if (!strcmp(cmd, "songops")) {           /* T6i: report the song flash op counter */
+            printf("  song ops %ld writes %u\n", song_ops, song_writes);
         } else if (!strcmp(cmd, "reboot")) {
             memset(&proj, 0, sizeof proj);
             boot();

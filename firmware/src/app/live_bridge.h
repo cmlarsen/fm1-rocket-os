@@ -53,6 +53,13 @@ typedef struct {
 /* Set up the static song and clip engine. Call once from engine_init()/ui_init(). */
 void live_bridge_init(void);
 
+/* T6i: the current song. `song_io` reads and edits it (a model.h `song_t *`, void here so this
+ * header keeps X0X's own `song_t` out), re-inits the clip engine after a change, and locks it so
+ * LIVE stops rebuilding from the project once slot 0 holds the song. */
+void *live_bridge_song(void);
+void  live_bridge_song_reload(void);
+void  live_bridge_lock_song(int on);
+
 /* Build the song from the project's patterns and make the bridge the audio source. The clip
  * transport starts stopped. `pats` is proj.pat (NPAT patterns), `bpm_x10` the project tempo. */
 void live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10);

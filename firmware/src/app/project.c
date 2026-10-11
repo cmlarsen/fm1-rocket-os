@@ -15,6 +15,7 @@
 #include "x0x.h"
 #include "../dsp/drum909.h"            /* DR_SD (the sound's revisions) */
 #include "../dsp/master.h"             /* MST_* (the sound's revisions) */
+#include "song_io.h"                   /* T6i: the song store, saved beside the project */
 #include "lz.c"
 
 project_t proj;
@@ -57,8 +58,9 @@ void project_defaults(void)
 /* how full the stream's room is, in % (GLO > ABOUT) */
 int project_mem_pct(void) { return (int)((packed_len * 100u + STREAM_CAP - 1u) / STREAM_CAP); }
 
-/* object payload: format word + body */
-static uint8_t io_buf[PLAT_STORE_MAX] __attribute__((aligned(4)));
+/* object payload: format word + body (T6i: in .pool, so song_store.c's own lz.c copy does not
+ * push .bss past the 96 KiB RAM region) */
+static uint8_t io_buf[PLAT_STORE_MAX] X0X_POOL __attribute__((aligned(4)));
 
 /* what each object last held on the flash (a hash of its payload), so a save writes only the
  * objects that changed: an autosave usually erases one or two sectors, not six */
@@ -517,5 +519,10 @@ int project_save(void)
         return -1;
     if (save_obj(OBJ_SOUND, &proj.sound, sizeof proj.sound))
         return -2;
-    return save_stream();
+    {
+        int rc = save_stream();
+        if (rc)
+            return rc;              /* -7 (or a write error): nothing more was written */
+    }
+    return song_io_flush();         /* T6i: the song, after the project, in the same idle window */
 }
