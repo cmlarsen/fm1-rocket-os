@@ -31,8 +31,8 @@ A record lives in an **extent**. Song extents are 4 sectors; take extents are 5:
 `N + 1` extents of each kind, so a save always has a spare: it writes the new record into the free
 extent and only then un-owns the old one. The previous take extent is kept until it is reused, so a
 replace-take is undoable once. With one spare of each kind, **N = 5 slots** fit worst-case
-`(5+1)*4 + (5+1)*5 = 54 ≤ 60`. The coordinator will set `SONG_SLOTS = 5` in `model.h`; T6c does not
-edit `model.h`.
+(`(5+1)*4 + (5+1)*5 = 54 ≤ 60`), and `model.h` now carries `SONG_SLOTS 5` (the coordinator lowered
+it after this lane measured the size). T6c does not edit `model.h`.
 
 This replaces A/B: **there is no directory on flash.** `song_store_init` scans every extent header, checks
 its payload CRC and keeps the **newest valid record per slot** (sequence number). A power cut during
@@ -198,9 +198,8 @@ no libm, no `double`; `memcpy` comes from X0X's `libc.c`.
   still returns the bytes of a deleted slot (they are what undelete restores).
 - The previous take is kept per slot and evicted only when the 6-extent pool is reused, so a
   replace-take is undoable exactly once; `undo_stack_undo` for a take returns 0 if it was evicted.
-- `model.h` still says `SONG_SLOTS 8`; use `SONG_STORE_SLOTS` (5) until the coordinator lowers it.
+- `model.h` carries `SONG_SLOTS 5`, matching `SONG_STORE_SLOTS`.
 
 ## Open items for the coordinator
 
-- Lower `SONG_SLOTS` to 5 in `model.h` (T6c does not edit it).
 - The 6 reserved sectors at the end of the region are unallocated headroom (e.g. a future format).
