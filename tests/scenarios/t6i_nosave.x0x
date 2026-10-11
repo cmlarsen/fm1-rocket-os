@@ -1,0 +1,37 @@
+# T6i: nothing writes the song store while playing or while in LIVE. A song edit made in LIVE
+# stays in RAM (dirty); the store is only written once STUDIO is stopped and quiet.
+wait 300
+expect songloaded 0
+expect songdirty 1
+expect songwrites 0
+# --- in LIVE, playing: a key assignment is not written ---
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 1
+tap PLAY
+expect playing 1
+assignkey 3 15
+expect keyclip3 15
+expect songdirty 1
+wait 6000
+expect songsaves 0
+expect songwrites 0
+# --- still in LIVE, stopped: still nothing ---
+tap PLAY
+expect playing 0
+assignkey 4 16
+wait 6000
+expect songsaves 0
+expect songwrites 0
+# --- leave LIVE: the autosave resumes once STUDIO is stopped and quiet ---
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 0
+wait 5000
+expect songsaves 1
+expect songwrites >0
+expect songdirty 0

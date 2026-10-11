@@ -231,6 +231,18 @@ unit-store:
 	    tests/host/song_fuzz.c core/model/song_store.c
 	build/host/song_fuzz_san
 
+# T6i: song_io glues the store, the LIVE song and undo; its own test stubs live_bridge and drives
+# a RAM song flash (the power cut included). Song_store.c is its own unit (it includes lz.c).
+.PHONY: unit-songio
+unit-songio:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/song_io_test \
+	    tests/host/song_io_test.c firmware/src/app/song_io.c core/model/song_store.c core/model/undo_stack.c
+	build/host/song_io_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/song_io_test_san \
+	    tests/host/song_io_test.c firmware/src/app/song_io.c core/model/song_store.c core/model/undo_stack.c
+	build/host/song_io_test_san
+
 .PHONY: unit-take
 unit-take:
 	@mkdir -p build/host
@@ -242,7 +254,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-take unit-midi unit-fx unit-name
+unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens
