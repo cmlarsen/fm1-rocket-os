@@ -162,7 +162,7 @@ Overnight the owner asked for more parallelism. Each task with a self-contained 
   - `all_off_now` sends no MIDI note-offs or clock stop to external gear.
   - K1–K4 changes made in LIVE are saved into the project.
   - The screen tour (`screens_tour.x0x`) doesn't visit LIVE yet, so `screens-lint` doesn't cover it.
-- **Device install log:** the T3 build (`build/rc/rocket-t3-*.fwsc`) was installed unattended on 2026-10-11, and the FM-1 stayed up for 30 s, answering `FM-1_900 [running]`.
+- **Device install log:** the RC1 release build `build/rc/rocket-rc1-1662c01.fwsc` (songs on flash, FM6 on core 1) was installed unattended on 2026-10-11 and stayed up for 40 s through its first song autosave. Before that, the T3 build (`build/rc/rocket-t3-*.fwsc`) was installed unattended on 2026-10-11, and the FM-1 stayed up for 30 s, answering `FM-1_900 [running]`.
 
 ## Riskiest tasks
 | Task | Risk | When we'll know |

@@ -1,0 +1,12 @@
+{
+  "t5perf_core0.wav": {
+    "frames": 88576,
+    "peak": 0.401611,
+    "rms": 0.067402
+  },
+  "t5perf_core1.wav": {
+    "frames": 88576,
+    "peak": 0.401611,
+    "rms": 0.067402
+  }
+}

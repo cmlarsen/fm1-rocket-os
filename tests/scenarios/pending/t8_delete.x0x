@@ -1,0 +1,53 @@
+# T8 (pending): delete with the hold ring, undo, reboot persistence, and open + reboot.
+# See pending/README.md: not run until T8i wires the hook and the store ops.
+wait 300
+press SAVE
+wait 700
+release SAVE
+wait 20
+expect songused 2
+expect songcurrent 0        # slot 0 is the boot song
+
+# Put the song on the cursor and open its menu, then hold SEL on the Delete row
+turn SELECT 2
+tap EDIT
+wait 20
+turn SELECT 3
+wait 20
+press SEL
+wait 750
+shot s10_delete_ring.png     # the ring about half full
+wait 800
+release SEL
+wait 20
+expect songused 1
+expect songslot 1 EMPTY
+shot s11_deleted.png
+
+# HOME + REC undoes it (one level, until the next delete)
+press HOME
+press REC
+release REC
+release HOME
+wait 20
+expect songused 2
+expect songslot 1 "SUNDAY DUB"
+shot s12_restored.png
+
+# the reboot keeps the undo result
+reboot
+expect songused 2
+shot s13_after_reboot.png
+
+# open another song, then reboot: the same song is back
+press SAVE
+wait 700
+release SAVE
+wait 20
+turn SELECT 2
+tap SEL
+wait 20
+wait 5000
+reboot
+expect songloaded 1
+expect songcurrent 1

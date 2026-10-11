@@ -209,27 +209,39 @@ static void rc_stop(void)
         live_bridge_exit();
         live_clear_held();
         set_view(rc_sav_view == V_LIVE ? V_HOME : rc_sav_view);
+        rc_settle();                    /* T5perf: let the exit land, as the sequencer stop below does */
     } else if (seq.playing || seq.req_start || seq.req_stop) {
         seq_stop(&seq);
         rc_settle();                    /* let the stop land before the next level starts */
     }
     engine_guard_enable(1);
+    engine_core2_force_off(0);          /* T5perf: core 1 is available again after the run */
     rc_restore_seq();
     rc_level = 0;
 }
 
 int rc_stress(int n, int cap)
 {
+    int single = 0, base = n;
     rc_stop();
     if (n <= 0)
         return 0;
-    if (n > 4)
+    /* T5perf: levels 5/6 are levels 2/1 with core 1 forced off (the single-core numbers a unit that
+     * cannot run the second core would see). */
+    if (n == 5) {
+        single = 1;
+        base = 2;
+    } else if (n == 6) {
+        single = 1;
+        base = 1;
+    } else if (n > 4)
         return -1;
     rc_save();
     rc_build_pattern(&rc_pat[0]);
     rc_level = n;
+    engine_core2_force_off(single);
 
-    if (n == 1) {                       /* the X0X baseline: all four parts, the sequencer's own path */
+    if (base == 1) {                    /* the X0X baseline: all four parts, the sequencer's own path */
         int p;
         if (seq.playing)
             seq_stop(&seq);
@@ -247,15 +259,15 @@ int rc_stress(int n, int cap)
         return 0;
     }
 
-    /* n = 2, 3 or 4: LIVE. Level 4 measures the unguarded cap (the guard would shed FM6 to two
+    /* base = 2, 3 or 4: LIVE. Level 4 measures the unguarded cap (the guard would shed FM6 to two
      * voices, which is not what "the cap" means); 2 and 3 keep the guard on. Level 3 would add
      * every wired punch FX: T10i has not wired any yet, so it is level 2 for now. */
-    engine_guard_enable(n == 4 ? 0 : 1);
+    engine_guard_enable(base == 4 ? 0 : 1);
     rc_live_enter();
     live_bridge_transport_start();
     rc_launch_all();
     {
-        int voices = (n == 4) ? (cap > 0 ? cap : 6) : 4;
+        int voices = (base == 4) ? (cap > 0 ? cap : 6) : 4;
         if (voices > 8)
             voices = 8;
         rc_hold_chord(voices);
@@ -275,6 +287,7 @@ static uint32_t rc_xruns(void) { return audio_xruns; }
 
 void rc_stats_reset(void)
 {
+    engine_core1_stats_reset();          /* T5perf: the core-1 busy mean is per run */
 #if defined(X0X_HOST)
     cpu_peak = 0;
 #else
@@ -292,9 +305,10 @@ int rc_stats(uint32_t *out, int max)
     RC_PUT(rc_xruns());
     RC_PUT(engine_guard_active());
     RC_PUT(eng_guard_count);
-    RC_PUT(plat_cpu2_on());
+    RC_PUT(engine_core2_forced_off() ? 0u : (uint32_t)plat_cpu2_on());
     RC_PUT(plat_cpu2_gave_up());
     RC_PUT((uint32_t)eng_fm6_voices_active());
+    RC_PUT(engine_core1_pct());          /* T5perf: core 1's own busy share (invisible in cpu when unwaited) */
     for (k = 0; k < ENG_PROF_N; k++)
         RC_PUT(eng_prof[k]);
 #ifndef X0X_HOST

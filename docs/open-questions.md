@@ -22,6 +22,9 @@ These questions are still unresolved. When one is answered, record the answer in
 - **Save model.** One state per song, autosaved while stopped, and undo is the safety net.
 - **Scope cuts:** quantize is Bar, Beat or End; modes are Loop or Once; six punch FX; one pad map; no scenes. The full list is in [build-plan](engineering/build-plan.md#deferred-past-v1).
 
+## Resolved 2026-10-11 (T8 review)
+- **The song's key and scale.** `song_t` gained `key` (0–11) and `scale` (`SCALE_*`) in the former `rsv[2]`, validated on load; the New-song screen stores them and the Starter's chords follow progressions in them. See [model](engineering/model.md).
+
 ## Owner decisions
 1. **Confirm the fork target: X0X.** It is recommended, and FM6, NOISE and the newer gfx would be ported from Felucca. See [fork evaluation](research/fork-evaluation.md).
 2. **Default pad map.** The proposal is keyboard zones (see [screens](product/screens.md#design-decisions-made-while-drawing)). It is waiting for the owner's review on the design canvas.
@@ -42,3 +45,6 @@ These questions are still unresolved. When one is answered, record the answer in
 
 ## RC1 CPU headroom (2026-10-11)
 - Full LIVE stress with 4 FM6 voices runs at about 77% CPU and trips the overload guard, which then holds FM6 to 2 voices. Is a lower FM6 voice count acceptable if optimisation can't win headroom back? See [RC1 results](reviews/2026-10-11-rc1-device-results.md).
+
+## Core-1 data integrity with FM6 offloaded (2026-10-11, T5perf review)
+X0X's core-1 check word covers the job hand-off, not the data core 1 reads while it renders FM6. On a unit with a bad core 1, FM6 could click or hold a stuck-loud voice before the hand-off check trips the single-core fallback. Memory isn't corrupted: no pointers are loaded from that data. The 808 has the same exposure. Only a healthy unit has been measured. If owners report FM6 glitches, offer a GLOBAL option to keep FM6 on core 0.

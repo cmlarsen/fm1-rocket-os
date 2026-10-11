@@ -24,6 +24,7 @@ enum {
     RC_ST_CPU2,          /* the second core is running (1/0)             */
     RC_ST_CPU2_GAVEUP,   /* it stopped itself (0 no)                     */
     RC_ST_FM6,           /* FM6 voices sounding now                      */
+    RC_ST_CORE1,         /* T5perf: core 1's mean busy % of the block (0 if it never ran) */
     RC_ST_PROF0,         /* .. + ENG_PROF_N: the PERF stage totals       */
     RC_ST_BSS = RC_ST_PROF0 + 9,   /* .data+.bss in use (device; 0 on host) */
     RC_ST_POOL,          /* the .pool section in use                     */
@@ -33,8 +34,9 @@ enum {
 };
 
 /* Start stress level n (0 = stop; 1 = X0X sequencer; 2 = LIVE; 3 = LIVE + wired punch FX;
- * 4 = LIVE with the FM6 voice cap raised). `cap` selects the FM6 voice count for level 4
- * (0 = 6). Returns 0 on success, -1 for an unknown level. */
+ * 4 = LIVE with the FM6 voice cap raised; 5 = level 2 with core 1 forced off; 6 = level 1 with core 1
+ * forced off). `cap` selects the FM6 voice count for level 4 (0 = 6). Returns 0 on success, -1 for
+ * an unknown level. */
 int rc_stress(int n, int cap);
 int rc_stress_level(void);           /* the running level, 0 = none */
 int rc_stress_active(void);          /* 1 while a level is running */
