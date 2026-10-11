@@ -410,7 +410,10 @@ static void studio_sound_key(int k, int down)
 {
     int role = ui.view == V_SOUND ? (int)ui.sound_role
              : ui.part == PART_303A ? 1 : ui.part == PART_303B ? 2 : 0;   /* BASS / LEAD / DRUMS */
-    live_bridge_play_key((uint8_t)role, (uint8_t)(41 + k), down, 88);
+    if (down)
+        note_key_down(k, (uint8_t)role, (uint8_t)(41 + k));   /* tracked, so a later view change releases it */
+    else
+        note_key_up(k);
 }
 
 /* ================================================================ drawing === */

@@ -281,6 +281,7 @@ static FILE *events_log;
 static uint32_t host_sample;             /* frames rendered since boot: the only clock */
 static uint32_t bar_count;               /* the 909's wraps since the transport started */
 static uint32_t boffs;                   /* T7a: note-offs the tap has seen (leaving LIVE releases) */
+static uint8_t bass_on[2];               /* T7a r2: the 303 gates the tap has seen stick (expect bassheld) */
 static uint8_t tr_prev_pos;
 static int was_playing;
 static uint8_t prev_pcue[NPARTS];
@@ -296,15 +297,21 @@ static void host_engine_tap(uint32_t sample, uint32_t cmd)
     case 9:
         if (a == PART_FM6 || a == PART_NOISE)              /* T5i: c = velocity */
             fprintf(events_log, "%u bon %u %u vel%u\n", sample, a, b, v);
-        else
+        else {
+            if (a < 2u)
+                bass_on[a] = 1;                            /* T7a r2: a 303 gate is held */
             fprintf(events_log, "%u bon %u %u %u %u\n", sample, a, b, v & 1u, (v >> 1) & 1u);
+        }
         break;
     case 10:
         boffs++;
         if (a == PART_FM6 || a == PART_NOISE)              /* T5i: b = note */
             fprintf(events_log, "%u boff %u %u\n", sample, a, b);
-        else
+        else {
+            if (a < 2u)
+                bass_on[a] = 0;                            /* T7a r2: the gate released */
             fprintf(events_log, "%u boff %u\n", sample, a);
+        }
         break;
     default: fprintf(events_log, "%u param %u %u %u %u\n", sample, type, a, b, v); break;
     }
@@ -789,6 +796,8 @@ static int expect(const char *what, const char *val)
         got = song_io_scale();
     else if (!strcmp(what, "boffs"))               /* T7a D1: note-offs the tap logged */
         got = (int)boffs;
+    else if (!strcmp(what, "bassheld"))            /* T7a r2: 303 gates still held */
+        got = (int)(bass_on[0] + bass_on[1]);
     else if (!strcmp(what, "undodepth"))
         got = song_io_undo_depth();
     else if (!strcmp(what, "undopos"))

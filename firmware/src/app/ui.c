@@ -140,6 +140,37 @@ static uint16_t studio_footer_sound(const char **a, const char **b, const char *
 /* the clip-setting knob refs (R_CLIP_*), used by build_pages / pref_* in ui.c */
 enum { RK_CLIP_LEN, RK_CLIP_MODE, RK_CLIP_QUANT, RK_CLIP_SWING };
 
+/* ====================================== T7a round 2: the held-note table === */
+/* One table for every "a key plays a note" path (LIVE's PLAY layer, the sound pages, and any
+ * future one). A key maps to what it started — the role and note — so a release always releases
+ * what that key began, whatever view, layer or mode is showing. Home/SEQ handoffs, set_view and
+ * the STUDIO/LIVE/Classic switches release everything still held. */
+static uint8_t hn_on[NKEYS], hn_role[NKEYS], hn_note[NKEYS];
+static void note_key_up(int k)
+{
+    if (k < 0 || k >= NKEYS || !hn_on[k])
+        return;
+    live_bridge_play_key(hn_role[k], hn_note[k], 0, 0);
+    hn_on[k] = 0;
+}
+static void note_key_down(int k, uint8_t role, uint8_t note)
+{
+    if (k < 0 || k >= NKEYS)
+        return;
+    if (hn_on[k])
+        note_key_up(k);                              /* a retrigger releases the old note first */
+    hn_role[k] = role;
+    hn_note[k] = note;
+    hn_on[k] = 1;
+    live_bridge_play_key(role, note, 1, 88);
+}
+static void note_release_all(void)
+{
+    int k;
+    for (k = 0; k < NKEYS; k++)
+        note_key_up(k);
+}
+
 /* the encoders, read for the UI: a turn counts as being touched (the autosave waits for quiet) */
 static int32_t enc(int role)
 {
@@ -1719,6 +1750,7 @@ static int32_t accel(int role, int32_t s, int range)
 
 static void set_view(int v)
 {
+    note_release_all();                           /* T7a r2: a view change releases every held note */
     if (v != ui.view)
         ui.prev_view = ui.view;
     ui.view = (uint8_t)v;
@@ -2137,6 +2169,8 @@ static void mute_track(int km, int v)                /* one drum track on / off 
 static void key_event(int k, int down)
 {
     int w = KEY_WHITE[k], bl = KEY_BLACK[k], wp = w >= 0 ? ui.pbank * 16 + w : -1;   /* wp: a white key's pattern */
+    if (!down)
+        note_key_up(k);                                /* T7a r2: a release always releases what k began */
     if (ui.overlay == O_ASK || ui.view == V_PERF || perf_testing())
         return;
     if (live_mode()) {                                     /* T3: LIVE owns the keys */
@@ -3028,7 +3062,9 @@ static void draw_header(void)
                             PART_COL[drum_mix_page()]) + 6;
         }
     }
-    {   /* the pattern of the part on screen (else the 909's), its cue; in SONG mode the bar */
+    if (ui.view != V_SOUND && (ui.classic || ui.view != V_PART)) {
+    /* the pattern of the part on screen (else the 909's), its cue; in SONG mode the bar. T7a r2:
+     * a sound page outside Classic draws no X0X "P1" marker. */
         int part = part_view() ? ui.part : PART_909, cue = seq_cue_of(&seq, part);
         int32_t px = x + 6 > 132 ? x + 6 : 132;       /* T7a: the CLASSIC chip widens the left side */
         if (seq.song_on) {

@@ -31,15 +31,9 @@ static int live_holding(void) { return live.holding != 0; }
 int live_layer(void) { return live.layer; }
 int live_focus(void) { return live.focus; }
 
-/* T3 review: a key's note is tracked per key, whatever the layer/focus/octave does while it is
- * held. A release always releases the note that key started (never the current focus's). */
-static uint8_t held_role[NKEYS], held_note[NKEYS], held_on[NKEYS];
-static void live_clear_held(void)
-{
-    int k;
-    for (k = 0; k < NKEYS; k++)
-        held_on[k] = 0;
-}
+/* T7a round 2: the held-note table lives in the shared key path (ui.c), so a key's note is tracked
+ * per key whatever the layer/focus/octave does, and a release (or a view/mode change) always
+ * releases what that key started. */
 
 /* ---- mode in and out ---- */
 
@@ -50,7 +44,7 @@ static void live_enter(void)
     live.layer = LIVE_PADS;               /* the PADS layer is the default on entry */
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
-    live_clear_held();
+    note_release_all();                   /* T7a r2: changing mode releases every held note */
     ui.classic = 0;                       /* LIVE is the clip engine, wherever it was entered from */
     live_bridge_enter(&proj.pat[0], 0);   /* T7a: make the clip engine the source; it does not
                                            * rebuild and does not reset the transport, so clips keep
@@ -59,21 +53,9 @@ static void live_enter(void)
     say("LIVE", 0);
 }
 
-/* T7a D1: leaving LIVE releases the note every held key started, so nothing hangs. */
-static void live_release_held(void)
-{
-    int k;
-    for (k = 0; k < NKEYS; k++)
-        if (held_on[k]) {
-            live_bridge_play_key(held_role[k], held_note[k], 0, 0);
-            held_on[k] = 0;
-        }
-}
-
 static void live_leave(void)
 {
-    live_release_held();
-    live_clear_held();
+    note_release_all();                   /* T7a D1/r2: leaving LIVE releases every held note */
     if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
         ui.classic = 1;
         live_bridge_exit();
@@ -128,23 +110,15 @@ static void live_play_tick(uint32_t btn)
 
 static int live_handle_key(int k, int down)
 {
-    if (!down) {                          /* a release always releases the note this key started */
-        if (held_on[k]) {
-            live_bridge_play_key(held_role[k], held_note[k], 0, 0);
-            held_on[k] = 0;
-        }
-        return 1;
-    }
+    if (!down)
+        return 1;                         /* the release is done by the shared table (ui.c) */
     if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, chromatically */
         int note = 41 + k + 12 * live.octv;
         if (note < 0)
             note = 0;
         if (note > 127)
             note = 127;
-        held_role[k] = live.focus;        /* the layer/focus/octave may change while it is held */
-        held_note[k] = (uint8_t)note;
-        held_on[k] = 1;
-        live_bridge_play_key(held_role[k], held_note[k], 1, 88);
+        note_key_down(k, live.focus, (uint8_t)note);   /* the layer/focus may change while it is held */
         return 1;
     }
     {                                     /* PADS: each key is a clip in its zone (press only) */
