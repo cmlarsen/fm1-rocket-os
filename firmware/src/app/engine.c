@@ -904,6 +904,15 @@ static void all_off_now(void)
     }
 }
 
+/* T2c: the UI fuzzer's `expect voices 0`. Counts every sounding voice: the 909 (all eleven),
+ * the 808 (one per lane), the two 303s (held or still sounding) and T5i's FM6 and NOISE. */
+int engine_voices_active(void)
+{
+    return drum909_voices_active(&d909) + drum808_voices_active(&d808)
+         + bass303_voices_active(&b303[0]) + bass303_voices_active(&b303[1])
+         + eng_fm6_voices_active() + eng_noise_voices_active();
+}
+
 void engine_render(int32_t *out_lr, uint32_t n)
 {
     static float out_l[256], out_r[256];

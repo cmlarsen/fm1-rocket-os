@@ -1696,6 +1696,13 @@ static void run_action(int act, int arg)
         say("SONG CLEARED", 0);
         break;
     case ACT_RESET:
+#ifdef X0X_HOST
+        if (host_fuzz_no_reset) {                     /* T2c: the UI fuzzer excludes the factory reset */
+            ui.overlay = O_NONE;
+            say("RESET SKIPPED", 0);
+            break;
+        }
+#endif
         project_defaults();
         engine_apply_sound(&proj.sound);
         palette_set(proj.set.palette);

@@ -32,7 +32,7 @@ REMOTE_DIR   := $(REMOTE_ROOT)/$(DIRNAME)-$(DIRHASH)
 SSH          := ssh $(FW_HOST)
 RSYNC_EXCL   := --exclude=/.git --exclude=/.venv --exclude=/build --exclude=/__pycache__
 
-.PHONY: all help fw release fw-debug fw-debug-check test test-local check push pull clean-remote unit scenarios screens parity host screens-lint
+.PHONY: all help fw release fw-debug fw-debug-check test test-local check push pull clean-remote unit scenarios screens parity host screens-lint fuzz-ui
 
 all: help
 
@@ -50,6 +50,7 @@ help:
 	@echo "  parity       WASM output vs native, sample for sample (needs emcc and node)"
 	@echo "  check        fw + the build's own checks (soft-double, size)"
 	@echo "  screens-lint render the screen tour and lint the layout (Mac; needs no deltron)"
+	@echo "  fuzz-ui      the UI fuzz: 200 seeds x 2000 events (T2c)"
 	@echo "  push         rsync this tree to $(FW_HOST):$(REMOTE_DIR)/"
 	@echo "  pull         rsync $(FW_HOST):$(REMOTE_DIR)/build/ back into ./build/"
 	@echo "  help         this list"
@@ -162,7 +163,7 @@ screens: host
 parity:
 	@sh tests/parity.sh
 
-check: fw
+check: fw host
 	@echo "check: forbidden symbols (heap, 64-bit division, soft-double)"
 	@$(SSH) 'cd $(REMOTE_DIR) && sh tools/check_symbols.sh build'
 	@echo "check: the flash write path refuses the protected regions"
@@ -170,6 +171,9 @@ check: fw
 	@echo "check: the user-sample upload (a second writer in the song region) is gone"
 	@sh tests/lint/no_sample_writers_test.sh
 	@echo "check: make fw passed the build's own checks (soft-double routines, image/RAM/pool size)"
+	@echo "check: the UI fuzz (short: 20 seeds x 500 events)"
+	@mkdir -p build/fuzz
+	@sh tests/fuzz/run_fuzz.sh 20 500
 
 # T2b: render the screen tour with a host build that records every text draw (-DX0X_LINT), then
 # lint the layout (tests/lint/check_layout.py). Runs on the Mac; exits non-zero on any finding or
@@ -182,6 +186,15 @@ screens-lint:
 	@n=$$(grep -c '^shot ' tests/scenarios/screens_tour.x0x); m=$$(ls build/screens/tour/*.png 2>/dev/null | wc -l | tr -d ' '); \
 	[ "$$n" = "$$m" ] || { echo "screens-lint: $$m of $$n shots written"; exit 1; }
 	@python3 tests/lint/check_layout.py build/screens/lint.log
+
+# T2c: the UI fuzz. Random key, button and encoder events across every view and mode, then
+# every input released, the transport stopped and `expect voices 0` after a 3 s tail (the
+# architecture's "no hung notes" invariant). A failure prints the seed and writes a full and a
+# minimised, ready-to-run .x0x into build/fuzz/. 200 seeds x 2000 events is the long run;
+# `make check` runs the short one.
+fuzz-ui: host
+	@mkdir -p build/fuzz
+	@sh tests/fuzz/run_fuzz.sh 200 2000
 
 clean-remote:
 	@$(SSH) 'rm -rf $(REMOTE_DIR)/build'

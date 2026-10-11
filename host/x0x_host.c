@@ -18,6 +18,12 @@
  *                                VEL 0 is a note off. Through the C_BON / C_BOFF command path (the
  *                                engine clamps NOTE to 0..127, so a test may pass more).
  *   alloff                       the panic all-notes-off (engine_all_off)
+ *   stop                         stop both transports, then the all-notes-off (T2c)
+ *   fuzz SEED N                  T2c: N random key / button / encoder / wait events from the
+ *                                deterministic SEED, starting at the song home and visiting the
+ *                                sound pages, Classic and LIVE; then release every input, stop,
+ *                                wait 3 s and expect zero voices. On failure it prints the seed and
+ *                                writes seed_<SEED>.full.x0x (the whole sequence) into OUTDIR.
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
  *   wav FILE | wavstop           start / stop recording the output
  *   load N                       the overload guard sees every block cost N% (-1: as measured)
@@ -35,7 +41,7 @@
  *   events FILE.txt              start logging every engine command (drum and bass note on, note
  *                                off, parameter change) and every cue and mute, one per line with
  *                                its sample time; eventsstop stops it
- *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, ...): exit
+ *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, voices, ...): exit
  *                                1 on mismatch; VALUE "<N" / ">N" is a bound
  *   expect key K L               the LED level of key K (0 off, 1 dim, 2 bright); K as "key" takes
  *   expect button B L            (w0..w15, b0..b10 or 0..26); the lit state of button B, 0 or 1
@@ -260,6 +266,9 @@ void plat_stalls_enable(int on) { (void)on; }
 #include "../firmware/src/app/x0x.h"
 #include "../firmware/src/app/song_io.h"
 #include "../firmware/src/app/project.c"
+/* T2c: the UI fuzzer sets this so ui.c's run_action skips the factory reset (the fuzzer must not
+ * send it). Defined here before ui.c is included; the device build never sees it (X0X_HOST). */
+static int host_fuzz_no_reset;
 #include "../firmware/src/app/ui.c"
 
 /* T5i: the adapter voice counters, for the scenarios' `expect fm6voices` / `expect nzvoices` */
@@ -836,6 +845,8 @@ static int expect(const char *what, const char *val)
         got = proj.sound.v[t][v][i];
     } else if (!strcmp(what, "fm6voices"))          /* T5i: FM6's live voice count */
         got = eng_fm6_voices_active();
+    else if (!strcmp(what, "voices"))               /* T2c: every engine's sounding voices (the invariant) */
+        got = engine_voices_active();
     else if (!strcmp(what, "fm6held"))              /* T5i: FM6's held (not released) count */
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
@@ -958,6 +969,285 @@ static void dump_json(const char *path)
     fclose(f);
 }
 
+/* ============================================================ T2c: UI fuzz === */
+/* `fuzz SEED N`: N random input events (keys, buttons, encoders and 0-300 ms waits) from a
+ * deterministic PRNG, starting at the song home and guaranteed to visit the sound pages, Classic
+ * and LIVE. When the sequence ends it releases every key and button, stops the transport, waits
+ * 3 s and expects zero voices on every engine (the architecture's "no hung notes" invariant).
+ * It writes the whole expanded sequence to <outdir>/seed_<SEED>.full.x0x first, so a crash still
+ * leaves a runnable reproduction, and reports the seed and the file on failure. It never sends a
+ * factory reset and never writes flash outside the normal save / autosave path. */
+#define FZ_MAX 16384
+enum { FZ_WAIT, FZ_KEY_DOWN, FZ_KEY_UP, FZ_TAPKEY, FZ_BTN_TAP, FZ_BTN_PRESS, FZ_BTN_RELEASE,
+       FZ_BTN_HOLD, FZ_TURN, FZ_SPIN };
+typedef struct { uint8_t kind; int16_t a, b, c; } fz_ev_t;
+static fz_ev_t fz_ev[FZ_MAX];
+static int fz_n;
+static uint32_t fz_rng;
+
+static uint32_t fz_rand(void)                        /* xorshift32: the deterministic PRNG */
+{
+    uint32_t x = fz_rng;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    fz_rng = x;
+    return x;
+}
+#define FZP(n) ((int)(fz_rand() % (uint32_t)(n)))
+
+static void fz_add(int kind, int a, int b, int c)
+{
+    if (fz_n >= FZ_MAX)
+        return;
+    fz_ev[fz_n].kind = (uint8_t)kind;
+    fz_ev[fz_n].a = (int16_t)a;
+    fz_ev[fz_n].b = (int16_t)b;
+    fz_ev[fz_n].c = (int16_t)c;
+    fz_n++;
+}
+/* a random member of a bitmask, cleared as it is picked (so up / release are always valid) */
+static int fz_pick(uint32_t *m)
+{
+    int b = FZP(32), i;
+    for (i = 0; i < 32; i++) {
+        int k = (b + i) & 31;
+        if ((*m >> k) & 1u) {
+            *m &= ~(1u << k);
+            return k;
+        }
+    }
+    return -1;
+}
+/* the buttons the spec calls out for a long hold (SCL/SEL, HOME, SEQ, EDIT, GLO, SAVE, FX, REC...) */
+static const int FZ_HOLD[] = {B_SEL, B_HOME, B_SEQ, B_EDIT, B_GLO, B_SAVE, B_FX, B_REC, B_ARP,
+                              B_ENV, B_LFO, B_OCTUP, B_OCTDN, B_PLAY};
+
+static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
+{
+    uint32_t hk = 0, hb = 0;
+    fz_rng = ((uint32_t)seed * 2654435761u) ^ 0x9E3779B9u;
+    if (!fz_rng)
+        fz_rng = 1u;
+    fz_n = 0;
+    /* prologue: song home -> the NOISE card -> a 303 sound page -> Classic -> LIVE -> back */
+    fz_add(FZ_BTN_TAP, B_HOME, 0, 0);
+    fz_add(FZ_TURN, EN_SELECT, 4, 80);
+    fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);
+    fz_add(FZ_KEY_DOWN, 2, 0, 0);
+    fz_add(FZ_WAIT, 0, 80, 0);
+    fz_add(FZ_KEY_UP, 2, 0, 0);
+    fz_add(FZ_BTN_TAP, B_HOME, 0, 0);
+    fz_add(FZ_TURN, EN_SELECT, -3, 80);
+    fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);
+    fz_add(FZ_KEY_DOWN, 1, 0, 0);
+    fz_add(FZ_WAIT, 0, 80, 0);
+    fz_add(FZ_KEY_UP, 1, 0, 0);
+    fz_add(FZ_BTN_TAP, B_HOME, 0, 0);
+    fz_add(FZ_BTN_TAP, B_GLO, 0, 0);
+    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
+    fz_add(FZ_KEY_DOWN, 0, 0, 0);
+    fz_add(FZ_WAIT, 0, 80, 0);
+    fz_add(FZ_KEY_UP, 0, 0, 0);
+    fz_add(FZ_BTN_TAP, B_GLO, 0, 0);
+    fz_add(FZ_TURN, EN_SELECT, 20, 20);
+    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
+    fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);
+    fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
+    fz_add(FZ_KEY_DOWN, 4, 0, 0);
+    fz_add(FZ_WAIT, 0, 80, 0);
+    fz_add(FZ_KEY_UP, 4, 0, 0);
+    fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);
+    while (fz_n < n) {
+        int c = FZP(100);
+        if (c < 18) {
+            fz_add(FZ_WAIT, 0, FZP(301), 0);
+        } else if (c < 30) {
+            int k = FZP(NKEYS);
+            if (!((hk >> k) & 1u)) {
+                hk |= 1u << k;
+                fz_add(FZ_KEY_DOWN, k, 0, 0);
+            } else
+                fz_add(FZ_WAIT, 0, 4, 0);
+        } else if (c < 40) {
+            int k = hk ? fz_pick(&hk) : -1;
+            if (k >= 0)
+                fz_add(FZ_KEY_UP, k, 0, 0);
+            else
+                fz_add(FZ_WAIT, 0, 4, 0);
+        } else if (c < 46) {
+            fz_add(FZ_TAPKEY, FZP(NKEYS), 0, 0);
+        } else if (c < 58) {
+            fz_add(FZ_BTN_TAP, FZP(NB), 0, 0);
+        } else if (c < 66) {
+            int b = FZP(NB);
+            if (!((hb >> b) & 1u)) {
+                hb |= 1u << b;
+                fz_add(FZ_BTN_PRESS, b, 0, 0);
+            } else
+                fz_add(FZ_WAIT, 0, 4, 0);
+        } else if (c < 71) {
+            int b = hb ? fz_pick(&hb) : -1;
+            if (b >= 0)
+                fz_add(FZ_BTN_RELEASE, b, 0, 0);
+            else
+                fz_add(FZ_WAIT, 0, 4, 0);
+        } else if (c < 78) {                          /* a long hold of one of the named buttons */
+            fz_add(FZ_BTN_HOLD, FZ_HOLD[FZP((int)(sizeof FZ_HOLD / sizeof FZ_HOLD[0]))], 400 + FZP(900), 0);
+        } else if (c < 88) {                          /* turn */
+            int e = FZP(NE), d = FZP(5) - 2;
+            if (!d)
+                d = 1;
+            fz_add(FZ_TURN, e, d, 40 + FZP(80));
+        } else if (c < 92) {                          /* spin (exact detents) */
+            int e = FZP(NE), d = FZP(11) - 5;
+            if (!d)
+                d = 3;
+            fz_add(FZ_SPIN, e, d, 0);
+        } else {                                      /* a coverage macro */
+            int m = FZP(4);
+            if (m == 0) {
+                fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0);  /* LIVE in / out */
+            } else if (m == 1) {
+                fz_add(FZ_BTN_TAP, B_GLO, 0, 0);      /* GLOBAL: row 0 is Classic */
+                fz_add(FZ_BTN_TAP, B_SEL, 0, 0);
+            } else if (m == 2) {
+                fz_add(FZ_TURN, EN_SELECT, FZP(5) - 2, 80);
+                fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);     /* a sound page for the cursor role */
+            } else {
+                fz_add(FZ_BTN_TAP, B_SEL, 0, 0);      /* SCL / launch / list entry */
+            }
+        }
+    }
+    *hk_out = hk;
+    *hb_out = hb;
+}
+
+/* apply one event exactly as its script line would (the reproduction is line-for-line identical) */
+static void fz_apply(const fz_ev_t *e)
+{
+    int k;
+    switch (e->kind) {
+    case FZ_WAIT: run_ms((uint32_t)e->b); break;
+    case FZ_KEY_DOWN: held_keys |= 1u << e->a; run_ms(2); break;
+    case FZ_KEY_UP: held_keys &= ~(1u << e->a); run_ms(2); break;
+    case FZ_TAPKEY: held_keys |= 1u << e->a; run_ms(60); held_keys &= ~(1u << e->a); run_ms(30); break;
+    case FZ_BTN_TAP: held_btn |= 1u << e->a; run_ms(40); held_btn &= ~(1u << e->a); run_ms(40); break;
+    case FZ_BTN_PRESS: held_btn |= 1u << e->a; run_ms(2); break;
+    case FZ_BTN_RELEASE: held_btn &= ~(1u << e->a); run_ms(2); break;
+    case FZ_BTN_HOLD:
+        held_btn |= 1u << e->a;
+        run_ms(2);
+        run_ms((uint32_t)e->b);
+        held_btn &= ~(1u << e->a);
+        run_ms(2);
+        break;
+    case FZ_TURN: {
+        int s = e->b > 0 ? 1 : -1, n = e->b < 0 ? -e->b : e->b;
+        for (k = 0; k < n; k++) {
+            enc_acc[e->a] += s;
+            run_ms((uint32_t)e->c);
+        }
+        break;
+    }
+    case FZ_SPIN:
+        enc_acc[e->a] += e->b;
+        accel_off = 1;
+        run_ms(1);
+        accel_off = 0;
+        break;
+    }
+}
+
+/* one event's script line(s): a hold is press / wait / release, exactly what fz_apply does */
+static void fz_line(char *b, size_t sz, const fz_ev_t *e)
+{
+    switch (e->kind) {
+    case FZ_WAIT: snprintf(b, sz, "wait %d\n", e->b); break;
+    case FZ_KEY_DOWN: snprintf(b, sz, "key %d down\n", e->a); break;
+    case FZ_KEY_UP: snprintf(b, sz, "key %d up\n", e->a); break;
+    case FZ_TAPKEY: snprintf(b, sz, "tapkey %d\n", e->a); break;
+    case FZ_BTN_TAP: snprintf(b, sz, "tap %s\n", BTN_N[e->a]); break;
+    case FZ_BTN_PRESS: snprintf(b, sz, "press %s\n", BTN_N[e->a]); break;
+    case FZ_BTN_RELEASE: snprintf(b, sz, "release %s\n", BTN_N[e->a]); break;
+    case FZ_BTN_HOLD: snprintf(b, sz, "press %s\nwait %d\nrelease %s\n", BTN_N[e->a], e->b, BTN_N[e->a]); break;
+    case FZ_TURN: snprintf(b, sz, "turn %s %d %d\n", ENC_N[e->a], e->b, e->c); break;
+    case FZ_SPIN: snprintf(b, sz, "spin %s %d\n", ENC_N[e->a], e->b); break;
+    default: b[0] = 0; break;
+    }
+}
+
+/* T2c: stop everything the way the `stop` command and the fuzz release tail do — abort a perf
+ * test, stop both transports, release every voice. Shared so a reproduction and the fuzz run
+ * leave the app in the same state. */
+static void host_all_stop(void)
+{
+    if (perf.test != PT_IDLE)
+        perf_test_abort();
+    live_bridge_transport_stop();
+    engine_all_off();
+    run_ms(1);
+}
+
+/* the `fuzz SEED N` command: returns 1 when the invariant fails */
+static int fuzz_cmd(const char *dir, int seed, int n)
+{
+    uint32_t hk = 0, hb = 0;
+    char path[400];
+    FILE *f;
+    int i;
+    if (n < 0)
+        n = 0;
+    if (n > 100000)
+        n = 100000;
+    fz_build(seed, n, &hk, &hb);
+    snprintf(path, sizeof path, "%s/seed_%d.full.x0x", dir, seed);
+    if ((f = fopen(path, "w"))) {                    /* written before the run: a crash still leaves it */
+        fprintf(f, "# T2c UI fuzz: seed %d, %d events (reproduce with)\n", seed, n);
+        fprintf(f, "#   build/host/x0x_host %s %s\n", path, dir);
+        fputs("noreset\n", f);                       /* the replay excludes the factory reset, as the fuzz did */
+        for (i = 0; i < fz_n; i++) {
+            char lb[128];
+            fz_line(lb, sizeof lb, &fz_ev[i]);
+            fputs(lb, f);
+        }
+        for (i = 0; i < NKEYS; i++)                  /* the release tail the command runs */
+            if ((hk >> i) & 1u)
+                fprintf(f, "key %d up\n", i);
+        for (i = 0; i < NB; i++)
+            if ((hb >> i) & 1u)
+                fprintf(f, "release %s\n", BTN_N[i]);
+        fputs("stop\nwait 3000\nexpect voices 0\n", f);
+        fclose(f);
+    } else {
+        snprintf(path, sizeof path, "(cannot write %s/seed_%d.full.x0x)", dir, seed);
+    }
+    for (i = 0; i < fz_n; i++)
+        fz_apply(&fz_ev[i]);
+    for (i = 0; i < NKEYS; i++)                       /* release every key and button still held */
+        if ((held_keys >> i) & 1u) {
+            held_keys &= ~(1u << i);
+            run_ms(2);
+        }
+    for (i = 0; i < NB; i++)
+        if ((held_btn >> i) & 1u) {
+            held_btn &= ~(1u << i);
+            run_ms(2);
+        }
+    host_all_stop();                                  /* stop the transport (and any perf test) */
+    run_ms(3000);                                     /* wait 3 s */
+    {
+        int v = engine_voices_active();
+        if (v != 0) {
+            printf("FAIL fuzz seed %d: %d voices still sounding after the release tail\n", seed, v);
+            printf("  seed %d -> %s\n", seed, path);
+            return 1;
+        }
+    }
+    printf("  ok fuzz seed %d (%d events, voices 0)\n", seed, fz_n);
+    return 0;
+}
+
 #ifndef X0X_WEB
 int main(int argc, char **argv)
 {
@@ -1058,6 +1348,13 @@ int main(int argc, char **argv)
         } else if (!strcmp(cmd, "alloff")) {            /* T5i: the panic all-notes-off */
             engine_all_off();
             run_ms(1);
+        } else if (!strcmp(cmd, "stop")) {              /* T2c: stop both transports and release every voice */
+            host_all_stop();
+        } else if (!strcmp(cmd, "noreset")) {           /* T2c: the fuzz reproduction excludes the factory reset */
+            host_fuzz_no_reset = 1;
+        } else if (!strcmp(cmd, "fuzz")) {              /* T2c: the UI fuzzer; writes seed_<S>.full.x0x */
+            host_fuzz_no_reset = 1;
+            fails += fuzz_cmd(dir, atoi(a), atoi(b));
         } else if (!strcmp(cmd, "master"))
             master = (uint32_t)atoi(a);
         else if (!strcmp(cmd, "midi")) {

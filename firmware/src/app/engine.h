@@ -52,6 +52,9 @@ void engine_motion_reset(void);                             /* lanes replaced (u
  * NOISE; the one-shot drums need nothing) at the start of the next block. Main loop: LIVE taking the
  * transport, a transport stop, the panic path and T3's live_bridge_exit. */
 void engine_all_off(void);
+/* T2c: how many voices are sounding right now, across every engine (the held-note invariant:
+ * after every input is released and the transport is stopped, this is 0). Host-only in practice. */
+int engine_voices_active(void);
 /* overload guard (engine.c): the platform reports each block's load after rendering it */
 void engine_load(uint32_t pct, uint32_t frames);           /* ISR, after engine_render */
 void engine_guard_enable(int on);                           /* off: full quality always (the PERF test) */

@@ -1618,6 +1618,14 @@ int drum808_active(const drum808_t *d)
     return 0;
 }
 
+int drum808_voices_active(const drum808_t *d)
+{
+    int l, n = 0;
+    for (l = 0; l < L_NUM; l++)
+        n += lane_on(d, l);
+    return n;
+}
+
 /* Run one voice for up to m samples into buf; stops where 8W8 would stop calling
  * it (the voice went inactive). Returns the samples written. */
 static int voice_run(drum808_t *d, int l, float *buf, int m, const float *bus, const float *pair)

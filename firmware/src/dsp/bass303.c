@@ -367,6 +367,9 @@ void bass303_note_on(bass303_t *b, int note, int accent, int slide)
 }
 
 void bass303_note_off(bass303_t *b) { b->gate = 0; }
+
+int bass303_voices_active(const bass303_t *b) { return (b->gate || !b->idle) ? 1 : 0; }
+
 void bass303_set_lite(bass303_t *b, int on) { b->lite = on != 0; }
 void bass303_all_off(bass303_t *b) { b->gate = 0; }
 
