@@ -60,12 +60,14 @@ void engine_all_off(void) { all_off_req = 1; }
 /* overload guard: past the CPU (a block over 92%, or 85% on average) the two 303s drop their
  * oversampling (~12% of the CPU: a little aliasing on bright notes), the 808's voices end at
  * -50 dB instead of -90 (~2%), T5i caps FM6 polyphony at 2 (releasing the oldest) and skips the NOISE
- * impulse density; after 3 s back under 65% all return. The platform reports each block's load after
+ * impulse density; after 3 s back under 75% all return (T5perf raised the release from 65%: the guard
+ * was staying on at 66-69%, and the release must sit under the 85% engage so it does not chatter).
+ * The platform reports each block's load after
  * rendering it (engine_load, same context as engine_render); the change is made at the start of the
  * next block. Off during the PERF test, which measures the full cost. */
 #define GUARD_ON_LAST 92u
 #define GUARD_ON_AVG 85u
-#define GUARD_OFF 65u
+#define GUARD_OFF 75u
 #define GUARD_CALM_FRAMES (3u * 44100u)
 #define GUARD_FM6_VOICES 2u
 extern float drum808_quiet;
@@ -74,6 +76,14 @@ static uint32_t guard_avg_q8, guard_calm;
 volatile uint32_t eng_guard_count;
 void engine_guard_enable(int on) { guard_enabled = (uint8_t)(on != 0); }
 int engine_guard_active(void) { return guard_on; }
+
+/* T5perf/RC1p: a debug-only switch that keeps the core-1 job on core 0 (the second core is left
+ * idle), so a stress run can measure the single-core numbers a unit that cannot run core 1 would
+ * see. It never stops core 1 (no ISR race); it just does not hand it work. Release builds never
+ * set it, so it costs one predictable branch per stretch. */
+static uint8_t eng_core2_off;
+void engine_core2_force_off(int on) { eng_core2_off = (uint8_t)(on != 0); }
+int engine_core2_forced_off(void) { return eng_core2_off; }
 void engine_load(uint32_t pct, uint32_t frames)
 {
     guard_avg_q8 = (guard_avg_q8 * 15u + pct * 256u) / 16u;
@@ -610,12 +620,34 @@ __attribute__((noinline)) static void scale_glide(float *buf, glide_t *g, uint32
 }
 
 /* the second core's job (or the first's, after its own part, with one core): the 808 into t0..tr;
- * arg bit 8: not timed (the cycle counter is the first core's). Nothing
- * here is mixed: the first core does that afterwards, in one core's order */
-static uint8_t d808_was_active;
+ * arg bit 8: not timed (the cycle counter is the first core's); bit 9: also render FM6 (T5perf).
+ * Nothing here is mixed: the first core does that afterwards, in one core's order.
+ *
+ * T5perf: FM6 joins the 808 on the second core when it is available, into `part_i32` (the same int32
+ * block the core-0 mix reads). The FM6 state is only touched by core 1 between the note events core 0
+ * applies at a stretch boundary, and core 0 waits for the job before it mixes, so the render order is
+ * one core's, bit for bit — the host and WASM (one core, the fallback) are unchanged. Core 1 is idle
+ * in LIVE (the 808 does not play there: the clip engine drives the 909 role), so this is nearly free. */
+/* T5perf: core 1's own busy time, for ED_STATS. Core 0's `plat_cycles` is the only cycle counter, so
+ * core 1 self-times with the shared 24 MHz timer (plat_ticks24) while it runs the job; core 0 adds the
+ * fallback's time nowhere, so this is core 1 only. Reported as a mean % of the block (see
+ * engine_core1_pct), which makes visible what core 0's load hides when it does not wait. */
+volatile uint32_t eng_core1_ticks, eng_core1_frames;
+uint32_t engine_core1_pct(void)
+{
+    uint32_t t = eng_core1_ticks, f = eng_core1_frames;   /* a benign torn read: debug only */
+    if (!f)
+        return 0;
+    return (uint32_t)(((t / 800u) * 147u) / f);            /* ticks/frame * 44100/24000000 = *147/800 */
+}
+void engine_core1_stats_reset(void) { eng_core1_ticks = 0; eng_core1_frames = 0; }
+
+#define CORE2_JOB_FM6 0x200u
+static uint8_t d808_was_active, fm6_was_active;
 static void core2_job(uint32_t arg)
 {
     uint32_t n = arg & 0xFFu ? arg & 0xFFu : 256u, i, timed = !(arg & 0x100u), pt = timed ? plat_cycles() : 0;
+    uint32_t tk0 = timed ? 0u : plat_ticks24();            /* the core-1 path: self-time the job */
     d808_was_active = (uint8_t)drum808_active(&d808);
     if (d808_was_active) {                                /* silent, it does nothing (and is not mixed) */
         for (i = 0; i < n; i++)
@@ -625,6 +657,19 @@ static void core2_job(uint32_t arg)
         drum808_pan_settle(&d808);
     if (timed)
         PROF_ADD(PR_808, pt);
+    fm6_was_active = (uint8_t)((arg & CORE2_JOB_FM6) != 0);   /* T5perf: the FM6 half of the job */
+    if (fm6_was_active) {
+        uint32_t pf6 = timed ? plat_cycles() : 0;
+        for (i = 0; i < n; i++)
+            part_i32[i] = 0;
+        eng_fm6_render(part_i32, n);
+        if (timed)
+            PROF_ADD(PR_FM6, pf6);
+    }
+    if (!timed) {                                         /* this ran on core 1: account its busy time */
+        eng_core1_ticks += plat_ticks24() - tk0;
+        eng_core1_frames += n;
+    }
 }
 
 /* a drum machine's mix, from its render (L, R, voice sends; mono, its kit send) */
@@ -649,17 +694,18 @@ __attribute__((noinline)) static void t5i_part_mix(int p, const int32_t *i32, ui
     add_glide(dly, mono, &mix_glide[p][GL_DLY], n);
     meter(p, mono, mix_level[p], n);
 }
-/* FM6 then NOISE, on core 0 (never core 1). Skipped while idle, so a project without them is
- * bit-identical; the adapters' own state carries a released voice's tail. Timed into their own PERF
- * buckets (PR_FM6, PR_NOISE). */
+/* FM6 then NOISE, mixed on core 0. Skipped while idle, so a project without them is bit-identical;
+ * the adapters' own state carries a released voice's tail. Timed into their own PERF buckets
+ * (PR_FM6, PR_NOISE).
+ *
+ * T5perf: the FM6 *render* moved to the core-1 job (core2_job); here core 0 only mixes the int32
+ * block it left in `part_i32`. fm6_was_active is that job's own answer for this stretch, so the mix
+ * happens exactly when the render did. NOISE still renders here, on core 0. */
 static void t5i_render(uint32_t n)
 {
     uint32_t i;
-    if (eng_fm6_voices_active()) {
+    if (fm6_was_active) {
         PROF_T(pf6);
-        for (i = 0; i < n; i++)
-            part_i32[i] = 0;
-        eng_fm6_render(part_i32, n);
         t5i_part_mix(PART_FM6, part_i32, n);
         PROF_ADD(PR_FM6, pf6);
     }
@@ -681,7 +727,12 @@ static void render_sub(float *out_l, float *out_r, uint32_t n)
     float *bb[NBASS] = {out_l, out_r};
     int idle[NBASS], b;
     uint32_t arg = n & 0xFFu, i, pt;
-    int on2 = plat_cpu2_run(core2_job, arg | 0x100u);
+    /* T5perf: hand core 1 the 808 and (when FM6 sounds) FM6 in one job. RC1p's single-core option
+     * forces the job onto core 0 instead, so a run can report the numbers without core 1; FM6 still
+     * renders there (the bug this replaced skipped it). */
+    int fm6_on2 = eng_fm6_voices_active();
+    uint32_t jarg = arg | (fm6_on2 ? CORE2_JOB_FM6 : 0u);
+    int on2 = engine_core2_forced_off() ? 0 : plat_cpu2_run(core2_job, jarg | 0x100u);
     for (i = 0; i < n; i++)
         dry_l[i] = dry_r[i] = rev[i] = dly[i] = 0.0f;
     {   /* the 909, straight into the mix: L, R and its voices' sends, then scaled in place */
@@ -722,7 +773,7 @@ static void render_sub(float *out_l, float *out_r, uint32_t n)
 #else
     if (!on2 || plat_cpu2_wait())
 #endif
-        core2_job(arg);                                   /* one core (or the second failed): here */
+        core2_job(jarg);                                  /* one core (or the second failed): here */
     else
         PROF_ADD(PR_808, pt);                             /* what the first core waited for the second */
     if (d808_was_active) {

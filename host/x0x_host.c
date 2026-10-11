@@ -550,7 +550,7 @@ static void run_ms(uint32_t ms)
 #endif
             di = instr_now() - i0;
             dt = now_ns() - t0;
-            if (seq.playing) {                           /* the cost that matters: while it plays */
+            if (seq.playing || live_bridge_active()) {   /* the cost that matters: while it plays (T5perf: LIVE too) */
                 for (k = 0; k < ENG_PROF_N; k++)
                     prof_tot[k] += (uint32_t)(eng_prof[k] - pr0[k]);
                 ins_total += di;
@@ -898,6 +898,8 @@ static int expect(const char *what, const char *val)
         got = eng_noise_voices_active();
     else if (!strcmp(what, "stresslevel"))          /* RC1p: the running stress level (0 none) */
         got = rc_stress_level();
+    else if (!strcmp(what, "core2forced"))          /* T5perf: the run has core 1 forced off */
+        got = engine_core2_forced_off();
     else if (!strcmp(what, "stressactive"))
         got = rc_stress_active();
     else if (!strcmp(what, "statswords"))           /* RC1p: the fields the last `stats` returned */
@@ -1330,6 +1332,8 @@ int main(int argc, char **argv)
                 proj.arr.lane[i].used = 0;
         } else if (!strcmp(cmd, "cpu2")) {              /* cpu2 0|1: the simulated second core */
             plat_cpu2_set(atoi(a));
+        } else if (!strcmp(cmd, "core2off")) {           /* T5perf: force the core-1 job onto core 0 */
+            engine_core2_force_off(atoi(a));
         } else if (!strcmp(cmd, "reboot")) {
             memset(&proj, 0, sizeof proj);
             boot();

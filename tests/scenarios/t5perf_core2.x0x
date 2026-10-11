@@ -1,0 +1,45 @@
+# T5perf: the FM6 render must happen whether the core-1 job runs on core 1 or is forced onto core 0
+# (a unit that cannot run the second core, or RC1's single-core levels 5/6). On the host there is one
+# render path, so the two runs are identical by construction; the point is that forcing the job onto
+# core 0 does not skip FM6 (a bug once did: the forced run went silent). Both runs must be non-silent
+# and the golden fixes the exact level, so the core-0 and core-1 audio cannot drift apart.
+wait 300
+# FM6 at unity, the TINE EP factory voice, its level macro up a little (as t5i_engines)
+param 5 4 0 100
+param 3 0 7 0
+param 3 0 2 70
+
+# core 1 off: the job runs on core 0
+core2off 1
+expect core2forced 1
+wav t5perf_core0.wav
+note 4 60 110
+note 4 64 110
+note 4 67 110
+note 4 72 110
+wait 1200
+note 4 60 0
+note 4 64 0
+note 4 67 0
+note 4 72 0
+wait 800
+wavstop
+expect peak_db_min -40
+
+# core 1 available again: the same chord, the same audio
+core2off 0
+expect core2forced 0
+peakreset
+wav t5perf_core1.wav
+note 4 60 110
+note 4 64 110
+note 4 67 110
+note 4 72 110
+wait 1200
+note 4 60 0
+note 4 64 0
+note 4 67 0
+note 4 72 0
+wait 800
+wavstop
+expect peak_db_min -40
