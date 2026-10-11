@@ -24,6 +24,7 @@
 #include "../seq/sequencer.h"
 #include "../dsp/drum909.h"          /* DR_* track order */
 #include "../dsp/drum808.h"          /* D8_* track order */
+#include "../dsp/perform.h"          /* T10i: PERF_* (stress level 3) */
 
 /* the FM6 adapter's live voice count (eng_fm6.c; not in engine.h) */
 extern int eng_fm6_voices_active(void);
@@ -38,8 +39,9 @@ typedef char rc_prof_n_fixed[(ENG_PROF_N == 9) ? 1 : -1];
 /* ------------------------------------------------------------------ content --- */
 
 /* The generated song lives here, never in proj: the LIVE bridge copies it into its own song and
- * the X0X baseline points the sequencer at it. NPAT entries because live_bridge_map scans them. */
-static pattern_t rc_pat[NPAT] X0X_POOL;
+ * the X0X baseline points the sequencer at it. T10i: one pattern, not NPAT — live_bridge_map_n()
+ * maps just it, so the debug build need not carry a full pattern array in the pool. */
+static pattern_t rc_pat X0X_POOL;
 
 /* The 909 / 808 track orders come from drum909.h / drum808.h (DR_* / D8_*, included above). */
 
@@ -103,8 +105,8 @@ static void rc_live_enter(void)
     live.focus = LIVE_BASS;
     live.octv = 0;
     note_release_all();
-    live_bridge_rebuild(rc_pat);           /* T7a: map the stress patterns explicitly (no auto-remap) */
-    live_bridge_enter(rc_pat, bpm ? bpm : 1200u);
+    live_bridge_rebuild_n(&rc_pat, 1);     /* T7a/T10i: map the one stress pattern (no auto-remap) */
+    live_bridge_enter(&rc_pat, bpm ? bpm : 1200u);
     set_view(V_LIVE);
     say("LIVE", 0);
 }
@@ -216,6 +218,7 @@ static void rc_stop(void)
     }
     engine_guard_enable(1);
     engine_core2_force_off(0);          /* T5perf: core 1 is available again after the run */
+    engine_perform_reset();             /* T10i: release every punch FX the run left on */
     rc_restore_seq();
     rc_level = 0;
 }
@@ -237,7 +240,7 @@ int rc_stress(int n, int cap)
     } else if (n > 4)
         return -1;
     rc_save();
-    rc_build_pattern(&rc_pat[0]);
+    rc_build_pattern(&rc_pat);
     rc_level = n;
     engine_core2_force_off(single);
 
@@ -245,7 +248,7 @@ int rc_stress(int n, int cap)
         int p;
         if (seq.playing)
             seq_stop(&seq);
-        seq.pat = rc_pat;
+        seq.pat = &rc_pat;
         for (p = 0; p < NPARTS; p++) {
             seq.ppat[p] = 0;
             seq.pcue[p] = 0xFF;
@@ -260,8 +263,9 @@ int rc_stress(int n, int cap)
     }
 
     /* base = 2, 3 or 4: LIVE. Level 4 measures the unguarded cap (the guard would shed FM6 to two
-     * voices, which is not what "the cap" means); 2 and 3 keep the guard on. Level 3 would add
-     * every wired punch FX: T10i has not wired any yet, so it is level 2 for now. */
+     * voices, which is not what "the cap" means); 2 and 3 keep the guard on. Level 3 adds every
+     * wired punch FX (T10i): it engages all six in turn, a few blocks each, and leaves the three
+     * that stack (freeze + filter dive + echo throw) running for the measurement. */
     engine_guard_enable(base == 4 ? 0 : 1);
     rc_live_enter();
     live_bridge_transport_start();
@@ -271,6 +275,16 @@ int rc_stress(int n, int cap)
         if (voices > 8)
             voices = 8;
         rc_hold_chord(voices);
+    }
+    if (base == 3) {
+        static const int FX[6] = {PERF_REPEAT_8, PERF_REPEAT_16, PERF_TAPE, PERF_FILTER,
+                                  PERF_ECHO, PERF_FREEZE};
+        int i;
+        engine_perform_reset();
+        for (i = 0; i < 6; i++) {
+            engine_perform_engage(FX[i], 1);    /* latch: the effect stays through the measurement */
+            rc_settle();                        /* let a few blocks run under it before the next */
+        }
     }
     return 0;
 }
