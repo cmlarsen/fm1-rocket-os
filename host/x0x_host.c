@@ -682,6 +682,8 @@ static int expect(const char *what, const char *val)
         got = engine_perform_latched(atoi(what + 7) % PERF_NFX);
     else if (!strncmp(what, "fxmute", 6))           /* fxmuteR: role R is muted (the clip engine) */
         got = live_bridge_muted((uint8_t)(atoi(what + 6) % LIVE_NROLES));
+    else if (!strncmp(what, "songrolemute", 12))    /* T10i: the song's stored role mute (always 0) */
+        got = live_bridge_song_role_muted((uint8_t)(atoi(what + 12) % LIVE_NROLES));
     else if (!strcmp(what, "focus"))
         got = live_focus();
     else if (!strcmp(what, "liveactive"))

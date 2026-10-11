@@ -272,7 +272,15 @@ void live_bridge_init(void)
 void *live_bridge_song(void) { return &g_song; }
 /* T7a: the song's tempo is authoritative in both modes; X0X's sequencer follows it. */
 static void sync_seq_tempo(void) { seq.bpm = (float)g_song.bpm_x10 / 10.0f; }
-void live_bridge_song_reload(void) { clip_engine_init(&g_eng, &g_song); g_eng_ready = 1; sync_seq_tempo(); }
+void live_bridge_song_reload(void)
+{
+    int r;
+    clip_engine_init(&g_eng, &g_song);                 /* T10i: init zeroes the engine's mute bits */
+    g_eng_ready = 1;
+    for (r = 0; r < NROLES; r++)                        /* a live mute is performance state: not kept */
+        g_song.role[r].muted = 0;                       /* in the song, and cleared on load (T10i review) */
+    sync_seq_tempo();
+}
 void live_bridge_sync_tempo(void) { sync_seq_tempo(); }
 uint32_t live_bridge_pats_hash(const pattern_t *pats)
 {
@@ -488,6 +496,10 @@ void live_bridge_mute(uint8_t role, int on)
         clip_engine_mute(&g_eng, role, on);
 }
 int live_bridge_muted(uint8_t role) { return clip_engine_muted(&g_eng, role); }
+int live_bridge_song_role_muted(uint8_t role)
+{
+    return role < NROLES ? (int)g_song.role[role].muted : 0;
+}
 void live_bridge_mute_all(int on)                    /* leaving LIVE clears every mute */
 {
     if (on) {

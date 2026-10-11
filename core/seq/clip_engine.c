@@ -369,11 +369,11 @@ int clip_engine_muted(const clip_engine_t *e, uint8_t role)
 void clip_engine_mute_clear(clip_engine_t *e)
 {
     uint8_t r;
-    for (r = 0; r < NROLES; r++) {
-        e->muted[r] = 0;
-        if (e->song)
-            e->song->role[r].muted = 0;
-    }
+    for (r = 0; r < NROLES; r++)
+        e->muted[r] = 0;                       /* immediate: the engine may stop rendering (classic) */
+    /* ... and a ring command ordered AFTER any pending mute, so a queued CLIP_CMD_MUTE that drains
+     * later cannot re-apply (T10i review). */
+    push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0);
 }
 
 /* ---- the render loop ----------------------------------------------------- */
@@ -460,8 +460,12 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             } else {
                 e->muted[role] = 0;                            /* unmute: rejoins in time */
             }
-            if (e->song)
-                e->song->role[role].muted = e->muted[role];    /* the current state (not the save state) */
+            continue;                                          /* live mutes are not song state (T10i review) */
+        }
+        if (c.cmd == CLIP_CMD_MUTE_CLEAR) {                    /* T10i: ordered after any queued mute */
+            uint8_t r;
+            for (r = 0; r < NROLES; r++)
+                e->muted[r] = 0;
             continue;
         }
         if (c.cmd == CLIP_CMD_STOP) {

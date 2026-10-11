@@ -43,7 +43,8 @@ typedef struct {
 
 /* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, or a
  * tempo. */
-enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE };
+enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE,
+       CLIP_CMD_MUTE_CLEAR };
 typedef struct {
     uint8_t  cmd;
     uint8_t  clip;     /* launch: the clip; stop / mute (T10i): the role */
@@ -115,9 +116,10 @@ void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
 void clip_engine_mute(clip_engine_t *e, uint8_t role, int on);
 int  clip_engine_muted(const clip_engine_t *e, uint8_t role);
 
-/* Clear every role mute directly, without the ring. Used at an audio handoff (LIVE leaving for the
- * classic pages), where the clip engine stops being rendered and a queued unmute would never drain.
- * Main loop only, with the clip transport stopped; the writes are one byte per role. */
+/* Clear every role mute. It zeroes the bits immediately (an engine that stops rendering, e.g. when
+ * LIVE hands the audio to the classic pages, has no later drain) AND queues CLIP_CMD_MUTE_CLEAR,
+ * which drains after any mute command already in the ring, so a pending CLIP_CMD_MUTE cannot
+ * re-apply. The mute is performance state, never song state; live_enter also clears. */
 void clip_engine_mute_clear(clip_engine_t *e);
 
 /* Add nframes of transport and call the sink for every event in that window, with its

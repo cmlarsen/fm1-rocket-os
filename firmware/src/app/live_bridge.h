@@ -113,6 +113,9 @@ void live_bridge_grid(uint32_t *next_8, uint32_t *next_16);
 void live_bridge_mute(uint8_t role, int on);
 int  live_bridge_muted(uint8_t role);
 void live_bridge_mute_all(int on);                  /* leaving LIVE clears every mute */
+/* T10i review: the song's stored role mute (always 0 for a live mute; kept separate from the
+ * engine's runtime mute so a test can see that a live mute is not song state). */
+int  live_bridge_song_role_muted(uint8_t role);
 
 /* UI queries. */
 uint8_t live_bridge_playing_clip(uint8_t role);   /* CLIP_NONE when stopped */
