@@ -47,7 +47,7 @@ G0 owner ─► G1 design sign-off ─► T1 import X0X + deltron build ─► R
 
 ## Rules every worker spec inherits
 - **Read first:** `CLAUDE.md`, `docs/README.md` and the docs named in the task.
-- **Tests first.** Start with a failing unit test or scenario. Done means the listed `make` targets pass. You must view every new or changed golden PNG at 1:1 and describe it in your report.
+- **Tests first.** Start with a failing unit test or scenario. Done means the listed `make` targets pass. List every new or changed golden PNG in your report with what it should show. Workers (DeepSeek Flash) cannot view images, so the Opus reviewer checks each PNG at 1:1.
 - **Keep X0X's layout.** Put new code in new files (under `core/` for new modules). Don't move or rename inherited files, so upstream fixes can still be ported.
 - **Hardware and licensing limits:**
   - Never flash.
