@@ -4,13 +4,13 @@
 /* X0X's subset of Felucca's editor protocol (web/EDITOR_PROTOCOL.md):
  *   F0 7D 46 4C cmd args.. F7
  * INFO (1), PING (25) and the sample-slot commands SMP_BEGIN .. SMP_INFO (11..15), so
- * tools/fm1_sample_upload.py loads break loops into the three slots unchanged. The
+ * tools/fm1_sample_upload.py loads user samples into the three slots unchanged. The
  * parameter / preset / track commands are Felucca's instrument and are not answered. */
 #define ED_HDR0 0x7D
 #define ED_HDR1 0x46
 #define ED_HDR2 0x4C
 enum { ED_INFO = 1, ED_SMP_BEGIN = 11, ED_SMP_WRITE, ED_SMP_END, ED_SMP_ERASE, ED_SMP_INFO, ED_SMP_READ, ED_PING = 25 };
-#define ED_READ_MAX 224u                     /* X0X: SMP_READ's bytes a frame (the break page draws the slots) */
+#define ED_READ_MAX 224u                     /* X0X: SMP_READ's bytes a frame (a page draws the slots) */
 
 static uint8_t ed_out[288];
 static uint32_t ed_n;

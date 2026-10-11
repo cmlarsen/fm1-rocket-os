@@ -27,7 +27,7 @@ needs are collected in `LICENSES/` (`LICENSE` itself is the GPL-3.0).
 
 No recorded breaks are in this tree or in the default firmware. The removed BREAK part
 (generator and its tools) came from [schwung-breakbeat](https://github.com/mestela/schwung-breakbeat)
-(BB Gen) by mestela, an unlicensed repository used "with the author's permission"; nothing of
+by mestela, an unlicensed repository used "with the author's permission"; nothing of
 it remains here.
 
 ## Felucca Assets

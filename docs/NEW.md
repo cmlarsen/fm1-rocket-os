@@ -74,7 +74,7 @@ The newest version first. Install it with the [web installer](../install/); the
 - Saving waits until you stop, so the audio never cuts out
 - B CHANCE works without PHRASE
 - CLEAR PATTERN no longer leaves a bar showing on HOME
-- The keys no longer trigger steps or slices on the MASTER and FX screens
+- The keys no longer trigger steps on the MASTER and FX screens
 
 Projects saved with 0.10 load as they were.
 

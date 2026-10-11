@@ -3533,9 +3533,6 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         *a = "PRESS: ON";
         *b = "TAP: OFF";
         *c = "HOLD + KNOBS: EDIT";
-    } else {
-        *a = "STEP + 1-8: PIN A SLICE";                /* (1-8 play the slices numbered above) */
-        *b = "9 REV 10 HALF 11 STUT";
     }
     return C_DIM;
 }
