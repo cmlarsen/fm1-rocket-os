@@ -43,3 +43,24 @@ Stage lock was stored and shown but nothing enforced it. `ui_studio.c` now refus
 | debug | 554,264 B | 73,524 / 98,304 | 301,940 / 344,064 | **42,124 B** |
 
 Both clear the 8,192 B rule. No hardware was flashed.
+
+## r1: Opus review findings
+
+Fixes are in `2330cfb` and the test follow-up. Each new scenario failed on `ca33861` before the fix (the take scenarios are pins and pass on both).
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 1 | Blocker: a momentary FX held in the FX layer stuck on when EDIT opened SETUP | `live_fx_reset_ui()` now releases every non-latched held FX key (`live_fx_release_held()`, shared with the FX-button release). Mapped and FX-layer key releases are handled before `live_setup_key()` | `tlset_fx_edit.x0x` (before: `fxactive2` stayed 1) |
+| 2 | LIVE assignments remapped STUDIO's keys | STUDIO uses the fixed zone map (`st_key_clip`, key k = clip k) for key handling and LEDs; only LIVE PADS reads `key_clip` | `tlset_studio_keys.x0x` (before: the clear hit the wrong clip) |
+| 3 | An assigned FX latched when an unrelated clip key with the same index was released | `fx_owner_key[6]` records the engaging key; only that key's release ends or latches the effect | `tlset_fx_owner.x0x` (before: `fxlatch0` 1) |
+| 4 | A refused SEL hold under stage lock launched the clip on release, and the toast refired each tick | A refusal sets `btn_used` for SEL and the tick will not retry while it is set, so the toast shows once and the release is not a tap | `tlset_lock_sel.x0x` (before: the release launched clip 1). The scenario is its own file, not an addition to `tlset_lock`, because that scenario's cursor clip is already playing and a launch there is invisible |
+| 5 | No take scenario with assigned keys | Host expect `fxactiveN` added. Stop and FX assignments recorded and replayed event-exactly; the live note is recorded and pinned separately | `tlset_take.x0x` (takedump and eventscmp, goldens), `tlset_take_note.x0x` (takedump golden) |
+| 6 | Assign had no None, and tapping an unassigned key assigned DRUMS A | PRESETS cycle has 40 states, the last is None (255). Release commits only when the target changed from the start, so no toast and no dirty flag otherwise | `tlset_assign_none.x0x` (before: `songdirty` 1 after a plain tap) |
+
+NITs done: key names in the toast and title follow the pitch played (41+k); "EDIT tap" left the HOME combo sheet (the EDIT card covers it) and the card reads "EDIT: setup / EDIT again: done"; LIVE LEDs dim-light assigned stop, FX and note keys and light a latched or held assigned FX; the channel compare happens after clamping and the indentation is fixed; LIVE 9 rows moved to an 18 px pitch so the Take row clears PERFORM; `song_migrate()` split out of the store load with a unit test that rejects v1 bytes 27-38 (`tests/host/song_store_test.c`).
+
+Goldens changed (GOLDEN_UPDATE=1, viewed at 1:1): `help_sheet_live` (EDIT row gone), `tlset_live7_assign` (key A3), `tlset_live9_setup` and `tlset_ext_setup` (row pitch), `tlset_setup_help` (card line); new `tlset_take` and `tlset_take_note` logs. SEL releasing held notes on layer change (architecture.md) was what moved `live_hold` and `snd_hang_scl` in `c340664`.
+
+Known, not fixed here (T9i's): a take replay starts a live note 256 samples early on the PLAY layer as well as on assigned keys (rec 384 vs replay 128 in `tlset_take_note`), so that scenario does not eventscmp.
+
+Ladder on the committed tree: `make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` pass; `tools/check_loader.sh` ok on `build/x0x.fwsc` and `build/debug/x0x.fwsc`. Pool spare is 42,124 B on both builds (301,940 / 344,064 used); images 549,800 B release and 554,344 B debug. No hardware was flashed.
