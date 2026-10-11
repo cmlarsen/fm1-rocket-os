@@ -2,10 +2,14 @@
 /* T4c clip engine: a song_t plays as five per-role clips, launched at a quantize point.
  *
  * Pure C, no heap, no locks, no double and no 64-bit division. Time is the audio sample
- * counter only. The main loop calls clip_engine_launch()/clip_engine_stop_role()/
+ * counter only. The main loop calls clip_engine_launch()/clip_engine_stop()/
  * clip_engine_launch_now(); the audio ISR calls clip_engine_render() and every event comes
  * back through the sink with its exact sample offset. The UI calls reach the engine through
  * a small single-producer / single-consumer ring, so the two sides never take a lock.
+ *
+ * A clip's kind is decided by its role, not by its bytes: clip_role(clip) == ROLE_DRUMS uses
+ * d.drum, every other role (FX included) uses d.notes[0..nnotes). An unused clip cannot be
+ * launched.
  *
  * Step timing is exact integer arithmetic: a 16th lasts STEP_NUM/bpm_x10 samples with
  * STEP_NUM = FS*150, driven by a Bresenham accumulator that keeps the fractional part, so
@@ -28,7 +32,7 @@ typedef struct {
     uint8_t  kind;
     uint8_t  role;
     uint8_t  a;        /* note / drum lane / param low / 1 | 0 */
-    uint8_t  b;        /* velocity / param high */
+    uint8_t  b;        /* velocity / drum accent / param high */
     uint8_t  c;        /* clip index, where meaningful */
 } clip_event_t;
 
@@ -55,7 +59,7 @@ typedef struct {
     song_t *song;
     uint8_t  playing;
     uint8_t  was_playing;
-    uint16_t bpm_x10;        /* current tempo (clamped), from the song or a BPM command */
+    uint16_t bpm_x10;        /* current tempo (clamped) */
     uint16_t bpm_src;        /* last tempo requested, to detect a real change */
     uint32_t step_L;         /* samples per 16th, integer part */
     uint32_t step_f;         /* remainder, in 1/bpm_x10 sample units */
@@ -80,21 +84,26 @@ typedef struct {
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
 
-/* Transport. Tempo and swing come from the song; a BPM command overrides the tempo. */
+/* Transport. Tempo and swing come from the song (or a tempo command). */
 void clip_engine_start(clip_engine_t *e);
-void clip_engine_stop(clip_engine_t *e);
-void clip_engine_set_bpm(clip_engine_t *e, uint16_t bpm_x10);
+void clip_engine_transport_stop(clip_engine_t *e);
 
-/* Queue a clip on its role (clip_role()); queue a stop with clip_engine_stop_role(). A
- * second launch of the already-queued clip cancels the queue. */
+/* Queue the clip on its role (clip_role()) at the clip's own quantize; a second launch of
+ * the clip that is already queued cancels the queue. clip_engine_launch_quant uses an
+ * explicit quantize. */
 void clip_engine_launch(clip_engine_t *e, uint8_t clip);
 void clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant);
-void clip_engine_stop_role(clip_engine_t *e, uint8_t role);
 
-/* HOME + pad: switch at the next step, whatever the clip's quantize says. */
+/* Queue a stop on a role, at that role's current clip quantize (the next bar if it is idle).
+ * A second stop cancels the queued one. */
+void clip_engine_stop(clip_engine_t *e, uint8_t role);
+
+/* HOME + pad: switch at the next step, whatever the clip's quantize says. It does not cancel
+ * a queued clip; it launches the new one now. */
 void clip_engine_launch_now(clip_engine_t *e, uint8_t clip);
 
-/* Tempo change from the main loop, through the ring. */
+/* Tempo change from the main loop, through the ring. It is applied at the next render and is
+ * the one source of truth (it also writes song->bpm_x10). */
 void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
 
 /* Add nframes of transport and call the sink for every event in that window, with its

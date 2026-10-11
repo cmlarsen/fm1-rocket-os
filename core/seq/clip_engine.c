@@ -10,9 +10,14 @@
  *     step_sample(k) = floor(k * STEP_NUM / bpm_x10)      (never drifts; proven by induction)
  *
  * so bar N starts on exactly the sample that multiplication says, hour after hour, and the
- * fractional part stays under bpm_x10 (a 32-bit divide). Swing is X0X's: an odd 16th is
- * delayed by L * swing / 200 samples (100 = the next even 16th shifts by half a step = 75 %).
- * A bar or beat lands on an even 16th, so quantize points are never swung.
+ * fractional part stays under bpm_x10 (a 32-bit divide). A tempo change keeps the current
+ * step's phase (the elapsed fraction of the step is rescaled to the new step length), so no
+ * step fires twice, however big the jump. Swing is X0X's: an odd 16th is delayed by
+ * L * swing / 200 samples (100 = the next even 16th shifts by half a step = 75 %). A bar or
+ * beat lands on an even 16th, so quantize points are never swung.
+ *
+ * A clip's kind is decided by its role: ROLE_DRUMS uses d.drum, everything else uses
+ * d.notes[0..nnotes). An unused clip cannot be launched.
  *
  * The render loop walks one step at a time and emits each event at its exact sample offset.
  * At the head of a step it applies any queued launch whose target step has arrived (releasing
@@ -26,25 +31,43 @@
 #endif
 #define CLIP_STEP_NUM ((uint32_t)CLIP_ENGINE_FS * 150u)
 #define NEVER32 0xFFFFFFFFu
+/* publish we have written the slot / read the head before the slot */
+#define CLIP_BARRIER() __asm__ volatile("" ::: "memory")
 
 /* ---- tempo --------------------------------------------------------------- */
 
-static void recompute_len(clip_engine_t *e)
+static uint16_t clamp_bpm(uint16_t b)
 {
-    uint16_t b = e->bpm_x10;
-    if (b < CLIP_ENGINE_BPM_MIN) b = CLIP_ENGINE_BPM_MIN;
-    if (b > CLIP_ENGINE_BPM_MAX) b = CLIP_ENGINE_BPM_MAX;
-    e->bpm_x10 = b;
-    e->step_L = CLIP_STEP_NUM / b;
-    e->step_f = CLIP_STEP_NUM % b;
+    if (b < CLIP_ENGINE_BPM_MIN) return CLIP_ENGINE_BPM_MIN;
+    if (b > CLIP_ENGINE_BPM_MAX) return CLIP_ENGINE_BPM_MAX;
+    return b;
 }
 
-void clip_engine_set_bpm(clip_engine_t *e, uint16_t bpm_x10)
+/* Change the tempo, keeping the elapsed fraction of the current step (ISR context only: the
+ * UI sends a tempo through clip_engine_queue_bpm). */
+static void set_bpm(clip_engine_t *e, uint16_t bpm_x10)
 {
+    uint16_t b = clamp_bpm(bpm_x10);
+    uint32_t new_l = CLIP_STEP_NUM / b;
+    uint32_t new_f = CLIP_STEP_NUM % b;
+    if (e->playing && e->step_L && new_l) {
+        uint32_t phase = e->elapsed - e->step_sample;   /* samples into the current step */
+        uint32_t scaled;
+        if ((int32_t)phase < 0)
+            phase = 0;
+        if (phase > e->step_L)
+            phase = e->step_L;
+        /* keep the same fraction of the step, so the next boundary is exactly one step away */
+        scaled = (uint32_t)((uint64_t)phase * new_l / e->step_L);
+        e->step_sample = e->elapsed - scaled;
+        e->step_frac = 0;
+    } else {
+        e->step_frac = 0;
+    }
+    e->bpm_x10 = b;
     e->bpm_src = bpm_x10;
-    e->bpm_x10 = bpm_x10;
-    recompute_len(e);
-    e->step_frac = 0;                 /* anchor the fractional part at the tempo change */
+    e->step_L = new_l;
+    e->step_f = new_f;
 }
 
 /* swing shift of step k, in samples */
@@ -84,29 +107,21 @@ static int clip_len_raw(const clip_t *c)
     return n > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : n;
 }
 
-/* melodic notes live in rng; anything outside rng is not in the model. Empty rng = drum. */
-static int clip_note_count(const clip_t *c)
-{
-    int n = 0, i, len = clip_len_raw(c);
-    for (i = 0; i < (int)CLIP_MAX_NOTES; i++) {
-        const note_t *nt = &c->d.notes[i];
-        if (nt->step < len && nt->len > 0)
-            n++;
-    }
-    return n;
-}
-
-static int clip_is_melodic(const clip_t *c) { return clip_note_count(c) > 0; }
-
 static int clip_len(const clip_engine_t *e, uint8_t clip)
 {
     return clip_len_raw(&e->song->clip[clip]);
 }
 
+static int clip_notes(const clip_t *c)
+{
+    int n = (int)c->nnotes;
+    return n > (int)CLIP_MAX_NOTES ? (int)CLIP_MAX_NOTES : n;
+}
+
 static int clip_valid(const clip_engine_t *e, uint8_t clip)
 {
     uint8_t role, lo, hi;
-    if (!e->song || clip >= NCLIPS)
+    if (!e->song || clip >= NCLIPS || !e->song->clip[clip].used)
         return 0;
     role = clip_role(clip);
     lo = e->song->role[role].first_clip;
@@ -204,7 +219,6 @@ static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t st
                         uint32_t off, uint32_t abs, const clip_sink_t *sink)
 {
     const clip_t *c = &e->song->clip[clip];
-    int melodic = clip_is_melodic(c);
     int i;
 
     /* motion first: a drum or a note hears this step's parameters as it fires */
@@ -216,8 +230,17 @@ static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t st
            (uint8_t)(m->param >> 8), m->v[step]);
     }
 
-    if (melodic) {
-        for (i = 0; i < (int)CLIP_MAX_NOTES; i++) {
+    if (role == ROLE_DRUMS) {
+        uint8_t acc = (uint8_t)((c->d.drum.accent[step >> 5] >> (step & 31u)) & 1u);
+        int lane;
+        for (lane = 0; lane < (int)DRUM_LANES; lane++) {
+            if (!drum_get(&c->d.drum, (unsigned)lane, step))
+                continue;
+            ev(sink, off, CLIPEV_DRUM, role, (uint8_t)lane, acc, clip);
+        }
+    } else {
+        int nn = clip_notes(c);
+        for (i = 0; i < nn; i++) {
             const note_t *nt = &c->d.notes[i];
             uint32_t dur, end;
             if (nt->len == 0 || nt->step != step)
@@ -231,14 +254,6 @@ static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t st
                 end = abs + 1u;
             if (note_set(e, role, nt->note, end))
                 ev(sink, off, CLIPEV_NOTE_ON, role, nt->note, nt->vel, clip);
-        }
-    } else {
-        int lane;
-        uint8_t acc = (uint8_t)((c->d.drum.accent[step >> 5] >> (step & 31u)) & 1u);
-        for (lane = 0; lane < (int)DRUM_LANES; lane++) {
-            if (!drum_get(&c->d.drum, (unsigned)lane, step))
-                continue;
-            ev(sink, off, CLIPEV_DRUM, role, (uint8_t)lane, acc, clip);
         }
     }
 }
@@ -278,24 +293,28 @@ void clip_engine_init(clip_engine_t *e, song_t *song)
     }
     e->bpm_x10 = (song && song->bpm_x10) ? song->bpm_x10 : 1200u;
     e->bpm_src = e->bpm_x10;
-    recompute_len(e);
+    e->bpm_x10 = clamp_bpm(e->bpm_x10);
+    e->step_L = CLIP_STEP_NUM / e->bpm_x10;
+    e->step_f = CLIP_STEP_NUM % e->bpm_x10;
 }
 
 void clip_engine_start(clip_engine_t *e) { e->playing = 1; }
-void clip_engine_stop(clip_engine_t *e) { e->playing = 0; }
+void clip_engine_transport_stop(clip_engine_t *e) { e->playing = 0; }
 
 /* ---- UI entry points ----------------------------------------------------- */
 
-static void push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm)
+static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm)
 {
     uint8_t head = e->cmd_head, next = (uint8_t)((head + 1u) % CLIP_CMD_RING);
     if (next == e->cmd_tail)
-        return;                           /* full: the UI may retry */
+        return -1;                        /* full: the UI may retry */
     e->cmd[head].cmd = cmd;
     e->cmd[head].clip = clip;
     e->cmd[head].quant = quant;
     e->cmd[head].bpm_x10 = bpm;
+    CLIP_BARRIER();                       /* publish the slot before the head */
     e->cmd_head = next;
+    return 0;
 }
 
 void clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant)
@@ -319,7 +338,7 @@ void clip_engine_launch_now(clip_engine_t *e, uint8_t clip)
     push_cmd(e, CLIP_CMD_LAUNCH_NOW, clip, 0, 0);
 }
 
-void clip_engine_stop_role(clip_engine_t *e, uint8_t role)
+void clip_engine_stop(clip_engine_t *e, uint8_t role)
 {
     if (role >= NROLES)
         return;
@@ -387,25 +406,38 @@ static void advance_role(clip_engine_t *e, uint8_t role, uint32_t off, uint32_t 
 
 static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
 {
-    while (e->cmd_tail != e->cmd_head) {
-        clip_cmd_t c = e->cmd[e->cmd_tail];
+    for (;;) {
+        uint8_t head = e->cmd_head;
+        clip_cmd_t c;
         uint8_t role, target;
+        CLIP_BARRIER();                       /* read the head before the slot */
+        if (e->cmd_tail == head)
+            break;
+        c = e->cmd[e->cmd_tail];
         e->cmd_tail = (uint8_t)((e->cmd_tail + 1u) % CLIP_CMD_RING);
+
         if (c.cmd == CLIP_CMD_SET_BPM) {
-            clip_engine_set_bpm(e, c.bpm_x10);
+            if (e->song)
+                e->song->bpm_x10 = c.bpm_x10;  /* one source of truth */
+            set_bpm(e, c.bpm_x10);
             continue;
         }
         if (c.cmd == CLIP_CMD_STOP) {
             role = c.clip;
             if (role >= NROLES)
                 continue;
-            if (e->que_set[role] && e->que[role] == CLIP_NONE) {
-                e->que_set[role] = 0;                 /* stop the queued stop */
+            if (e->que_set[role] && e->que[role] == CLIP_NONE) {   /* a second stop cancels */
+                e->que_set[role] = 0;
+                ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, CLIP_NONE);
                 continue;
             }
             e->que[role] = CLIP_NONE;
             e->que_set[role] = 1;
-            e->que_at[role] = e->global_step + action_lead(e, role, Q_END);
+            {
+                uint8_t q = (e->cur[role] != CLIP_NONE)
+                            ? e->song->clip[e->cur[role]].quant : Q_BAR;
+                e->que_at[role] = e->global_step + action_lead(e, role, q);
+            }
             ev(sink, 0, CLIPEV_CLIP_QUEUED, role, 0, 0, CLIP_NONE);
             continue;
         }
@@ -414,8 +446,8 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         if (!clip_valid(e, target))
             continue;
         role = clip_role(target);
-        if (e->que_set[role] && e->que[role] == target) {   /* launching the queued clip cancels */
-            e->que_set[role] = 0;
+        if (c.cmd == CLIP_CMD_LAUNCH && e->que_set[role] && e->que[role] == target) {
+            e->que_set[role] = 0;             /* relaunching the queued clip cancels */
             e->que[role] = CLIP_NONE;
             ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, target);
             continue;
@@ -466,9 +498,10 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
     if (!nframes)
         return;
 
-    /* the song is the tempo source of truth; a ring BPM command already set it */
+    /* the song is the tempo source of truth: the UI writes song->bpm_x10 directly, or a
+     * ring tempo command writes it (in consume_cmds) */
     if (e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src)
-        clip_engine_set_bpm(e, e->song->bpm_x10);
+        set_bpm(e, e->song->bpm_x10);
 
     consume_cmds(e, sink);
 
@@ -535,7 +568,14 @@ uint8_t clip_engine_playing_clip(const clip_engine_t *e, uint8_t role)
 
 uint8_t clip_engine_queued_clip(const clip_engine_t *e, uint8_t role)
 {
-    return (role < NROLES && e->que_set[role]) ? e->que[role] : CLIP_NONE;
+    uint8_t q, s;
+    if (role >= NROLES)
+        return CLIP_NONE;
+    CLIP_BARRIER();                        /* a consistent snapshot of the pair */
+    s = e->que_set[role];
+    q = e->que[role];
+    CLIP_BARRIER();
+    return s ? q : CLIP_NONE;
 }
 
 uint8_t clip_engine_progress(const clip_engine_t *e, uint8_t role)
