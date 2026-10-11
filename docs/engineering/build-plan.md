@@ -42,6 +42,7 @@ G0 owner ─► G1 design sign-off ─► T1 import X0X + deltron build ─► R
   2. runs `/code-review`;
   3. merges `--no-ff`;
   4. releases the worker.
+- **After every merge, the coordinator runs `make fw fw-debug` on the merged `integration` tree,** not only on the worker branch. Two branches that each fit the RAM pool can overflow it together (T8i + T10i on 2026-10-11). A failed merged build blocks the next install until a fix lands.
 - **Failures** go back to the same worker as a follow-up Dispatch, with the artifacts attached. After two failures on one Task, the coordinator escalates to the owner.
 - **`integration` → `main`** happens only at RC gates, as a PR that the owner approves.
 
