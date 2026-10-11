@@ -17,7 +17,7 @@ tap EDIT
 press PLAY
 wait 700
 release PLAY
-wait 1000
+wait 5000
 expect songdirty 0
 reboot
 wait 300

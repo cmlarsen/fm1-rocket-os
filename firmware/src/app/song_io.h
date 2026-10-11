@@ -40,6 +40,12 @@ int  song_io_flush(void);
 /* T6i behaviour 2: an edit to the current song marks it dirty. T10's assign-keys UI calls this. */
 void song_io_set_key_clip(int key, int clip);
 
+/* LIVE SETUP: model-free song settings; edits use the normal autosave gate. */
+enum { SONG_SETUP_QUANT, SONG_SETUP_LOCK, SONG_SETUP_CHANNEL, SONG_SETUP_PC };
+enum { LIVE_ASSIGN_STOP = 27, LIVE_ASSIGN_FX = 32, LIVE_ASSIGN_NOTE = 38, LIVE_ASSIGN_COUNT = 39 };
+int song_io_setup_get(int setting);
+void song_io_setup_set(int setting, int value);
+
 /* T7a: the clip under the cursor. Indices are the model's clip order (0..26); a role index is
  * 0..4 (DRUMS..FX). The clip-settings edits mark the song dirty; the copy/clear edits push an undo
  * entry of their own. Creating a clip only fills an unused slot. */

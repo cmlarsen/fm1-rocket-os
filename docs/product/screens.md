@@ -31,9 +31,9 @@ Related: [interaction model](interaction-model.md) · [UX principles](ux-princip
 | LIVE | 4 Pads, recording | Red border, REC timer, knob cards marked as recorded, LEAD B queued to stop |
 | LIVE | 5 Play layer | After SCL: the keys play LEAD in C minor, with a clip-status strip |
 | LIVE | 6 Punch FX | FX held: six effects on the first six lower keys. One is latched, one is held. Upper keys mute roles. |
-| LIVE | 7 Assign keys | In LIVE SETUP: hold a key and turn PRESETS to pick what it triggers |
+| LIVE | 7 Assign keys | LIVE SETUP → SEL: hold a key, turn PRESETS through clips, stops, FX and Live note; release commits |
 | LIVE | 8 Clear take | Hold REC: a red ring names the take. The clips stay and the music keeps playing. |
-| LIVE | 9 Setup | Assign keys, launch default, stage lock, external keys, Program Change, the take |
+| LIVE | 9 Setup | EDIT in LIVE: Assign keys, launch default, stage lock, external keys, Program Change, shared Clock in, Take; SELECT row, ALGO value, SEL open, EDIT done |
 | LIVE | 10 The take | One take per song: timeline (role lanes plus a knob curve), play, clear |
 | STUDIO | 1 Song home | Song card, selected clip, role × clip grid with cursor |
 | STUDIO | 2 Empty slot | Cursor on an empty slot. REC records, SEQ steps it in. |
@@ -94,3 +94,5 @@ Decisions made in this pass:
 - Sound deep-edit pages. These are inherited from the fork ([ADR-0003](../decisions/0003-sound-design-scope.md)).
 - Settings/GLO, MIDI, the boot and safe-mode screens, the alternate 4×4 grid and Custom pad layouts, and the commit-tweaks prompt.
 - The alternate Felucca palettes (AMBER, ICE, PAPER, HI-CON). Swapping them only needs `design/project/fm1.css`.
+
+TLSET adds an EXT chip to the LIVE header while following external clock, alongside its followed BPM. LIVE 7 and LIVE 9 retain X0X’s bottom performance knob strip; the seven setup rows fit above it at 240×240. SEL remains the performance layer toggle and confirms setup rows.

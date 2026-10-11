@@ -1,5 +1,19 @@
 # X0X
 
+## LIVE SETUP (Rocket OS)
+
+Hold PLAY to enter LIVE. SEL switches PADS/PLAY. EDIT opens LIVE SETUP; SELECT chooses a row, ALGORITHM changes a value, SEL opens Assign keys or Take, HOME goes back, and EDIT finishes.
+
+- **Assign keys:** hold a key and turn PRESETS to choose any clip, a role stop, one of six punch FX, or Live note. Release keeps it and shows a confirmation. Assigned FX tap to latch and hold for momentary use; Live note plays the focused role at that key's pitch in PADS.
+- **Launch on:** Next bar, Next beat, or End of clip, used by new clips and MIDI Program Change. Existing clips keep their own launch setting.
+- **Stage lock:** blocks clip clearing from launch mode while playing. LIVE pad holds leave clips untouched; take clear is still available.
+- **External keys:** Omni or channel 1–16. **Program change:** Off or On for quantized clip launches.
+- **Clock in:** Auto follows incoming USB/TRS clock; Internal uses the song tempo. This is the same GLOBAL setting. EXT and the followed BPM appear in the LIVE header while following clock.
+- **Take:** SEL opens the take card and plays it; PLAY or SEL stops playback. Hold REC 1.5 seconds to clear with a ring; undo restores it.
+
+The song keeps assignments and setup options, marks changes with the header dot, and autosaves only after leaving LIVE while stopped and silent. Clock in is a GLOBAL setting. No flash writes occur in LIVE.
+
+
 X0X turns the M-VAVE FM-1 into a groovebox: a 909, an 808 and two 303s,
 all playing at once, in stereo. Each part can play its own pattern, you can arrange patterns
 into a song, record knob moves, and give single steps a sound and a chance of their own.

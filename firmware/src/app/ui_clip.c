@@ -177,7 +177,7 @@ void clip_open(int clip)                               /* SEQ: the create is not
     if (clip < 0 || role < 0)
         return;
     if (!live_bridge_clip_used(clip))
-        song_io_clip_create(clip, 16, 0 /*Loop*/, 0 /*Bar*/);
+        song_io_clip_create(clip, 16, 0 /*Loop*/, song_io_setup_get(SONG_SETUP_QUANT));
     cl_session_end();
     cl.clip = clip;
     cl.role = role;
@@ -208,7 +208,7 @@ void clip_record_open(int clip)
     cl.toast_until = 0;
     song_io_edit_begin(clip);
     if (!live_bridge_clip_used(clip))
-        song_io_clip_create_undoable(clip, 16, 0 /*Loop*/, 0 /*Bar*/);
+        song_io_clip_create_undoable(clip, 16, 0 /*Loop*/, song_io_setup_get(SONG_SETUP_QUANT));
     cl_base_for_clip();
     set_view(V_CLIPEDIT);
     clip_rec_arm(1);                                   /* the pass shares the session's entry */

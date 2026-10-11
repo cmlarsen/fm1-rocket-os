@@ -142,11 +142,36 @@ void song_io_set_key_clip(int key, int clip)
 {
     if (key < 0 || key >= (int)NKEYS)
         return;
-    if (clip != (int)CLIP_NONE && (clip < 0 || clip > (int)NCLIPS))
+    if (clip < 0 || !key_target_valid((unsigned)clip))
         return;
     song()->key_clip[key] = (uint8_t)clip;
     dirty = 1;
     failed = 0;
+}
+
+static uint8_t *setup_field(int setting)
+{
+    switch (setting) {
+    case SONG_SETUP_QUANT: return &song()->quant_default;
+    case SONG_SETUP_LOCK: return &song()->stage_lock;
+    case SONG_SETUP_CHANNEL: return &song()->live_channel;
+    case SONG_SETUP_PC: return &song()->pc_launch;
+    default: return 0;
+    }
+}
+int song_io_setup_get(int setting)
+{
+    uint8_t *p = setup_field(setting);
+    return p ? *p : 0;
+}
+void song_io_setup_set(int setting, int value)
+{
+    uint8_t *p = setup_field(setting);
+    int max = setting == SONG_SETUP_CHANNEL ? 16 : setting == SONG_SETUP_QUANT ? NQUANT - 1 : 1;
+    if (!p || value < 0 || value > max || *p == value)
+        return;
+    *p = (uint8_t)value;
+    song_io_mark_dirty();
 }
 
 /* ---- T7a: the clip under the cursor -------------------------------------- */

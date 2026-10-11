@@ -894,6 +894,14 @@ static int expect(const char *what, const char *val)
         got = (int)song_writes;
     else if (!strcmp(what, "songsaves"))           /* T6i: song_io's successful saves */
         got = song_io_saves();
+    else if (!strcmp(what, "setup")) got = setup_open;
+    else if (!strcmp(what, "assign")) got = assign_open;
+    else if (!strcmp(what, "takeopen")) got = take_open;
+    else if (!strcmp(what, "songquant")) got = song_io_setup_get(SONG_SETUP_QUANT);
+    else if (!strcmp(what, "stagelock")) got = song_io_setup_get(SONG_SETUP_LOCK);
+    else if (!strcmp(what, "livechannel")) got = song_io_setup_get(SONG_SETUP_CHANNEL);
+    else if (!strcmp(what, "pclaunch")) got = song_io_setup_get(SONG_SETUP_PC);
+    else if (!strcmp(what, "clockinternal")) got = proj.set.rsv[1];
     else if (!strcmp(what, "songdirty"))           /* T6i: the current song changed since the last save */
         got = song_io_dirty();
     else if (!strcmp(what, "songfailed"))          /* T6i: the last song save failed; no retry until an edit */

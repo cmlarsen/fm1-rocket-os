@@ -109,15 +109,16 @@ The keyboard splits at its natural gaps, the places where two lower keys meet wi
 - Deferred: the 4×4 grid, Split and Custom maps, and scenes.
 
 ### LIVE SETUP (EDIT in LIVE) — configuring keys (R10)
-- **Rows:**
-  - **Assign keys:** hold a key and turn PRESETS to choose what it triggers (a clip of any role, a role stop, a punch FX or a live note), then release. A toast confirms, for example "A4 → CHORDS B".
-  - Launch default
-  - Stage lock
-  - External keys channel
-  - Program Change launch
-  - The take (play, clear)
-- **These settings are saved with the song.**
-- **Holding a pad on the LIVE screen itself does nothing in v1.** Pad holds mean copy in STUDIO and clear when combined with HOME.
+- EDIT opens the setup list. SELECT chooses a row; ALGORITHM changes its value; SEL opens Assign keys or Take. EDIT leaves setup; HOME goes back one level, remaining in LIVE.
+- **Assign keys:** SEL opens the assignment screen. Hold a key and turn PRESETS through every clip of every role, five role stops, six punch FX and Live note. Release commits and a toast names the key and target. Leaving before release cancels. Assigned FX use the same tap-to-latch and hold-for-momentary gestures as the FX layer; a mapped Live note plays the focused role at the key's pitch in PADS. Opening setup releases held panel and MIDI notes.
+- **Launch on:** Next bar, Next beat or End of clip. New clips and MIDI Program Change use this default; existing clips keep their own launch setting.
+- **Stage lock:** Off or On. While playing, clearing from launch mode is blocked. LIVE pad holds do not clear or copy clips; take clear remains available.
+- **External keys:** Omni or channels 1–16. Changing channel releases held external notes.
+- **Program change:** Off or On, enabling quantized clip launch on the external keys channel.
+- **Clock in:** Auto or Internal, the same GLOBAL setting. Auto follows incoming clock and shows EXT with the followed tempo in the LIVE header. Internal restores the song tempo.
+- **Take:** SEL opens the existing take card; SEL plays, PLAY or SEL stops playback, and holding REC 1.5 s clears it with the existing ring and undo.
+- Assignments, launch default, stage lock and MIDI options belong to the song and mark it dirty. Autosave writes only while stopped and idle after leaving LIVE; Clock in belongs to GLOBAL settings.
+- SEL toggles PADS/PLAY on the performance screen and confirms rows inside setup.
 
 ### Recording the take (R14)
 - **REC tap arms recording.** It starts at the next bar, or at your first launch if the transport is stopped. While recording, REC is solid red and the screen gets a red border.
@@ -176,8 +177,7 @@ Deferred: HOME+SAVE capture, OCT± clip banks, and the Gate clip mode.
 - Notes on the live channel play the focused role.
 - Program Change launches clips, quantized.
 - Clock comes in over USB or TRS. Clock out over USB comes after v1 if it's easy.
-- T11i: the live channel and Program Change are per song (`song.live_channel`, `song.pc_launch`);
-  their LIVE SETUP rows are a follow-up, so the defaults are **omni** and **PC launch off**.
+- The live channel and Program Change are per song (`song.live_channel`, `song.pc_launch`), edited in LIVE SETUP. Defaults are **Omni** and **PC launch Off**.
 - T11i: **CC 120 and CC 123** release everything external MIDI holds, plus the engine's all-off.
 - T11i: **CLOCK IN**, a GLOBAL row, is **Auto** (follow the incoming clock when present) or
   **Internal** (ignore it, and keep the song's own tempo). With Auto, F8 ticks set the tempo, and

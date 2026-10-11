@@ -544,7 +544,7 @@ int song_validate(const song_t *s)
             return -1;                        /* the role ranges are fixed in model v1 */
     }
     for (i = 0; i < (int)NKEYS; i++)
-        if (s->key_clip[i] != CLIP_NONE && s->key_clip[i] >= NCLIPS)
+        if (!key_target_valid(s->key_clip[i]))
             return -1;
     for (i = 0; i < (int)NCLIPS; i++) {
         const clip_t *c = &s->clip[i];
@@ -700,6 +700,13 @@ static int sst_try_song(const song_store_t *st, int ext, uint8_t slot, song_t *o
     src.ctx = &rd;
     if (lz_decompress(&src, (uint8_t *)out, sizeof(song_t)) || rd.err)
         return -1;
+    if (out->version == 1u) {
+        int k;
+        for (k = 0; k < (int)NKEYS; k++)
+            if (out->key_clip[k] != CLIP_NONE && out->key_clip[k] >= NCLIPS)
+                return -1;                 /* v1 never had non-clip targets */
+        out->version = MODEL_VERSION;
+    }
     return song_validate(out);
 }
 
