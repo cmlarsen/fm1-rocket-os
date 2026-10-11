@@ -87,7 +87,9 @@ int song_io_flush(void)
 
 void song_io_set_key_clip(int key, int clip)
 {
-    if (key < 0 || key >= (int)NKEYS || clip < 0 || clip > (int)NCLIPS)
+    if (key < 0 || key >= (int)NKEYS)
+        return;
+    if (clip != (int)CLIP_NONE && (clip < 0 || clip > (int)NCLIPS))
         return;
     song()->key_clip[key] = (uint8_t)clip;
     dirty = 1;
