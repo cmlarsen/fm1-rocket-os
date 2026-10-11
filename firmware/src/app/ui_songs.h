@@ -27,13 +27,10 @@
  * Studio-NewSong, Studio-SongMenu, Studio-Rename and Studio-DeleteSong at 1:1. */
 #pragma once
 #include <stdint.h>
-#include "ui_name.h"                   /* name_edit_t, name_event_t (and plat.h's B_* / NE / NKEYS) */
+#include "ui_name.h"                   /* name_edit_t, name_event_t (and plat.h's B_* / NE) */
+#include "songs_seam.h"                /* song_row_t, songs_ops_t (model-free) */
 
-/* model.h's SONG_SLOTS and SONG_NAME_LEN, kept local so this header need not include
- * model.h beside plat.h (both define NKEYS). The host test asserts them equal. */
-#define SONGS_SLOTS 5u
 #define SONGS_ROWS (SONGS_SLOTS + 1u)  /* the list adds the "+ New song" row */
-#define SONGS_NAME (NAME_MAX + 1u)     /* SONG_NAME_LEN: 12 */
 
 /* the delete hold-to-confirm ring and the toast the screens can show */
 #define SONGS_DELETE_MS 1500u
@@ -44,65 +41,6 @@ enum { SO_LIST = 0, SO_NEW, SO_MENU, SO_RENAME };
 
 /* what ui_songs_input reports to the shell */
 enum { SONG_ACTION_NONE = 0, SONG_ACTION_CLOSE, SONG_ACTION_OPENED };
-
-/* one row of the songs list, as the ops table reports it */
-typedef struct {
-    char    name[SONGS_NAME];
-    uint8_t used;                      /* a live (undeleted) song exists */
-    uint8_t has_take;                  /* the song has one take */
-    uint8_t current;                   /* the song being edited / heard */
-} song_row_t;
-
-/* The songs the view needs. The integration (T8i) implements these over song_io /
- * song_store; tests/host/ui_songs_test.c implements a RAM fake. Every pointer is
- * required except clip_count, which only feeds the menu and the delete ring. */
-typedef struct {
-    void *ctx;
-
-    /* Fill `out` for slot 0 .. SONGS_SLOTS-1. A deleted slot reports used = 0 and an
-     * empty name; `current` marks the song the app is editing. Always a valid row. */
-    void (*list)(void *ctx, int slot, song_row_t *out);
-
-    /* The slot being edited, or -1. */
-    int  (*current_slot)(void *ctx);
-
-    /* Make `slot` the current song: stop the transport, flush the current song if it
-     * is dirty (the autosave safety rules), load it and reload the clip engine.
-     * 0 = opened. */
-    int  (*open)(void *ctx, int slot);
-
-    /* Write a song (a `const song_t *`) into the first free slot, without opening it.
-     * Returns the new slot (>= 0), or -2 when all SONGS_SLOTS are taken. */
-    int  (*create_from)(void *ctx, const void *song);
-
-    /* Copy slot `src` into the first free slot. Returns the new slot (>= 0) or -2. */
-    int  (*copy)(void *ctx, int src);
-
-    /* Rename slot `slot`, durably. 0 = ok. */
-    int  (*rename)(void *ctx, int slot, const char *name);
-
-    /* Delete slot `slot`: the store's durable delete, plus an undo entry. 0 = ok. If it
-     * was the current song the op opens another, or a new Empty when none is left. */
-    int  (*del)(void *ctx, int slot);
-
-    /* Undo the most recent delete. UNDO_DONE / UNDO_EMPTY / UNDO_CANNOT
-     * (core/model/undo_stack.h). */
-    int  (*undelete)(void *ctx);
-
-    /* The slot the next create_from / copy would use: a slot that has never held a
-     * song first, then a deleted one, or -2 when all are in use. The view shows the
-     * "5 songs max" message from it before it builds a song. */
-    int  (*first_free)(void *ctx);
-
-    /* 1 while the most recent delete can still be undone. Once its slot is reused by
-     * a create or a copy the delete can no longer be brought back, so an undo says
-     * "can't undo" (core/model/undo_stack.h's sequence check). */
-    int  (*can_undelete)(void *ctx);
-
-    /* How many clips the slot's song holds, for the menu and the delete ring;
-     * -1 when unknown. */
-    int  (*clip_count)(void *ctx, int slot);
-} songs_ops_t;
 
 /* X0X's `input()` frame (btn / keys / enc / ms), the same shape ui_name uses */
 typedef name_event_t song_event_t;
@@ -128,6 +66,7 @@ typedef struct {
     uint8_t  del_held;                 /* SEL is down on Delete: the ring is filling */
     uint8_t  del_done;                 /* the delete succeeded this hold */
     uint32_t del_t0;
+    uint8_t  home_used;                /* HOME was used in the undo chord: its release must not go back */
 
     /* button/key edges (the shell feeds held state) */
     uint32_t prev_btn, prev_keys;
