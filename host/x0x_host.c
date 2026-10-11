@@ -796,6 +796,46 @@ static int expect(const char *what, const char *val)
         got = song_io_scale();
     else if (!strcmp(what, "boffs"))               /* T7a D1: note-offs the tap logged */
         got = (int)boffs;
+    else if (!strcmp(what, "editclip"))            /* T7b: the clip the editor holds */
+        got = clip_cur_clip();
+    else if (!strcmp(what, "globalstep"))          /* T7b: the transport's 16th index */
+        got = (int)live_bridge_global_step();
+    else if (!strcmp(what, "clipstep"))            /* T7b: the step inside a playing clip */
+        got = (int)live_bridge_clip_step(0);
+    else if (!strncmp(what, "drumget", 7)) {       /* T7b: drumget C.L.S */
+        int c, l, s;
+        sscanf(what, "drumget%d.%d.%d", &c, &l, &s);
+        got = song_io_drum_get(c, l, s);
+    } else if (!strncmp(what, "drumacc", 7)) {     /* T7b: drumacc C.S */
+        int c, s;
+        sscanf(what, "drumacc%d.%d", &c, &s);
+        got = song_io_drum_accent(c, s);
+    } else if (!strncmp(what, "notestep", 8)) {    /* T7b: notestep C.I */
+        int c, i;
+        sscanf(what, "notestep%d.%d", &c, &i);
+        song_io_note_get(c, i, &got, 0, 0, 0);
+    } else if (!strncmp(what, "notenote", 8)) {
+        int c, i;
+        sscanf(what, "notenote%d.%d", &c, &i);
+        song_io_note_get(c, i, 0, &got, 0, 0);
+    } else if (!strncmp(what, "notevel", 7)) {
+        int c, i;
+        sscanf(what, "notevel%d.%d", &c, &i);
+        song_io_note_get(c, i, 0, 0, &got, 0);
+    } else if (!strncmp(what, "notelen", 7)) {
+        int c, i;
+        sscanf(what, "notelen%d.%d", &c, &i);
+        song_io_note_get(c, i, 0, 0, 0, &got);
+    } else if (!strncmp(what, "mlparam", 7)) {     /* T7b: mlparam C.L (the packed lane param) */
+        int c, l;
+        sscanf(what, "mlparam%d.%d", &c, &l);
+        got = song_io_motion_param(c, l);
+    } else if (!strncmp(what, "mlval", 5)) {       /* T7b: mlval C.L.S */
+        int c, l, s;
+        sscanf(what, "mlval%d.%d.%d", &c, &l, &s);
+        got = song_io_motion_get(c, l, s);
+    } else if (!strcmp(what, "recrec"))            /* T7b: a record pass is running */
+        got = clip_rec_active();
     else if (!strcmp(what, "bassheld"))            /* T7a r2: 303 gates still held */
         got = (int)(bass_on[0] + bass_on[1]);
     else if (!strcmp(what, "undodepth"))
