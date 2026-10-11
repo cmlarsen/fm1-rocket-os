@@ -34,7 +34,8 @@ static const song_flash_t FB = { fb_read, fb_erase, fb_program, 0 };
 
 static song_store_t store SONG_POOL;
 static undo_stack_t undo SONG_POOL;
-static song_t scratch SONG_POOL;         /* T8i: one song off flash, for clip_count */
+/* TRAM: song_io's open / clip-count path shares the store's one song_t scratch
+ * (song_store_scratch_acquire) instead of holding a second 14,352 B buffer. */
 static uint8_t ready, dirty, loaded, failed;
 static int cur_slot = -1;                /* T8i: the slot the current song lives in, -1 = none yet */
 static uint32_t saves;
@@ -358,9 +359,15 @@ int song_io_songs_open(void *ctx, int slot)
         return -1;
     if (!store_quiet())
         return -1;
-    if (song_store_load(&store, slot, &scratch) != 0)   /* deleted or unreadable: g_song is untouched */
-        return -1;
-    *song() = scratch;                                  /* only now change the live song */
+    {
+        song_t *s = song_store_scratch_acquire();       /* TRAM: the store's shared scratch */
+        if (song_store_load(&store, slot, s) != 0) {    /* deleted or unreadable: g_song is untouched */
+            song_store_scratch_release();
+            return -1;
+        }
+        *song() = *s;                                   /* only now change the live song */
+        song_store_scratch_release();
+    }
     cur_slot = slot;
     loaded = 1;
     dirty = 0;
@@ -490,12 +497,17 @@ int song_io_songs_can_undelete(void *ctx)
 int song_io_songs_clip_count(void *ctx, int slot)
 {
     int i, n = 0;
+    song_t *s;
     (void)ctx;
-    if (song_store_load(&store, slot, &scratch) != 0)
+    s = song_store_scratch_acquire();                   /* TRAM: the store's shared scratch */
+    if (song_store_load(&store, slot, s) != 0) {
+        song_store_scratch_release();
         return -1;
+    }
     for (i = 0; i < (int)NCLIPS; i++)
-        if (scratch.clip[i].used)
+        if (s->clip[i].used)
             n++;
+    song_store_scratch_release();
     return n;
 }
 

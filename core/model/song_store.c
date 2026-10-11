@@ -17,14 +17,34 @@
 #endif
 #include "../../firmware/src/app/lz.c"
 
-/* T6i: the store's own song scratch. The recommit path (delete/undelete) used to hold a 14 KB
- * song_t on the stack; it lives in .pool now, like the store itself. */
+/* TRAM: the one song_t scratch. The recommit path (delete/undelete) and song_io's open /
+ * clip-count path share it; both are main-loop only and never nested. See song_store_scratch_acquire. */
 #if defined(X0X_HOST)
 #define SST_POOL
 #else
 #define SST_POOL __attribute__((section(".pool")))
 #endif
-static song_t sst_recommit_scratch SST_POOL;
+static song_t sst_scratch SST_POOL;
+#if defined(X0X_HOST) || (defined(X0X_DEBUG) && X0X_DEBUG)
+static uint8_t sst_scratch_held;
+#endif
+
+song_t *song_store_scratch_acquire(void)
+{
+#if defined(X0X_HOST) || (defined(X0X_DEBUG) && X0X_DEBUG)
+    if (sst_scratch_held)
+        __builtin_trap();                 /* TRAM: the scratch is not reentrant: a nested use */
+    sst_scratch_held = 1;
+#endif
+    return &sst_scratch;
+}
+
+void song_store_scratch_release(void)
+{
+#if defined(X0X_HOST) || (defined(X0X_DEBUG) && X0X_DEBUG)
+    sst_scratch_held = 0;
+#endif
+}
 
 #define SST_MAGIC 0x31545353u                 /* "SST1" */
 #define SST_HDR ((uint32_t)sizeof(sst_hdr_t))
@@ -781,18 +801,24 @@ static int sst_recommit_song(song_store_t *st, int slot, uint8_t flags)
 {
     int ext;
     uint32_t seq, off;
-    song_t *s = &sst_recommit_scratch;            /* .pool (T6i): no 14 KB stack frame */
-    if (sst_load_song(st, slot, s))               /* the current record's data (ignores the flag) */
+    song_t *s = song_store_scratch_acquire();   /* TRAM: shared 14,352 B scratch, no 14 KB stack frame */
+    if (sst_load_song(st, slot, s)) {           /* the current record's data (ignores the flag) */
+        song_store_scratch_release();
         return -1;
+    }
     ext = sst_pick_free_ext(st, 0);
-    if (ext < 0)
+    if (ext < 0) {
+        song_store_scratch_release();
         return -2;
+    }
     seq = st->next_seq;
     off = sst_song_ext_off((uint32_t)ext);
     if (sst_write_song(st, off, (uint8_t)slot, flags, seq, s, st->slot[slot].song_tag)) {
         st->song_ext_bad[ext] = 1u;               /* the next save picks another extent */
+        song_store_scratch_release();
         return -3;
     }
+    song_store_scratch_release();
     st->next_seq = seq + 1u;
     st->slot[slot].song_ext = (int8_t)ext;
     st->slot[slot].song_seq = seq;
