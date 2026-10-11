@@ -85,6 +85,7 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 | Punch FX history (repeat, tape stop, freeze), mono int16 | −32,768 |
 | Echo throw | 0: it drives X0X's fxbus delay (send, feedback, synced time) instead of its own line |
 | `song_t` (the live song) | −14,352 |
+| TRAM: one shared `song_t` scratch for `song_io`'s open/clip-count and the store's recommit, not two | **+14,352** freed |
 | `take_t` | −16,436 |
 | Undo ring | −12,240 |
 | FM6 + NOISE state, moved to the pool if `.bss` is tight | about −3,000 |
@@ -95,6 +96,8 @@ Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new 
 **Measured after T3** (`make fw` on deltron): the POOL is **254,636 B of 344,064** (was 328,052 B) and `.data+.bss` is **95,124 B of 98,304** (was 95,044 B). The 1.0 s delay line freed ~86 KiB; the LIVE `song_t` (14,352 B) and the clip engine (440 B), both in the `.pool`, take ~15 KiB of it back, leaving roughly 89 KiB of pool against the 8 KiB spare.
 
 **Measured after T10i** (`make fw` and `make fw-debug` on deltron): the release POOL is **325,196 B of 344,064** and `.data+.bss` is **95,888 B of 98,304**; the debug (X0X_DEBUG=1) POOL is **326,988 B of 344,064** and `.data+.bss` is 96,000 B, so both keep the 8 KiB pool spare. The punch FX `perform_t` (**33,060 B**, 32 KiB of it the shared history) is in the pool; the echo throw has no line of its own. The debug stress buffer `rc_pat` was cut from 32 patterns to **one** (`live_bridge_map_n()` maps a single pattern), freeing ~16 KiB of debug pool that the FX would otherwise have spent.
+
+**Measured after TRAM** (`make fw` and `make fw-debug` on deltron): the release POOL is **325,196 B of 344,064** (**18,868 B** spare) and `.data+.bss` is **96,128 B of 98,304**; the debug POOL is **326,988 B of 344,064** (**17,076 B** spare) and `.data+.bss` is **96,228 B**. TRAM shares **one** `song_t` scratch (14,352 B) between `song_io`'s open / clip-count path and the store's recommit path (`sst_recommit_song`); before it each held its own, so the pool carried two (T8i had brought the second). The two paths are main-loop only and never nest: a host/debug-build guard (`song_store_scratch_acquire`) traps a nested acquire. Both builds clear the 8 KiB requirement and the TRAM target of 10,240 B; steps 2 (a separate lz work buffer) and 3 (the undo ring) were not needed.
 
 ## Invariant: no hung notes (2026-10-11)
 Reviews found hung notes in T3, T7a and T7a's re-review, each through a different view or mode change. The rule:
