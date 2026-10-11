@@ -1,28 +1,7 @@
-# T3 LIVE, the PADS layer: build two 909 patterns and a 303 line in STUDIO, enter LIVE on a
+# T3 LIVE, the PADS layer: the boot song (Starter) has clips on every role; enter LIVE on a
 # long PLAY press, launch and switch clips on the bar, stop a role, and read the key LEDs.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
-# pattern 1 of the 909 gets a kick on step 3 (so LIVE has two drum clips)
-tapkey w0
-tapkey w4
-turn PRESET 1
-expect ppat0 2
-tapkey w2
-turn PRESET -1
-expect ppat0 1
-# 303 A and 303 B, pattern 1: a note on step 1 each
-turn ALGO 2
-tapkey w0
-turn ALGO 1
-tapkey w0
-turn ALGO -3
-expect part 0
-
 # --- enter LIVE: a long press on PLAY, the ring fills ---
-# T7a: the song is the edited object; seed its clips from the patterns just built.
-songseed
 press PLAY
 wait 300
 shot live_enter.png
@@ -32,12 +11,12 @@ wait 50
 expect mode 1
 expect view 9
 expect layer 0
-echo live: clips built
+echo live: clips present
 expect liveused0 1
 expect liveused1 1
 expect liveused7 1
 expect liveused12 1
-expect liveused2 0
+expect liveused4 0
 shot live_pads_stopped.png
 
 # --- launch drum A and bass A while stopped; they start with the transport ---
@@ -78,4 +57,4 @@ wait 700
 release PLAY
 wait 50
 expect mode 0
-expect view 1
+expect view 10

@@ -389,20 +389,21 @@ static void live_draw_header(void)
 
 static uint16_t live_footer(const char **a, const char **b, const char **c)
 {
+    /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
     *a = *b = *c = 0;
     if (fx_layer_active()) {
-        *a = "tap latch hold moment";
-        *b = "HOME+FX reset";
+        *a = "TAP LATCH";
+        *b = "HOME+FX RESET";
     } else if (live.layer == LIVE_PLAY) {
         static char t[24];
         char *q;
-        q = put_s(t, "keys play ");
+        q = put_s(t, "KEYS PLAY ");
         put_s(q, LV_ROLE_L[live.focus]);
         *a = t;
-        *b = "SCL pads";
+        *b = "SCL PADS";
     } else {
-        *a = "SCL play";
-        *b = "hold PLAY exit";
+        *a = "SCL PLAY";
+        *b = "HOLD PLAY EXIT";
     }
     return C_DIM;
 }

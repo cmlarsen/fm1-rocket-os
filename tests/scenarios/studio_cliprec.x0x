@@ -2,6 +2,7 @@
 # Notes keep their real length (note-on to note-off); the second REC closes the loop at the next
 # bar, the length becomes the recorded bar count (1 bar) and the clip launches now (no gap).
 wait 300
+newsong 0
 cursor 1 0
 tap PLAY
 wait-bar 1

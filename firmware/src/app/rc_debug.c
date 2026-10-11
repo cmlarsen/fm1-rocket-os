@@ -228,38 +228,20 @@ int rc_stress(int n, int cap)
     rc_stop();
     if (n <= 0)
         return 0;
-    /* T5perf: levels 5/6 are levels 2/1 with core 1 forced off (the single-core numbers a unit that
-     * cannot run the second core would see). */
+    /* TCLS: the X0X-sequencer baseline (old levels 1 and 6) is gone — the clip engine is the only
+     * audio path. T5perf: level 5 is level 2 with core 1 forced off (the single-core numbers a unit
+     * that cannot run the second core would see). */
+    if (n == 1 || n == 6)
+        return -1;
     if (n == 5) {
         single = 1;
         base = 2;
-    } else if (n == 6) {
-        single = 1;
-        base = 1;
-    } else if (n > 4)
+    } else if (n > 5)
         return -1;
     rc_save();
     rc_build_pattern(&rc_pat);
     rc_level = n;
     engine_core2_force_off(single);
-
-    if (base == 1) {                    /* the X0X baseline: all four parts, the sequencer's own path */
-        int p;
-        if (seq.playing)
-            seq_stop(&seq);
-        seq.pat = &rc_pat;
-        for (p = 0; p < NPARTS; p++) {
-            seq.ppat[p] = 0;
-            seq.pcue[p] = 0xFF;
-        }
-        seq.mute = 0;
-        seq.song_on = 0;
-        seq_chain(&seq, 0, 0);
-        seq.bpm = 125.0f;
-        engine_guard_enable(1);         /* the guard is part of what RC1 measures */
-        seq_start(&seq);
-        return 0;
-    }
 
     /* base = 2, 3 or 4: LIVE. Level 4 measures the unguarded cap (the guard would shed FM6 to two
      * voices, which is not what "the cap" means); 2 and 3 keep the guard on. Level 3 adds every

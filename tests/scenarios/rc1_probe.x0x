@@ -2,9 +2,6 @@
 # device's ED_STRESS / ED_STATS commands call (firmware/src/app/rc_debug.c), so the scenario is the
 # host half of tools/rc_probe.py. Each level starts, ED_STATS is well formed, and LIVE plays.
 wait 300
-# T7a: enter the classic X0X pages (GLOBAL -> Classic patterns).
-tap GLO
-tap SEL
 
 # ED_STATS is well formed from a cold boot, and stress 0 is a no-op
 stats
@@ -12,20 +9,7 @@ expect statswords 22
 stress 0
 expect stressactive 0
 
-# stress 1: the X0X baseline (909 + 808 + 303 A + 303 B, the sequencer's own path)
-stress 1
-wait 500
-expect stressactive 1
-expect stresslevel 1
-expect playing 1
-peakreset
-wait-bar 2
-expect peak_db_min -40
-stats
-expect statswords 22
-stress 0
-expect stressactive 0
-expect playing 0
+# TCLS: the old stress 1 (the X0X sequencer baseline) is gone; the levels start at 2.
 
 # stress 2: LIVE, a busy clip on every melodic/drum role and a held 4-note FM6 chord (the release
 # cap). The guard must stay off and no xruns, as RC1's pass criteria ask.
@@ -76,7 +60,7 @@ stress 0
 expect liveactive 0
 expect guard 0
 
-# T5perf: levels 5/6 are levels 2/1 with core 1 forced off, for the single-core numbers.
+# T5perf: level 5 is level 2 with core 1 forced off, for the single-core numbers.
 cpu2 1
 stress 5
 wait 200
@@ -90,15 +74,4 @@ stress 0
 expect liveactive 0
 expect core2forced 0
 expect guard 0
-
-stress 6
-wait 500
-expect stresslevel 6
-expect core2forced 1
-expect playing 1
-stats
-expect statswords 22
-stress 0
-expect playing 0
-expect core2forced 0
 statsreset

@@ -2,6 +2,7 @@
 # pass's playhead step (not the note cursor); the first two distinct params claim lane 0 and lane 1,
 # a third stays off with "2 lanes max"; the lanes play back as the clip engine's motion events.
 wait 300
+newsong 0
 cursor 1 0
 tap REC
 expect recrec 1

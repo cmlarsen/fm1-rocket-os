@@ -24,6 +24,7 @@
  *                                sound pages and LIVE; then release every input, stop,
  *                                wait 3 s and expect zero voices. On failure it prints the seed and
  *                                writes seed_<SEED>.full.x0x (the whole sequence) into OUTDIR.
+ *   newsong KIND                 TCLS: start from a New song (0 Empty, 1 Starter), as SONGS does
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
  *   midicfg CHANNEL PC           T11i: the current song's live channel (0 = omni) and PC launch
  *   midiclock BPM N              T11i: N 24-ppqn F8 ticks at BPM, into the ring with their stamps
@@ -1866,6 +1867,14 @@ int main(int argc, char **argv)
         } else if (!strcmp(cmd, "songseed")) {          /* TCLS: test setup; the boot song is already the
                                                          * Starter template, so this only marks it dirty */
             song_io_mark_dirty();
+        } else if (!strcmp(cmd, "newsong")) {           /* TCLS: start from a New song (0 Empty, 1 Starter) */
+            int kind = atoi(a), key23 = 0;              /* C MAJ, so a test's key/scale are predictable */
+            int slot = song_io_songs_create(0, kind, live_bridge_bpm_x10(), key23);
+            if (slot >= 0) {
+                song_io_songs_open(0, slot);
+                live_bridge_sync_tempo();
+                proj.set.rsv[0] = (uint8_t)slot;
+            }
         } else if (!strcmp(cmd, "cursor")) {            /* T7a: set the song-home cursor (role, col) */
             studio_set_cursor(atoi(a), b[0] ? atoi(b) : 0);
         } else if (!strcmp(cmd, "songcorrupt")) {       /* T6i: flip every song record's magic */

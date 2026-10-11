@@ -1,6 +1,7 @@
 # T7a follow-up D6: the card reads the real mode and shows sub-bar lengths in steps, and its left
 # line names the song's key and scale.
 wait 300
+newsong 0
 expect songkey 0
 expect songscale 0
 tap SEQ

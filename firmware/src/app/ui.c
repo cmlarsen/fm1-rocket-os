@@ -1154,8 +1154,8 @@ static void open_list_of_pages(void)
         list_rows[ui.list_n++] = PR(R_HDR, GR_MORE, 0, 0);
     for (k = 0; k < pg.nmore; k++)
         list_add(pg.more[k]);
-    if (ui.view == V_PERF)
-        list_add(PR(R_ACT, ACT_PERF_TEST, 0, 0));
+    /* TCLS: the PERF TEST played X0X's own patterns through its sequencer, which is gone; the PERF
+     * screen keeps its live CPU/stats readout. */
     if (ui.view == V_SONG) {
         list_add(PR(R_SMODE, 0, 0, 0));
         list_add(PR(R_SLEN, 0, 0, 0));
@@ -1473,7 +1473,9 @@ static uint8_t save_wait;
 static void save_project(void)
 {
     int rc;
-    if (seq.playing || seq.req_stop) {
+    /* TCLS: the clip engine owns the transport, so it is the one that must be stopped before a
+     * flash write (a 4 KB erase stalls XIP and glitches audio). */
+    if (live_bridge_transport_playing() || seq.playing || seq.req_stop) {
         save_wait = 1;
         say("SAVES WHEN STOPPED", 0);
         return;

@@ -2,6 +2,8 @@
 
 v2 (2026-10-11) applies the [plan review](../reviews/2026-10-11-build-plan-review.md): SCL is the layer toggle, there is one take per song, six punch FX, assign keys lives in LIVE SETUP, and Gate, legato, 2/4/8-bar launch and SAVE-paste are gone.
 
+**TCLS (2026-10-11):** X0X's Classic pattern screens are removed ([ADR-0004](../decisions/0004-remove-classic-shorten-delay.md)). The screens below that belong to STUDIO, LIVE, SONGS and the inherited sound/FX/MIX/GLOBAL pages are what the firmware draws; the X0X pattern home, the 909/303 step grid, TB-3PO and the song arranger have no screens any more.
+
 This is the review canvas for every screen: **[FM-1 Rocket OS Screens](https://claude.ai/artifact/VrmkPN8wop1rqGqmc2o8PL)**. It's private until shared. A copy of the canvas source lives in [`design/project/`](../../design/project/) and is edited through the canvas.
 
 Each artboard shows two things:

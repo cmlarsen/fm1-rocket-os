@@ -1,6 +1,7 @@
 # T7b: REC on a loaded clip overdubs. A 1-bar pass records two notes; a second pass, while the clip
 # plays, follows the clip's own playhead and adds two more; the length is untouched.
 wait 300
+newsong 0
 cursor 1 0
 tap REC
 key w7 down
