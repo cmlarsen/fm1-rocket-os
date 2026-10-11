@@ -561,7 +561,7 @@ static void midi_in(uint32_t pkt)
 /* ---------------------------------------------------------------- render --- */
 static void drain(void)
 {
-    uint32_t r = cq_r, pkt;
+    uint32_t r = cq_r, pkt, ts;
     int guard = 64;
     while (r != cq_w) {
         uint32_t c = cq[r % CQ], type = c >> 28, a = (c >> 20) & 0xFFu, b = (c >> 12) & 0xFFu, v = c & 0xFFFu;
@@ -586,8 +586,11 @@ static void drain(void)
             eng_noise_note_off((int)(b > 127u ? 127u : b));
     }
     cq_r = r;
-    while (guard-- && plat_midi_in(&pkt))
-        midi_in(pkt);
+    if (!live_bridge_active())                          /* T11i: in STUDIO/LIVE the main loop's
+                                                         * midi_live_poll() owns the ring; Classic
+                                                         * keeps X0X's own per-part MIDI-in here */
+        while (guard-- && plat_midi_in(&pkt, &ts))
+            midi_in(pkt);
 }
 
 static float part_peak[ENG_NPARTS];

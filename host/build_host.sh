@@ -17,7 +17,7 @@ U="firmware/src/dsp/drum909.c firmware/src/dsp/drum808.c firmware/src/dsp/bass30
    firmware/src/dsp/perform.c
    firmware/src/seq/sequencer.c firmware/src/seq/tb3po.c firmware/src/seq/pattern.c
    firmware/src/seq/motion.c firmware/src/app/engine.c
-   core/seq/clip_engine.c firmware/src/app/live_bridge.c
+   core/seq/clip_engine.c firmware/src/app/live_bridge.c firmware/src/app/midi_live.c core/midi/midi_in.c
    core/model/song_store.c core/model/undo_stack.c firmware/src/app/song_io.c firmware/src/app/song_templates.c
    host/plat_crit_host.c"
 # shellcheck disable=SC2086

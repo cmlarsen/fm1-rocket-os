@@ -37,7 +37,9 @@ struct x0x_worst_s {
 static void render_block(int32_t *o)                /* ALNK0: one half, measured */
 {
     uint32_t t0 = fm1_ticks(), us, budget = HALF_FRAMES * 1000000u / FS;
-    x0x_dbg.in_audio = 1;
+    x0x_dbg.in_audio = 1;                           /* T11i: before the sync, so the TIMER5 MIDI
+                                                     * producer defers its poll while we publish */
+    plat_sample_sync();                             /* T11i: anchor the MIDI timestamp clock to this half */
 #if FELUCCA_UAC
     uac_render_start();
 #endif
@@ -314,6 +316,7 @@ static void fm1_main(void)
     engine_init(proj.pat, &proj.arr.song, proj.arr.lane, &proj.sound);
     if (project_load() != 0)
         project_defaults();                         /* nothing saved yet (or another format) */
+    midi_live_set_clock(proj.set.rsv[1]);           /* T11i: the GLOBAL clock source (0 = AUTO) */
     engine_apply_sound(&proj.sound);
     seq.bpm = (float)proj.set.bpm_x10 / 10.0f;
     seq.accent_q7 = proj.set.accent_q7;
@@ -344,6 +347,7 @@ static void fm1_main(void)
     for (;;) {
         fm1_wdt_feed();
         usb_retry(fm1_ms);
+        midi_live_poll(plat_sample_now());          /* T11i: the TRS/USB ring -> the app (main loop) */
         if (fm1_ms > 30000u && bootguard.pending) {     /* a crash or hang in the first 30 s counts */
             bootguard.pending = 0;
             bootguard.failed = 0;

@@ -25,6 +25,12 @@
  *                                wait 3 s and expect zero voices. On failure it prints the seed and
  *                                writes seed_<SEED>.full.x0x (the whole sequence) into OUTDIR.
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
+ *   midicfg CHANNEL PC           T11i: the current song's live channel (0 = omni) and PC launch
+ *   midiclock BPM N              T11i: N 24-ppqn F8 ticks at BPM, into the ring with their stamps
+ *   stall MS                     T11i: MS ms of a stalled main loop (audio runs, no MIDI poll)
+ *   midiflood N                  T11i: N note-ons, N CCs and a note-off, to overflow the input ring
+ *   midifuzz SEED N              T11i: N random MIDI messages, then the panic on all 16 channels;
+ *                                stops, waits out the release tail and expects no held note / voice
  *   wav FILE | wavstop           start / stop recording the output
  *   load N                       the overload guard sees every block cost N% (-1: as measured)
  *   peakreset                    restart the output peak (expect peak_db_min / peak_db_max)
@@ -42,7 +48,7 @@
  *                                off, parameter change) and every cue and mute, one per line with
  *                                its sample time; eventsstop stops it
  *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, voices,
- *                                 heldnotes, ...): exit
+ *                                 heldnotes, bpm, ext, midiheld, ...): exit
  *                                1 on mismatch; VALUE "<N" / ">N" is a bound
  *   expect key K L               the LED level of key K (0 off, 1 dim, 2 bright); K as "key" takes
  *   expect button B L            (w0..w15, b0..b10 or 0..26); the lit state of button B, 0 or 1
@@ -116,15 +122,43 @@ void plat_play_red(int red) { (void)red; }
 void plat_keys_dim(uint32_t k) { dim_keys = k; }      /* dim keys: "o" in the leds print */      /* the device's PLAY colour: green, red while recording */
 
 #define MQ 256
-static uint32_t min_q[MQ], mi_w, mi_r;
+static uint32_t host_sample;             /* frames rendered since boot: the only clock (defined below) */
+static uint32_t min_q[MQ], min_ts[MQ], mi_w, mi_r;
+static uint8_t host_midi_overflow;
+static int host_stall;                   /* T11i: `stall MS`: the main loop is busy (no MIDI poll) */
 static FILE *midi_log;
-int plat_midi_in(uint32_t *pkt)
+
+static int host_midi_push(uint32_t pkt, uint32_t ts)
+{
+    uint32_t fill = mi_w - mi_r;
+    int note_on = ((pkt >> 8) & 0xF0) == 0x90 && ((pkt >> 24) & 0x7F);
+    if (fill >= MQ || (fill >= MQ - 16u && note_on)) {
+        if (fill >= MQ)
+            host_midi_overflow = 1;
+        return 0;
+    }
+    min_q[mi_w % MQ] = pkt;
+    min_ts[mi_w % MQ] = ts;
+    mi_w++;
+    return 1;
+}
+int plat_midi_in(uint32_t *pkt, uint32_t *sample)
 {
     if (mi_r == mi_w)
         return 0;
-    *pkt = min_q[mi_r++ % MQ];
+    *pkt = min_q[mi_r % MQ];
+    *sample = min_ts[mi_r % MQ];
+    mi_r++;
     return 1;
 }
+int plat_midi_overflow(void)
+{
+    int o = host_midi_overflow != 0;
+    host_midi_overflow = 0;
+    return o;
+}
+uint32_t plat_sample_now(void) { return host_sample; }
+void plat_sample_sync(void) { }
 static uint32_t midi_out_count, clock_out_count, note_ons;
 void plat_midi_out(uint32_t pkt)
 {
@@ -289,7 +323,6 @@ static int rc_host_words;                            /* fields the last `stats` 
  * b:8 | c:12, type 0..7 = a parameter's target (engine.h T_*), 8 = a drum note, 9 = a bass note
  * on, 10 = a bass note off. */
 static FILE *events_log;
-static uint32_t host_sample;             /* frames rendered since boot: the only clock */
 static uint32_t bar_count;               /* the 909's wraps since the transport started */
 static uint32_t boffs;                   /* T7a: note-offs the tap has seen (leaving LIVE releases) */
 static uint8_t bass_on[2];               /* T7a r2: the 303 gates the tap has seen stick (expect bassheld) */
@@ -545,6 +578,7 @@ static void boot(void)
     engine_init(proj.pat, &proj.arr.song, proj.arr.lane, &proj.sound);
     if (project_load() != 0)
         project_defaults();
+    midi_live_set_clock(proj.set.rsv[1]);           /* T11i: the GLOBAL clock source (0 = AUTO) */
     engine_apply_sound(&proj.sound);
     seq.bpm = (float)proj.set.bpm_x10 / 10.0f;
     seq.accent_q7 = proj.set.accent_q7;
@@ -560,6 +594,8 @@ static void run_ms(uint32_t ms)
     uint32_t i;
     for (i = 0; i < ms; i++) {
         now_ms++;
+        if (!host_stall)
+            midi_live_poll(host_sample);             /* T11i: the TRS/USB ring -> the app (main loop) */
         while (audio_due_ms <= (double)now_ms) {      /* 256-frame half buffers, as the I2S DMA */
             double t0 = now_ns(), dt;
             uint32_t k;
@@ -609,11 +645,13 @@ static void run_ms(uint32_t ms)
             }
             audio_due_ms += 256.0 * 1000.0 / 44100.0;
         }
-        if (now_ms >= ui_due) {
-            ui_due = now_ms + 16;
-            ui_frame();
-        } else {
-            ui_input_only();
+        if (!host_stall) {
+            if (now_ms >= ui_due) {
+                ui_due = now_ms + 16;
+                ui_frame();
+            } else {
+                ui_input_only();
+            }
         }
         host_log_seq();                                  /* cues and mutes set this millisecond */
     }
@@ -985,6 +1023,14 @@ static int expect(const char *what, const char *val)
         got = (int)seq.mute;
     else if (!strcmp(what, "vmute"))                /* drum tracks muted on their own (bit kit * 11 + track) */
         got = (int)seq.vmute;
+    else if (!strcmp(what, "bpm"))                  /* T11i: the transport's tempo, whole bpm */
+        got = live_bridge_active() ? (int)(live_bridge_bpm_x10() / 10u) : (int)(seq.bpm + 0.5f);
+    else if (!strcmp(what, "midibpm"))              /* T11i: the followed MIDI tempo, bpm * 10 */
+        got = (int)midi_live_bpm_x10();
+    else if (!strcmp(what, "ext"))                  /* T11i: following an external clock */
+        got = midi_live_ext();
+    else if (!strcmp(what, "midiheld"))             /* T11i: the notes external MIDI still holds */
+        got = midi_live_held();
     else {
         printf("FAIL unknown expect %s\n", what);
         return 1;
@@ -1109,6 +1155,67 @@ static void dump_json(const char *path)
     fclose(f);
 }
 
+/* T11i: a deterministic MIDI fuzz. Feeds N random MIDI messages (notes on/off, Program Change and
+ * CC, across the 16 channels) through the app's MIDI path, then sends CC 123 and CC 120 on every
+ * channel, stops the transport, waits out the release tail, and checks that no MIDI note is still
+ * held and no T5i voice sounds. Deterministic (xorshift32 from SEED); prints the seed on failure. */
+static int host_midi_fuzz(uint32_t seed, int n)
+{
+    static const uint8_t PANIC[2] = {123u, 120u};
+    uint32_t r = seed | 1u;
+    int i, ch, k, fails = 0;
+    for (i = 0; i < n; i++) {
+        uint8_t st, d1, d2 = 0, cin = 0x0Fu;
+        r ^= r << 13;
+        r ^= r >> 17;
+        r ^= r << 5;
+        d1 = (uint8_t)((r >> 8) & 0x7Fu);
+        switch (r % 4u) {
+        case 0:                                     /* Note On, velocity 0 = Note Off */
+            st = (uint8_t)(0x90u | ((r >> 24) & 0x0Fu));
+            d2 = (uint8_t)((r >> 16) & 0x7Fu);
+            cin = 0x09u;
+            break;
+        case 1:                                     /* Note Off */
+            st = (uint8_t)(0x80u | ((r >> 24) & 0x0Fu));
+            cin = 0x08u;
+            break;
+        case 2:                                     /* Program Change */
+            st = (uint8_t)(0xC0u | ((r >> 24) & 0x0Fu));
+            cin = 0x0Cu;
+            break;
+        default:                                    /* Control Change */
+            st = (uint8_t)(0xB0u | ((r >> 24) & 0x0Fu));
+            d2 = (uint8_t)((r >> 16) & 0x7Fu);
+            cin = 0x0Bu;
+            break;
+        }
+        midi_live_feed((uint32_t)cin | (uint32_t)st << 8 | (uint32_t)d1 << 16 | (uint32_t)d2 << 24,
+                       host_sample + (uint32_t)i);
+    }
+    for (ch = 0; ch < 16; ch++)                     /* the panic, on every channel */
+        for (k = 0; k < 2; k++)
+            midi_live_feed(0x0Bu | (uint32_t)(0xB0u | (uint32_t)ch) << 8 | (uint32_t)PANIC[k] << 16,
+                           host_sample + (uint32_t)n + (uint32_t)ch * 2u + (uint32_t)k);
+    midi_live_tick(host_sample + (uint32_t)n + 64u);
+    live_bridge_transport_stop();                   /* a clip the fuzz launched does not play on */
+    run_ms(1500);                                   /* the release tail */
+    if (midi_live_held() != 0) {
+        printf("FAIL midifuzz %u: %d MIDI notes still held\n", seed, midi_live_held());
+        fails++;
+    }
+    if (eng_fm6_voices_active() != 0) {
+        printf("FAIL midifuzz %u: %d FM6 voices\n", seed, eng_fm6_voices_active());
+        fails++;
+    }
+    if (eng_noise_voices_active() != 0) {
+        printf("FAIL midifuzz %u: %d NOISE voices\n", seed, eng_noise_voices_active());
+        fails++;
+    }
+    if (!fails)
+        printf("  ok midifuzz %u (%d events)\n", seed, n);
+    return fails;
+}
 /* ============================================================ T2c: UI fuzz === */
 /* `fuzz SEED N`: N random input events (keys, buttons, encoders and 0-300 ms waits) from a
  * deterministic PRNG, starting at the song home and guaranteed to visit the sound pages, Classic
@@ -1580,7 +1687,36 @@ int main(int argc, char **argv)
         else if (!strcmp(cmd, "midi")) {
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
-            min_q[mi_w++ % MQ] = cin | s << 8 | d1 << 16 | d2 << 24;
+            host_midi_push(cin | s << 8 | d1 << 16 | d2 << 24, host_sample);
+        } else if (!strcmp(cmd, "midicfg")) {           /* T11i: LIVE SETUP, for the tests: CHANNEL PC */
+            midi_live_set_song_cfg((uint8_t)atoi(a), (uint8_t)(b[0] ? atoi(b) : 0));
+        } else if (!strcmp(cmd, "midiclock")) {         /* T11i: N F8 ticks at BPM, into the ring with stamps */
+            int bpm = atoi(a), n = b[0] ? atoi(b) : 25, k;
+            uint32_t step, span, base;
+            if (bpm < 20)
+                bpm = 20;
+            if (n < 1)
+                n = 1;
+            step = (60u * 44100u) / ((uint32_t)bpm * 24u);
+            span = (uint32_t)(n - 1) * step;
+            base = host_sample > span ? host_sample - span : 0u;
+            for (k = 0; k < n; k++)
+                host_midi_push(0x0000F80Fu, base + (uint32_t)k * step);
+        } else if (!strcmp(cmd, "stall")) {              /* T11i: MS ms of a stalled main loop (no MIDI poll) */
+            host_stall = 1;
+            run_ms((uint32_t)atoi(a));
+            host_stall = 0;
+        } else if (!strcmp(cmd, "midiflood")) {          /* T11i: fill the ring past full, then a note-off */
+            int k, m = atoi(a);
+            for (k = 0; k < m; k++)                      /* note-ons: the reserve caps them at MQ-16 */
+                host_midi_push(0x09u | (uint32_t)(0x90u | (k & 15)) << 8 |
+                               (uint32_t)(k & 127) << 16 | 100u << 24, host_sample);
+            for (k = 0; k < m; k++)                      /* CCs: these may fill it to overflowing */
+                host_midi_push(0x0Bu | (uint32_t)(0xB0u | (k & 15)) << 8 |
+                               (uint32_t)(7u) << 16 | (uint32_t)(k & 127) << 24, host_sample);
+            host_midi_push(0x08u | (uint32_t)0x80u << 8 | (uint32_t)((m - 1) & 127) << 16, host_sample);
+        } else if (!strcmp(cmd, "midifuzz")) {          /* T11i: a deterministic MIDI fuzz */
+            fails += host_midi_fuzz((uint32_t)atoi(a), b[0] ? atoi(b) : 200);
         } else if (!strcmp(cmd, "wav")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
             wav_open(out);

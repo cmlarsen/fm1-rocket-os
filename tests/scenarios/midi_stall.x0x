@@ -1,0 +1,13 @@
+# T11i: a stalled main loop must not corrupt the followed tempo. midiclock queues 64 ticks with
+# their true arrival stamps, `stall` runs 20 ms of a busy main loop (audio keeps rendering, no
+# MIDI poll), then the drain reads the stored stamps: the tempo is still 120.
+wait 300
+midi FA 00 00
+wait 20
+expect playing 1
+midiclock 120 64
+stall 20
+wait 40
+expect bpm 120
+expect ext 1
+dump midi_stall.json
