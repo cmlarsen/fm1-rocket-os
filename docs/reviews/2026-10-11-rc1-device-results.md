@@ -34,3 +34,12 @@ Stress 1 profile shares: 909 33%, 303A 22%, 303B 21%, FX 15%, MASTER 8.5%, SEQ 1
 Candidate 1 had a bug: FM6 was silently skipped when core 1 was off. The coordinator caught it because FM6 showed 0% in the profile on the single-core run. A host test now proves the FM6 audio is the same with core 1 on or off.
 
 **Verdict:** units with a healthy core 1 pass RC1. Single-core units stay dropout-free, with the guard shedding FM6 to 2 voices at full stress. That meets the "never require core 1" rule.
+
+## After T10i (punch FX) + TRAM, debug build `df71895`
+
+| Stress | Mean | Max | Peak | Xruns | Guard | Core 1 mean / max |
+|---|---|---|---|---|---|---|
+| 3 (LIVE + all six punch FX cycling) | 74.8% | 77% | 86% | 0 | never | 9.3% / 16% |
+| 2 (LIVE, FX idle) | 70.3% | 73% | 82% | 0 | never | 9.3% / 16% |
+
+Punch FX costs about 4% even when idle, because the history has to record continuously for repeat and freeze capture. Stress 2's mean is 0.3% over the 70% line. Follow-up T10perf: bypass the filter, echo and freeze work when idle, and make the history write cheaper. Core 1 has spare capacity (9% mean), so moving `perform`'s history write or the FX bus there is an option.
