@@ -1,0 +1,32 @@
+# case prelude_restore
+header nevents=18 bpm=1435 length=0
+log 0 0xf0000000 mark start
+log 0 0xc0001000 launch clip=0 now role=0
+log 0 0xc0701001 launch clip=7 now role=1
+log 0 0xc0c01002 launch clip=12 now role=2
+log 0 0xc1a01004 launch clip=26 now role=4
+log 0 0xd0000000 mute role=0 on=0
+log 0 0xd0101000 mute role=1 on=1
+log 0 0xd0200000 mute role=2 on=0
+log 0 0xd0300000 mute role=3 on=0
+log 0 0xd0401000 mute role=4 on=1
+log 0 0xf020059b mark tempo=1435
+log 0 0x0000000a param t=0 a=0 b=0 c=10
+log 0 0x00100011 param t=0 a=1 b=0 c=17
+log 0 0x00200018 param t=0 a=2 b=0 c=24
+log 0 0x0030001f param t=0 a=3 b=0 c=31
+log 0 0x00400026 param t=0 a=4 b=0 c=38
+log 0 0x0050002d param t=0 a=5 b=0 c=45
+log 0 0xf0100000 mark end
+role 0 clip=0 mute=0
+role 1 clip=7 mute=1
+role 2 clip=12 mute=0
+role 3 clip=255 mute=0
+role 4 clip=26 mute=1
+param 0 = 10
+param 1 = 17
+param 2 = 24
+param 3 = 31
+param 4 = 38
+param 5 = 45
+restored bpm=1435 (header says 1435)
