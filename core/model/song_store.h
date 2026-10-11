@@ -136,3 +136,10 @@ int song_validate(const song_t *song);
 
 /* Compressed size of a song (for the slot budget); -1 if lz refuses. */
 int song_store_measure(const song_t *song);
+
+/* TRAM: the one song_t scratch shared by the store's recommit path (delete/undelete) and
+ * song_io's open / clip-count path. Both run in the main loop only and never nest, so a single
+ * 14,352 B buffer serves both instead of one each. `acquire` returns the buffer and takes the
+ * guard; a nested acquire traps in a debug (X0X_DEBUG=1) or host build. `release` returns it. */
+song_t *song_store_scratch_acquire(void);
+void song_store_scratch_release(void);

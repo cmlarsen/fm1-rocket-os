@@ -264,6 +264,7 @@ void plat_stalls_enable(int on) { (void)on; }
 /* -------------------------------------------------------------- app --- */
 #include "../firmware/src/app/x0x.h"
 #include "../firmware/src/app/song_io.h"
+#include "../firmware/src/dsp/perform.h"       /* T10i: PERF_NFX for `expect fxlatch` */
 #include "../firmware/src/app/project.c"
 #include "../firmware/src/app/ui.c"
 
@@ -716,6 +717,14 @@ static int expect(const char *what, const char *val)
         got = studio_cursor_clip();
     else if (!strcmp(what, "layer"))
         got = live_layer();
+    else if (!strcmp(what, "fxlayer"))              /* T10i: the punch FX layer is showing */
+        got = live_fx_layer();
+    else if (!strncmp(what, "fxlatch", 7))          /* fxlatchI: effect I is latched */
+        got = engine_perform_latched(atoi(what + 7) % PERF_NFX);
+    else if (!strncmp(what, "fxmute", 6))           /* fxmuteR: role R is muted (the clip engine) */
+        got = live_bridge_muted((uint8_t)(atoi(what + 6) % LIVE_NROLES));
+    else if (!strncmp(what, "songrolemute", 12))    /* T10i: the song's stored role mute (always 0) */
+        got = live_bridge_song_role_muted((uint8_t)(atoi(what + 12) % LIVE_NROLES));
     else if (!strcmp(what, "focus"))
         got = live_focus();
     else if (!strcmp(what, "liveactive"))
