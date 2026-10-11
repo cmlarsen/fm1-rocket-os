@@ -16,6 +16,7 @@
 #include "../dsp/bass303.h"                    /* BASS303_* (the 303's pages) */
 #include "song_io.h"                           /* T6i: the current song on flash */
 #include "live_bridge.h"                       /* T3/T7a: the clip engine and the song it owns */
+#include "ui_songs.h"                          /* T8i: the SONGS view (songs_ops_t, songs_ui_t) */
 #include "undo.c"
 
 /* ================================================================ model === */
@@ -23,8 +24,8 @@ static const int8_t KEY_WHITE[NKEYS] = {0, -1, 1, -1, 2, -1, 3, 4, -1, 5, -1, 6,
 static const int8_t KEY_BLACK[NKEYS] = {-1, 0, -1, 1, -1, 2, -1, -1, 3, -1, 4, -1, -1, 5, -1, 6, -1, 7, -1, -1, 8, -1, 9, -1, -1, 10, -1};
 static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
-enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND, NVIEWS };
-static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND"};
+enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND, V_SONGS, NVIEWS };
+static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND", "SONGS"};
 /* T7a: the classic X0X pages (the pattern editors) are not on the normal button paths any more;
  * they are reached from the GLOBAL list's "Classic patterns" row. `classic` is that mode: X0X's
  * sequencer is the audio source and its views behave exactly as before. */
@@ -139,6 +140,21 @@ static void studio_draw_sound(int band);       /* V_SOUND: the FM6/NOISE sound c
 static uint16_t studio_footer_sound(const char **a, const char **b, const char **c);
 /* the clip-setting knob refs (R_CLIP_*), used by build_pages / pref_* in ui.c */
 enum { RK_CLIP_LEN, RK_CLIP_MODE, RK_CLIP_QUANT, RK_CLIP_SWING };
+
+/* ============================================================ T8i: SONGS === */
+/* The songs list and its CRUD, in ui_songs.c (included near the bottom, after ui_name.c).
+ * It is driven from input() while V_SONGS is up; SAVE held ~600 ms opens it, a short SAVE
+ * tap still saves. The store side is song_io_songs_*; the parts that touch the engine
+ * (stopping the clip engine and the all-off before a load) live here, in the ops wrappers. */
+enum { SAVE_HOLD_MS = 600 };
+static songs_ui_t songs;
+static void songs_save_tick(uint32_t btn);
+static int  songs_mode(void);
+static void songs_open(void);
+static void songs_close(void);
+static int  songs_op_open(void *ctx, int slot);
+static int  songs_op_delete(void *ctx, int slot);
+int  ui_songs_up(void);                         /* the runner: 1 while the songs view is up */
 
 /* ====================================== T7a round 2: the held-note table === */
 /* One table for every "a key plays a note" path (LIVE's PLAY layer, the sound pages, and any
@@ -2534,11 +2550,162 @@ static void button_tap(int b)
     }
 }
 
+/* ============================================================ T8i: SONGS === */
+
+static int songs_mode(void) { return ui.view == V_SONGS; }
+int ui_songs_up(void) { return ui.view == V_SONGS; }
+int ui_songs_row(void) { return songs.row; }     /* the runner: the view's cursor row */
+
+/* stop the clip engine, silence everything, then load `slot` as the current song */
+static void songs_load_now(int slot)
+{
+    live_bridge_transport_stop();
+    note_release_all();
+    engine_all_off();
+    song_io_songs_open(0, slot);
+    live_bridge_sync_tempo();
+    proj.set.rsv[0] = (uint8_t)slot;      /* T8i: remember the current song across a reboot */
+    ui.dirty = 1;                         /* ... the autosave writes it */
+}
+
+/* the ops wrapper: save the current song if dirty (the autosave safety rules), then load */
+static int songs_op_open(void *ctx, int slot)
+{
+    (void)ctx;
+    live_bridge_transport_stop();
+    note_release_all();
+    engine_all_off();
+    if (song_io_songs_current_slot(0) >= 0)
+        song_io_flush();                    /* keep a stored song; never auto-save the project seed */
+    if (song_io_songs_open(0, slot) != 0)
+        return -1;
+    live_bridge_sync_tempo();
+    proj.set.rsv[0] = (uint8_t)slot;        /* T8i: the current song persists across a reboot */
+    ui.dirty = 1;
+    return 0;
+}
+
+/* the ops wrapper: delete, and when it was the current song open another (or a new Empty) */
+static int songs_op_delete(void *ctx, int slot)
+{
+    int was_current, key23, i, ns;
+    (void)ctx;
+    was_current = (slot == song_io_songs_current_slot(0));
+    key23 = song_io_key() + (song_io_scale() == 1 ? 12 : 0);      /* model.h SCALE_MINOR = 1 */
+    if (song_io_songs_delete(0, slot) != 0)
+        return -1;
+    if (!was_current)
+        return 0;
+    ns = -1;
+    for (i = 0; i < (int)SONGS_SLOTS; i++) {
+        song_row_t r;
+        if (i == slot)
+            continue;
+        song_io_songs_list(0, i, &r);
+        if (r.used) {
+            ns = i;
+            break;
+        }
+    }
+    if (ns < 0)
+        ns = song_io_songs_create(0, 0, live_bridge_bpm_x10(), key23);   /* a new Empty when none is left */
+    if (ns >= 0)
+        songs_load_now(ns);
+    return 0;
+}
+
+static const songs_ops_t SONGS_OPS = {
+    0,
+    song_io_songs_list,
+    song_io_songs_current_slot,
+    songs_op_open,
+    song_io_songs_create,
+    song_io_songs_copy,
+    song_io_songs_rename,
+    songs_op_delete,
+    song_io_songs_undelete,
+    song_io_songs_first_free,
+    song_io_songs_can_undelete,
+    song_io_songs_clip_count
+};
+
+static void songs_open(void)
+{
+    note_release_all();
+    ui_songs_begin(&songs, &SONGS_OPS);
+    set_view(V_SONGS);
+    say("SONGS", 0);
+}
+static void songs_close(void)
+{
+    ui_songs_end(&songs);
+    note_release_all();
+    set_view(V_STUDIO);
+    studio_enter();
+    say("STUDIO", 0);
+}
+
+/* SAVE held ~600 ms opens the list; a short SAVE tap stays "save now" (input()'s button pass). */
+static uint8_t save_down, save_holding;
+static uint32_t save_t0;
+static void songs_save_tick(uint32_t btn)
+{
+    uint32_t now = plat_ms();
+    int down = (int)((btn >> B_SAVE) & 1u);
+    if (songs_mode() || live_mode() || ui.classic) {
+        save_down = (uint8_t)down;
+        save_holding = 0;
+        return;
+    }
+    if (down && !save_down) {
+        save_down = 1;
+        save_holding = 1;
+        save_t0 = now;
+    }
+    if (down && (btn & ~(1u << B_SAVE)))
+        save_holding = 0;                       /* SAVE as a modifier, not a hold */
+    if (down && save_holding && (now - save_t0) >= SAVE_HOLD_MS) {
+        save_holding = 0;
+        ui.btn_used |= 1u << B_SAVE;            /* suppress the release-time save */
+        songs_open();
+        return;
+    }
+    if (!down)
+        save_down = 0;
+}
+
 static void input(void)
 {
     uint32_t btn = plat_buttons(), keys = plat_keys(), ch, i;
     int e;
     live_play_tick(btn);                                  /* T3: PLAY's short / long press */
+    songs_save_tick(btn);                                 /* T8i: SAVE's long press opens SONGS */
+    if (songs_mode()) {                                   /* T8i: the songs view owns the frame */
+        song_event_t ev;
+        uint32_t j, chb = btn ^ ui.btn;
+        ev.btn = btn;
+        ev.keys = keys;
+        ev.ms = plat_ms();
+        for (i = 0; i < NE; i++)
+            ev.enc[i] = enc((int)i);
+        if (ui_songs_input(&songs, &ev) != SONG_ACTION_NONE)
+            songs_close();
+        /* keep ui.c's button bookkeeping in step: a press stamps down_t, and the view
+         * owns the buttons, so their releases do not leak into the view underneath
+         * (a stale SEL hold once cleared the cursor clip on the way back). */
+        for (j = 0; j < NB; j++) {
+            uint32_t m = 1u << j;
+            if (chb & m) {
+                ui.btn_used &= ~m;
+                if (btn & m)
+                    ui.down_t[j] = plat_ms();
+            }
+        }
+        ui.btn_used |= btn;
+        ui.btn = btn;
+        ui.keys = keys;
+        return;
+    }
     ch = btn ^ ui.btn;
     for (i = 0; i < NB; i++) {
         uint32_t m = 1u << i;
@@ -4070,11 +4237,23 @@ static void draw_knobs(void)
 /* T3: the LIVE view lives in its own file, included here so it can use every helper above
  * (its entry points are forward-declared at the top of ui.c). */
 #include "ui_live.c"
+/* T8c: the name editor (name_edit_*), then T8i: the SONGS view (it reuses the editor for
+ * the rename screen). Both draw through gfx.c's canvas, like ui_live.c. */
+#include "ui_name.c"
+#include "ui_songs.c"
 
 static void leds(void)
 {
     uint32_t b = 0, k = 0, d = 0, i;
     int blink = (ui.frame & 8u) != 0;
+    if (songs_mode()) {                              /* T8i: the SAVE light, the keys dark */
+        ui_songs_leds(&songs, &b, &k, &d);
+        plat_keys_dim(0);
+        plat_glow(proj.set.keyled == 1);
+        plat_play_red(ui.rec);
+        plat_leds(b, 0);
+        return;
+    }
     if (seq.playing && eng_step[TRK_DRUM] % 4 == 0)
         b |= 1u << B_PLAY;
     if (ui.rec)
@@ -4256,9 +4435,13 @@ void ui_frame(void)
         volatile uint8_t *h = &eng_hit[i / NDRUM][i % NDRUM];
         *h = (uint8_t)(*h - (*h >> 3) - (*h ? 1 : 0));
     }
-    draw_header();
-    draw_main();
-    draw_knobs();
+    if (songs_mode())                                  /* T8i: the songs view draws its own screen */
+        ui_songs_draw(&songs, plat_ms());
+    else {
+        draw_header();
+        draw_main();
+        draw_knobs();
+    }
     leds();
     ui.frame++;
 }
