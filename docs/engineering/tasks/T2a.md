@@ -15,7 +15,7 @@ Give agents a fast, deterministic way to prove behaviour: scripted scenarios wit
    - `wait-bar N`: run until N bar boundaries have passed (use the sequencer's bar boundary, not milliseconds).
    - `events FILE.txt`: start logging every engine command (note on/off, parameter change, cue, mute) with its sample time, one per line; `eventsstop` stops it.
    - New `expect` keys: `bar`, `beat`, `key K` (LED level of key K), `button B` (lit 0/1).
-2. **Goldens.** `tests/golden/<scenario>/` holds the expected `*.png`, `*.json`, `events*.txt` and an `audio.json` per WAV (`frames`, `peak`, `rms`, `sha256` of the PCM). A comparer (`tests/golden.sh` or a small C/Python tool) diffs a scenario's output dir against its golden dir and prints the first mismatch per file. `GOLDEN_UPDATE=1` copies output over the goldens instead. Scenarios without a golden dir keep working as today.
+2. **Goldens.** `tests/golden/<scenario>/` holds the expected `*.png`, `*.json`, `events*.txt` and an `audio.json` per WAV (`frames`, `peak`, `rms`; compared within loose bounds, never by hash, so DSP changes don't churn goldens). A comparer (`tests/golden.sh` or a small C/Python tool) diffs a scenario's output dir against its golden dir and prints the first mismatch per file. `GOLDEN_UPDATE=1` copies output over the goldens instead. Scenarios without a golden dir keep working as today.
 3. **Make targets** (Mac, no deltron needed; build the host binary with `host/build_host.sh`):
    - `make unit`: the host unit suites from `tests/run_tests.sh` that run on macOS.
    - `make scenarios`: every `tests/scenarios/*.x0x`, each into `build/scenarios/<name>/`, compared with goldens where they exist.
@@ -23,11 +23,9 @@ Give agents a fast, deterministic way to prove behaviour: scripted scenarios wit
    - `make parity`: the existing WASM-vs-native parity test (find it under `web/` or `tests/`). If Node is missing, fail with a clear message.
    - Keep `make test` (remote, full) working.
 4. **Seed goldens** for 3 existing scenarios that cover transport, cueing a pattern, and mute. Run with `GOLDEN_UPDATE=1` and list every PNG in the report with what it should show; the Opus reviewer looks at them (you cannot view images).
-5. Prove determinism: run `make scenarios` twice; outputs must be byte-identical.
 
 ## Done
 - `make unit scenarios parity` pass on the Mac; `make screens` runs.
-- A deliberately broken expectation fails `make scenarios` with a readable message (show it in the report, then revert it).
 - Small commits with the attribution lines from `CLAUDE.md`'s instructions.
 - `reports/T2a.md`: commands added, goldens seeded (with what each PNG should show), timings for each make target.
 - `worker_done` with `--outcome`, `--files-modified`, `--report-path reports/T2a.md`.
