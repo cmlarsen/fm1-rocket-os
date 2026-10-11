@@ -93,3 +93,11 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new large buffer goes in the pool through X0X's pool mechanism. Any task that adds more than 1 KB of RAM must update this table.
 
 **Measured after T3** (`make fw` on deltron): the POOL is **254,636 B of 344,064** (was 328,052 B) and `.data+.bss` is **95,124 B of 98,304** (was 95,044 B). The 1.0 s delay line freed ~86 KiB; the LIVE `song_t` (14,352 B) and the clip engine (440 B), both in the `.pool`, take ~15 KiB of it back, leaving roughly 89 KiB of pool against the 8 KiB spare.
+
+## Invariant: no hung notes (2026-10-11)
+Reviews found hung notes in T3, T7a and T7a's re-review, each through a different view or mode change. The rule:
+- **Every note a key starts lives in one held-note table.** Releasing the key releases that note, whatever view is showing.
+- **Every view, layer or mode change releases what is still held.**
+- **Every audio-source handoff calls `engine_all_off`.**
+
+Task **T2c (UI fuzz)** enforces this. The host runner plays random sequences of key, button and encoder events across every view and mode, then releases all inputs and stops the transport. After the release tail, the engine must report zero active voices on every engine. It runs in `make check`.
