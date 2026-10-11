@@ -1,0 +1,140 @@
+# T11h: the two help systems on the device.
+# SYSTEM 1: holding HOME for 400 ms shows the context's HOME combos; releasing closes it, and a
+# short HOME tap still goes back. SYSTEM 2: GLO + a button shows that button's card; releasing
+# closes it. Cards are written for STUDIO, LIVE and SONGS (ui_help.c); Classic keeps X0X's own
+# 1 s help (tests/scenarios/help.x0x).
+wait 300
+expect sheet 0
+expect card 0
+
+# ---------- SYSTEM 1, the cheat sheet in STUDIO ----------
+press HOME
+wait 200
+expect sheet 0                    # under 400 ms: not yet
+wait 250
+expect sheet 1
+shot help_sheet_studio.png
+release HOME
+wait 60
+expect sheet 0
+
+# ---------- SYSTEM 2, a GLO + REC card in STUDIO ----------
+press GLO
+wait 60
+press REC
+wait 60
+expect card 12                    # REC is button 11, +1 like the help card
+expect help 0                     # the Classic 1 s help is off outside Classic
+shot help_card_rec_studio.png
+release REC
+wait 60
+expect card 0
+release GLO
+wait 60
+expect view 10                    # the release did not open GLOBAL
+expect sheet 0
+
+# ---------- SYSTEM 2, GLO + SEQ ----------
+press GLO
+wait 60
+press SEQ
+wait 60
+expect card 10                    # SEQ is button 9, +1
+shot help_card_seq_studio.png
+release SEQ
+release GLO
+wait 60
+expect card 0
+expect view 10
+
+# ---------- a short HOME tap still goes back ----------
+tap EDIT
+wait 100
+expect view 1                     # the 909 sound page
+tap HOME
+wait 100
+expect view 10                    # back to the song home
+expect sheet 0
+
+# ---------- into LIVE (long PLAY) ----------
+press PLAY
+wait 700
+release PLAY
+wait 1400                         # the "LIVE" toast clears, so the header shows LIVE SHIFT
+expect view 9
+expect layer 0
+
+# ---------- SYSTEM 1, the cheat sheet in LIVE ----------
+press HOME
+wait 450
+expect sheet 1
+shot help_sheet_live.png
+release HOME
+wait 60
+expect sheet 0
+
+# ---------- SYSTEM 2, a GLO + REC card in LIVE ----------
+press GLO
+wait 60
+press REC
+wait 60
+expect card 12
+shot help_card_rec_live.png
+release REC
+release GLO
+wait 60
+expect card 0
+
+# ---------- back to STUDIO ----------
+press PLAY
+wait 700
+release PLAY
+wait 80
+expect view 10
+
+# ---------- HOME + REC still undoes while the sheet shows ----------
+tap SEQ
+tap HOME
+wait 200
+expect clipused0 1
+press HOME
+key w0 down
+wait 1600
+key w0 up
+release HOME
+expect clipused0 0
+expect undodepth 1
+press HOME
+wait 450
+expect sheet 1
+tap REC
+wait 60
+expect sheet 1                    # the combo works; the sheet stays while HOME is held
+expect clipused0 1
+expect undopos 0
+shot help_sheet_undo.png
+release HOME
+wait 60
+expect sheet 0
+
+# ---------- SYSTEM 2 in SONGS (SAVE held opens the list) ----------
+press SAVE
+wait 700
+release SAVE
+wait 100
+expect songson 1
+press GLO
+wait 60
+press REC
+wait 60
+expect card 12
+shot help_card_rec_songs.png
+release REC
+release GLO
+wait 60
+expect card 0
+expect songson 1                    # the card was modal: the SONGS view is still up
+tap HOME
+wait 100
+expect songson 0
+dump help_cards.json

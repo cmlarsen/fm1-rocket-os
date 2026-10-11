@@ -166,6 +166,11 @@ Overnight the owner asked for more parallelism. Each task with a self-contained 
 - **Songs (from the T8i review, minor):**
   - `song_io_flush` returns 0 after an earlier failed save, so opening another song then drops the unsaved edits (`song_io.c:127`).
   - `songs_load_now` refuses silently on a timeout after the current song is deleted, so the next autosave brings the deleted song back (`ui.c:2592`). It should show a message and pick another slot.
+- **Gesture polish (TPOL), from T11h's model-versus-code audit.** Do this after T7b, T9i and LIVE SETUP merge.
+  - **HOME + touching a knob clears that knob's motion lane** everywhere outside Classic. X0X's SAVE + knob stays in Classic only.
+  - **HOME + tap launches now in STUDIO too.**
+  - Re-run `tools/check_help.py` and the cards against the final handlers.
+  - Fix the LIVE footer descender clip T11h noted.
 - **Device install log:** the RC1 release build `build/rc/rocket-rc1-1662c01.fwsc` (songs on flash, FM6 on core 1) was installed unattended on 2026-10-11 and stayed up for 40 s through its first song autosave. Before that, the T3 build (`build/rc/rocket-t3-*.fwsc`) was installed unattended on 2026-10-11, and the FM-1 stayed up for 30 s, answering `FM-1_900 [running]`.
 
 ## Riskiest tasks

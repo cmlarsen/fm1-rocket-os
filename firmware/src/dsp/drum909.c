@@ -852,3 +852,22 @@ int drum909_active(const drum909_t *d)
             return 1;
     return 0;
 }
+
+int drum909_voices_active(const drum909_t *d)
+{
+    int i, n = 0;
+    for (i = 0; i < 2; ++i)                       /* BD, SD voices */
+        if (d->bt[i].mute > 0)
+            ++n;
+    for (i = 0; i < 3; ++i)                       /* LT, MT, HT voices */
+        if (d->tom[i].mute > 0)
+            ++n;
+    if (d->rim.mute > 0)
+        ++n;
+    if (d->clap.mute > 0)
+        ++n;
+    for (i = 0; i < 4; ++i)                       /* CH, OH, CR, RD samples */
+        if (d->smp[i].mute > 0 && d->smp[i].playing)
+            ++n;
+    return n;
+}

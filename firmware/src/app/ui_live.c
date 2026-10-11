@@ -373,8 +373,8 @@ static void live_draw_header(void)
     box(4, 3, w, 14, TOK_THEME);
     cv_text(4 + 5, vc(&AF_S, 3, 14), &AF_S, "LIVE", C_BLACK);
     cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S,
-            fx_layer_active() ? "FX" : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
-            fx_layer_active() ? TOK_ACCENT : TOK_MID);
+            help_shift_active() ? "SHIFT" : fx_layer_active() ? "FX" : (live.layer == LIVE_PADS ? "PADS" : "PLAY"),
+            fx_layer_active() && !help_shift_active() ? TOK_ACCENT : TOK_MID);
     x = 104;
     if (playing)
         play_icon(x, 4, C_WHITE);

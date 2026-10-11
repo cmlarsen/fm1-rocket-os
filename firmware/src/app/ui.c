@@ -17,6 +17,7 @@
 #include "song_io.h"                           /* T6i: the current song on flash */
 #include "live_bridge.h"                       /* T3/T7a: the clip engine and the song it owns */
 #include "ui_songs.h"                          /* T8i: the SONGS view (songs_ops_t, songs_ui_t) */
+#include "ui_help.h"                           /* T11h: the cheat sheet and the GLO+button cards */
 #include "undo.c"
 
 /* ================================================================ model === */
@@ -164,10 +165,32 @@ int  ui_songs_up(void);                         /* the runner: 1 while the songs
  * what that key began, whatever view, layer or mode is showing. Home/SEQ handoffs, set_view and
  * the STUDIO/LIVE/Classic switches release everything still held. */
 static uint8_t hn_on[NKEYS], hn_role[NKEYS], hn_note[NKEYS];
+/* T2c: the view / mode the note started in. The fuzzer's held-across-transition check compares it
+ * with the current one: a note that is still in the table after a view/mode change is a bug. */
+static uint8_t hn_mode[NKEYS];
+static uint8_t hn_mode_now(void)
+{
+    return (uint8_t)(ui.view | (ui.classic ? 0x40u : 0u) | (live_bridge_active() ? 0x80u : 0u));
+}
+/* T2c r2: the 303 A/B parts are monophonic. Releasing one key must not cut the note while another
+ * key on the same part is still held; the note-off goes out only on the last release, whichever
+ * key that is. (v1 does not retrigger to the other key, so the part keeps sounding the note it
+ * already has.) Polyphonic roles (drums, FM6, NOISE) release their own note as before. */
+static int hn_mono(uint8_t role) { return role == LIVE_BASS || role == LIVE_LEAD; }
 static void note_key_up(int k)
 {
+    int j;
     if (k < 0 || k >= NKEYS || !hn_on[k])
         return;
+    if (hn_mono(hn_role[k])) {
+        for (j = 0; j < NKEYS; j++)                  /* another key on the same part still held? */
+            if (j != k && hn_on[j] && hn_role[j] == hn_role[k])
+                break;
+        if (j < NKEYS) {
+            hn_on[k] = 0;                            /* keep sounding: no note-off yet */
+            return;
+        }
+    }
     live_bridge_play_key(hn_role[k], hn_note[k], 0, 0);
     hn_on[k] = 0;
 }
@@ -179,8 +202,24 @@ static void note_key_down(int k, uint8_t role, uint8_t note)
         note_key_up(k);                              /* a retrigger releases the old note first */
     hn_role[k] = role;
     hn_note[k] = note;
+    hn_mode[k] = hn_mode_now();
     hn_on[k] = 1;
     live_bridge_play_key(role, note, 1, 88);
+}
+/* T2c: register a note the caller has already started, without starting it again. The legacy 303
+ * keyboard and step-preview paths send their own engine_bass_on (for accent and slide), so they
+ * use this to put the note in the table; every release (key up, a view/mode change, a stop) then
+ * goes through note_key_up / note_release_all and the note cannot hang. */
+static void note_key_track(int k, uint8_t role, uint8_t note)
+{
+    if (k < 0 || k >= NKEYS)
+        return;
+    if (hn_on[k])
+        note_key_up(k);                              /* a retrigger releases the old note first */
+    hn_role[k] = role;
+    hn_note[k] = note;
+    hn_mode[k] = hn_mode_now();
+    hn_on[k] = 1;
 }
 static void note_release_all(void)
 {
@@ -694,7 +733,8 @@ static void pref_value_of(pref_t r, int v, char *num, char *unit)
     if (!d || r.kind == R_ACT)
         return;
     if (d->names) {
-        put_s(num, d->names[v]);
+        int idx = v < 0 ? 0 : v > (int)d->max ? (int)d->max : v;   /* a value can outrun a switch's range (T2c) */
+        put_s(num, d->names[idx]);
         return;
     }
     if (r.kind == R_TAPE) {
@@ -1227,9 +1267,8 @@ static void clear_part(pattern_t *p, int part)
 }
 
 /* ============================================================ help cards === */
-/* Hold one button for HELP_HOLD ms without using it with anything: a card says what it does here,
- * its combinations included. A key, a turn or another button puts the card away (and the
- * combination works as always); letting go of the button after its card does nothing else. */
+/* T11h: this is X0X's own "hold one button ~1 s" help, and it stays only inside Classic. Outside
+ * Classic the help is SYSTEM 2 (GLO + a button) in ui_help.c, and a hold never shows X0X help. */
 #define HELP_HOLD 900u
 #define HELP_HOLD_SAVE 400u                    /* SAVE is held to copy: its card says what will be copied */
 static int perf_testing(void);
@@ -1322,6 +1361,8 @@ static void help_tick(uint32_t btn, uint32_t keys)
 {
     uint32_t now = plat_ms();
     int i;
+    if (!ui.classic)
+        return;                                      /* T11h: outside Classic the 1 s help is off */
     if (ui.help) {
         uint32_t m = 1u << (ui.help - 1);
         if (btn != m || keys || (int32_t)(ui.turn_t - ui.down_t[ui.help - 1]) > 0 || ui.overlay == O_ASK)
@@ -1721,6 +1762,13 @@ static void run_action(int act, int arg)
         say("SONG CLEARED", 0);
         break;
     case ACT_RESET:
+#ifdef X0X_HOST
+        if (host_fuzz_no_reset) {                     /* T2c: the UI fuzzer excludes the factory reset */
+            ui.overlay = O_NONE;
+            say("RESET SKIPPED", 0);
+            break;
+        }
+#endif
         project_defaults();
         engine_apply_sound(&proj.sound);
         palette_set(proj.set.palette);
@@ -2091,6 +2139,7 @@ static void bass_kbd(int key, int down)
 {
     int b = bidx(), n = kbd_note(key);
     if (down) {
+        note_key_track(key, (uint8_t)(1 + b), (uint8_t)n);   /* T2c: the table owns the note-off */
         engine_bass_on(b, n, (ui.btn & (1u << B_ENV)) != 0, kbd_held_note[b] != 0);
         kbd_held_note[b] = (uint8_t)n;
         if (ui.rec && !seq.playing) {
@@ -2103,8 +2152,7 @@ static void bass_kbd(int key, int down)
             mark_dirty();
         }
     } else if (kbd_held_note[b] == n) {
-        engine_bass_off(b);
-        kbd_held_note[b] = 0;
+        kbd_held_note[b] = 0;                        /* the note-off is note_key_up's (key_event) */
     }
 }
 
@@ -2126,18 +2174,19 @@ static void bass_step_key(int white, int down)
             mark_dirty();
         }
         ui.step_preview = key_sounds();               /* as the drum keys */
-        if (ui.step_preview)
-            engine_bass_on(b, bp->step[s].note + bp->transpose - 24, (bp->step[s].flags & BS_ACCENT) != 0, 0);
+        if (ui.step_preview) {
+            int note = bp->step[s].note + bp->transpose - 24;
+            note_key_track(WHITE_KEY[white], (uint8_t)(1 + b), (uint8_t)note);   /* T2c: table owns the off */
+            engine_bass_on(b, note, (bp->step[s].flags & BS_ACCENT) != 0, 0);
+        }
     } else if (ui.held_step == s) {
         if (!ui.step_created && !ui.step_edited && plat_ms() - ui.step_t0 < STEP_TAP_MS) {   /* a tap takes it off */
             bp->step[s].flags = G_REST;
             mark_dirty();
         }
-        if (ui.step_preview)
-            engine_bass_off(b);
         if (ui.step_edited && lock_step() >= 0)
             lock_release();
-        ui.step_preview = 0;
+        ui.step_preview = 0;                          /* the note-off is note_key_up's (key_event) */
         ui.held_step = -1;
     }
 }
@@ -2730,6 +2779,11 @@ static void input(void)
         ev.ms = plat_ms();
         for (i = 0; i < NE; i++)
             ev.enc[i] = enc((int)i);
+        if (help_songs_tick(btn, keys)) {              /* T11h: GLO + a button: its card, and modal */
+            ev.btn = 0;
+            for (j = 0; j < NE; j++)
+                ev.enc[j] = 0;
+        }
         if (ui_songs_input(&songs, &ev) != SONG_ACTION_NONE)
             songs_close();
         /* keep ui.c's button bookkeeping in step: a press stamps down_t, and the view
@@ -2757,6 +2811,8 @@ static void input(void)
             any_button = 1;
             ui.btn_used &= ~m;
             ui.down_t[i] = plat_ms();
+            if (help_glo_press(btn, (int)i))           /* T11h: GLO + a button: its card, no action */
+                continue;
             if (i == B_REC)                            /* transport acts on the press: timing */
                 button_tap((int)i);
         } else if (!(ui.btn_used & m) && i != B_REC && i != B_PLAY) {
@@ -2769,6 +2825,7 @@ static void input(void)
         copy_tick(btn, keys);
         help_tick(btn, keys);
     }
+    help_overlay_tick(btn, keys);                      /* T11h: the HOME sheet, and the card's close */
     ui.btn = btn;
     ch = keys ^ ui.keys;
     ui.keys = keys;
@@ -3939,24 +3996,27 @@ static void draw_help(int band)
 }
 
 #ifdef X0X_HOST
-/* every card, on every kind of screen, fits the screen: 1 = yes (prints the first that does not) */
+/* every card, on every kind of screen, fits the screen: 1 = yes (prints the first that does not).
+ * T11h: it also walks Classic on and off (the footer's two discovery lines) and checks the new
+ * ui_help.c tables. */
 static int help_fits(void)
 {
     static const uint8_t views[] = {V_PART, V_SEQ, V_HOME, V_SONG, V_GEN, V_FX, V_MIX, V_LIVE};
     const char *l[HELP_LINES];
     ui_t keep = ui;
     uint8_t keep_any = any_button;
-    int b, p, v, kb, n, k, ok = 1;
+    int b, p, v, kb, cl, n, k, ok = 1;
     for (v = 0; v < (int)sizeof views; v++)
         for (p = 0; p < NPARTS; p++)
             for (kb = 0; kb < 2; kb++)
-                for (b = 0; b < NB; b++) {
-                    ui.view = views[v];
-                    ui.part = (uint8_t)p;
-                    ui.rec = (uint8_t)kb;
-                    {
+                for (cl = 0; cl < 2; cl++)
+                    for (b = 0; b < NB; b++) {
                         const char *fa, *fb, *fc;
                         int32_t w;
+                        ui.view = views[v];
+                        ui.part = (uint8_t)p;
+                        ui.rec = (uint8_t)kb;
+                        ui.classic = (uint8_t)cl;
                         ui.overlay = (uint8_t)(b % 3);           /* none, a list, a question */
                         ui.gen_stale[0] = (uint8_t)(b & 1);
                         ui.rec = (uint8_t)(b & 2);
@@ -3968,17 +4028,17 @@ static int help_fits(void)
                                 printf("footer too wide: \"%s / %s / %s\" (%d px)\n", fa, fb ? fb : "", fc ? fc : "", (int)w);
                             ok = 0;
                         }
-                    }
-                    n = help_lines(b, l);
-                    if (n < 1 || n > HELP_LINES)
-                        ok = 0;
-                    for (k = 0; k < n; k++)
-                        if (tw(&AF_S, l[k]) > 224) {
-                            if (ok)
-                                printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&AF_S, l[k]));
+                        n = help_lines(b, l);
+                        if (n < 1 || n > HELP_LINES)
                             ok = 0;
-                        }
-                }
+                        for (k = 0; k < n; k++)
+                            if (tw(&AF_S, l[k]) > 224) {
+                                if (ok)
+                                    printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&AF_S, l[k]));
+                                ok = 0;
+                            }
+                    }
+    ok = help_cards_fit() && ok;                           /* T11h: the sheet rows and the new cards */
     ui = keep;
     any_button = keep_any;
     return ok;
@@ -3990,8 +4050,15 @@ static int help_fits(void)
 static uint16_t footer_text(const char **a, const char **b, const char **c)
 {
     *a = *b = *c = 0;
+    if (help_footer(a, b, c))                          /* T11h: the sheet / a card is up */
+        return C_GRAY;
     if (!any_button) {
-        *a = "HOLD ANY BUTTON: WHAT IT DOES";
+        if (ui.classic) {                              /* T11h: X0X's own help still lives in Classic */
+            *a = "HOLD ANY BUTTON: WHAT IT DOES";
+        } else {                                       /* T11h: outside Classic, the ways in */
+            *a = "GLO: A CARD";
+            *b = "HOLD HOME: COMBOS";
+        }
         return C_GRAY;
     }
     if (ui.overlay == O_ASK) {
@@ -4067,7 +4134,9 @@ static void draw_main(void)
     cv_begin(240, 2 * BAND_H, C_BLACK);           /* both bands, then one transfer: no tear between them */
     for (band = 0; band < 2; band++) {
         cv_band(band * BAND_H, BAND_H);
-        if (ui.help)
+        if (help_card_active() || help_shift_active())
+            help_draw(band);                           /* T11h: the GLO card / the HOME sheet */
+        else if (ui.help)
             draw_help(band);
         else if (ui.overlay == O_ASK)
             draw_ask(band);
@@ -4299,6 +4368,8 @@ static void draw_knobs(void)
  * the rename screen). Both draw through gfx.c's canvas, like ui_live.c. */
 #include "ui_name.c"
 #include "ui_songs.c"
+/* T11h: the cheat sheet and the GLO+button help cards (its own file, included like the views). */
+#include "ui_help.c"
 
 static void leds(void)
 {
@@ -4494,9 +4565,11 @@ void ui_frame(void)
         volatile uint8_t *h = &eng_hit[i / NDRUM][i % NDRUM];
         *h = (uint8_t)(*h - (*h >> 3) - (*h ? 1 : 0));
     }
-    if (songs_mode())                                  /* T8i: the songs view draws its own screen */
+    if (songs_mode()) {                                /* T8i: the songs view draws its own screen */
         ui_songs_draw(&songs, plat_ms());
-    else {
+        if (help_card_active())                        /* T11h: a GLO+button card over it */
+            help_draw_songs();
+    } else {
         draw_header();
         draw_main();
         draw_knobs();

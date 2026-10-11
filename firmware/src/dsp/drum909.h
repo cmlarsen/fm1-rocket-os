@@ -120,3 +120,5 @@ int drum909_get(const drum909_t *d, int voice, int i);
 
 /* true while any voice is still sounding (for a caller that wants to skip work) */
 int drum909_active(const drum909_t *d);
+/* T2c: how many voices are still sounding (BD, SD, the three toms, RS, CP and the four samples) */
+int drum909_voices_active(const drum909_t *d);

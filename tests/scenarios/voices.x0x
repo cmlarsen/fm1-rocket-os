@@ -1,0 +1,17 @@
+# T2c: the `voices` expect key (every engine's sounding voices) and the release tail.
+# A 303 note auditioned on its sound page is released when the key is let go, and a key held
+# across a view change is released too: after 3 s, no voice is left sounding.
+wait 300
+turn SELECT 1 80
+tap EDIT
+key 0 down
+wait 150
+key 0 up
+wait 3000
+expect voices 0
+key 5 down
+wait 200
+tap HOME
+key 5 up
+wait 3000
+expect voices 0
