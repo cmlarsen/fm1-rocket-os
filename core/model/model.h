@@ -30,7 +30,7 @@ enum { SCALE_MAJOR, SCALE_MINOR, SCALE_DORIAN, SCALE_PENTA, SCALE_CHROMATIC, NSC
 
 #define SONG_SLOTS 5u
 #define SONG_NAME_LEN 12u
-#define TAKE_MAX_EVENTS 2048u
+#define TAKE_MAX_EVENTS 1024u
 
 typedef struct {
     uint8_t step;
