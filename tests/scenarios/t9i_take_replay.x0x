@@ -1,0 +1,55 @@
+# T9i: the take records a LIVE session and replays it event-exactly. Build two clips, enter LIVE,
+# arm REC, launch and move a knob and punch FX and mute a role, stop, then replay the take and
+# compare the note/drum event streams relative to the start (eventscmp). The take's own log is
+# pinned too (takedump).
+wait 300
+tap GLO
+tap SEL
+tapkey w0
+turn ALGO 2
+tapkey w0
+turn ALGO -3
+songseed
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+eventsnotes rec_notes.txt
+tapkey 0
+wait-bar 1
+tapkey 7
+wait-bar 1
+turn K1 8 20
+wait-bar 1
+press FX
+wait 30
+tapkey 0
+tapkey 16
+release FX
+wait-bar 2
+waitbarabs 7
+eventsstop
+takedump take_rec.txt
+tap REC
+wait-bar 2
+expect takehas 1
+expect takestate 0
+echo recorded
+# replay: stop, then play the take and log the same note/drum stream
+tap PLAY
+wait 400
+expect takeplaying 0
+eventsnotes play_notes.txt
+takeplay
+waitbarabs 7
+eventsstop
+eventscmp rec_notes.txt play_notes.txt
+tap PLAY
+wait 300
+expect takeplaying 0
+dump t9i_take_replay.json
+echo done
