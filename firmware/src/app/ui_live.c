@@ -20,6 +20,7 @@ typedef struct {
     uint8_t holding, to_live;             /* the ring is filling; 1 = entering LIVE */
     uint8_t long_done;                    /* the 600 ms point was reached */
     uint8_t back;                         /* the view to come back to */
+    uint8_t back_classic;                 /* T7a: LIVE was entered from the classic pages */
     uint32_t t0;
     int8_t octv;                          /* the PLAY layer's octave */
 } live_ui_t;
@@ -44,25 +45,33 @@ static void live_clear_held(void)
 
 static void live_enter(void)
 {
-    uint16_t bpm = (uint16_t)(seq.bpm * 10.0f + 0.5f);
     live.back = ui.view;
+    live.back_classic = ui.classic;       /* T7a: remember whether we came from the classic pages */
     live.layer = LIVE_PADS;               /* the PADS layer is the default on entry */
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
     live_clear_held();
-    if (live_bridge_enter(&proj.pat[0], bpm))   /* stops X0X's transport and releases its voices
-                                                 * (engine_all_off); 1 = it rebuilt the clips from the
-                                                 * project, so the song changed (T6i) */
-        song_io_mark_dirty();
+    ui.classic = 0;                       /* LIVE is the clip engine, wherever it was entered from */
+    live_bridge_enter(&proj.pat[0], 0);   /* T7a: make the clip engine the source; it does not
+                                           * rebuild and does not reset the transport, so clips keep
+                                           * playing across the mode change */
     set_view(V_LIVE);
     say("LIVE", 0);
 }
 
 static void live_leave(void)
 {
-    live_bridge_exit();                   /* stops the clip transport and releases any held note */
     live_clear_held();
-    set_view(live.back == V_LIVE ? V_HOME : live.back);
+    if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
+        ui.classic = 1;
+        live_bridge_exit();
+        engine_all_off();
+        set_view(live.back == V_LIVE ? V_HOME : live.back);
+    } else {                              /* back to the song: the clips keep playing (T7a dec. 7) */
+        set_view(live.back == V_LIVE ? V_STUDIO : live.back);
+        if (ui.view == V_STUDIO)
+            studio_enter();
+    }
     say("STUDIO", 0);
 }
 
