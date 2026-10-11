@@ -19,6 +19,10 @@
  *                                engine clamps NOTE to 0..127, so a test may pass more).
  *   alloff                       the panic all-notes-off (engine_all_off)
  *   midi B0 B1 B2                incoming USB MIDI message (hex bytes)
+ *   midicfg CHANNEL PC           T11i: the current song's live channel (0 = omni) and PC launch
+ *   midiclock BPM N              T11i: N 24-ppqn F8 ticks at BPM, sample-accurate (the clock test)
+ *   midifuzz SEED N              T11i: N random MIDI messages, then the panic on all 16 channels;
+ *                                stops, waits out the release tail and expects no held note / voice
  *   wav FILE | wavstop           start / stop recording the output
  *   load N                       the overload guard sees every block cost N% (-1: as measured)
  *   peakreset                    restart the output peak (expect peak_db_min / peak_db_max)
@@ -35,7 +39,8 @@
  *   events FILE.txt              start logging every engine command (drum and bass note on, note
  *                                off, parameter change) and every cue and mute, one per line with
  *                                its sample time; eventsstop stops it
- *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, ...): exit
+ *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, bpm,
+ *                                ext, midiheld, ...): exit
  *                                1 on mismatch; VALUE "<N" / ">N" is a bound
  *   expect key K L               the LED level of key K (0 off, 1 dim, 2 bright); K as "key" takes
  *   expect button B L            (w0..w15, b0..b10 or 0..26); the lit state of button B, 0 or 1
@@ -534,6 +539,7 @@ static void boot(void)
     engine_init(proj.pat, &proj.arr.song, proj.arr.lane, &proj.sound);
     if (project_load() != 0)
         project_defaults();
+    midi_live_set_clock(proj.set.rsv[1]);           /* T11i: the GLOBAL clock source (0 = AUTO) */
     engine_apply_sound(&proj.sound);
     seq.bpm = (float)proj.set.bpm_x10 / 10.0f;
     seq.accent_q7 = proj.set.accent_q7;
@@ -549,6 +555,7 @@ static void run_ms(uint32_t ms)
     uint32_t i;
     for (i = 0; i < ms; i++) {
         now_ms++;
+        midi_live_poll(host_sample);                 /* T11i: the TRS/USB ring -> the app (main loop) */
         while (audio_due_ms <= (double)now_ms) {      /* 256-frame half buffers, as the I2S DMA */
             double t0 = now_ns(), dt;
             uint32_t k;
@@ -886,6 +893,14 @@ static int expect(const char *what, const char *val)
         got = (int)seq.mute;
     else if (!strcmp(what, "vmute"))                /* drum tracks muted on their own (bit kit * 11 + track) */
         got = (int)seq.vmute;
+    else if (!strcmp(what, "bpm"))                  /* T11i: the transport's tempo, whole bpm */
+        got = live_bridge_active() ? (int)(live_bridge_bpm_x10() / 10u) : (int)(seq.bpm + 0.5f);
+    else if (!strcmp(what, "midibpm"))              /* T11i: the followed MIDI tempo, bpm * 10 */
+        got = (int)midi_live_bpm_x10();
+    else if (!strcmp(what, "ext"))                  /* T11i: following an external clock */
+        got = midi_live_ext();
+    else if (!strcmp(what, "midiheld"))             /* T11i: the notes external MIDI still holds */
+        got = midi_live_held();
     else {
         printf("FAIL unknown expect %s\n", what);
         return 1;
@@ -1010,6 +1025,68 @@ static void dump_json(const char *path)
     fclose(f);
 }
 
+/* T11i: a deterministic MIDI fuzz. Feeds N random MIDI messages (notes on/off, Program Change and
+ * CC, across the 16 channels) through the app's MIDI path, then sends CC 123 and CC 120 on every
+ * channel, stops the transport, waits out the release tail, and checks that no MIDI note is still
+ * held and no T5i voice sounds. Deterministic (xorshift32 from SEED); prints the seed on failure. */
+static int host_midi_fuzz(uint32_t seed, int n)
+{
+    static const uint8_t PANIC[2] = {123u, 120u};
+    uint32_t r = seed | 1u;
+    int i, ch, k, fails = 0;
+    for (i = 0; i < n; i++) {
+        uint8_t st, d1, d2 = 0, cin = 0x0Fu;
+        r ^= r << 13;
+        r ^= r >> 17;
+        r ^= r << 5;
+        d1 = (uint8_t)((r >> 8) & 0x7Fu);
+        switch (r % 4u) {
+        case 0:                                     /* Note On, velocity 0 = Note Off */
+            st = (uint8_t)(0x90u | ((r >> 24) & 0x0Fu));
+            d2 = (uint8_t)((r >> 16) & 0x7Fu);
+            cin = 0x09u;
+            break;
+        case 1:                                     /* Note Off */
+            st = (uint8_t)(0x80u | ((r >> 24) & 0x0Fu));
+            cin = 0x08u;
+            break;
+        case 2:                                     /* Program Change */
+            st = (uint8_t)(0xC0u | ((r >> 24) & 0x0Fu));
+            cin = 0x0Cu;
+            break;
+        default:                                    /* Control Change */
+            st = (uint8_t)(0xB0u | ((r >> 24) & 0x0Fu));
+            d2 = (uint8_t)((r >> 16) & 0x7Fu);
+            cin = 0x0Bu;
+            break;
+        }
+        midi_live_feed((uint32_t)cin | (uint32_t)st << 8 | (uint32_t)d1 << 16 | (uint32_t)d2 << 24,
+                       host_sample + (uint32_t)i);
+    }
+    for (ch = 0; ch < 16; ch++)                     /* the panic, on every channel */
+        for (k = 0; k < 2; k++)
+            midi_live_feed(0x0Bu | (uint32_t)(0xB0u | (uint32_t)ch) << 8 | (uint32_t)PANIC[k] << 16,
+                           host_sample + (uint32_t)n + (uint32_t)ch * 2u + (uint32_t)k);
+    midi_live_tick(host_sample + (uint32_t)n + 64u);
+    live_bridge_transport_stop();                   /* a clip the fuzz launched does not play on */
+    run_ms(1500);                                   /* the release tail */
+    if (midi_live_held() != 0) {
+        printf("FAIL midifuzz %u: %d MIDI notes still held\n", seed, midi_live_held());
+        fails++;
+    }
+    if (eng_fm6_voices_active() != 0) {
+        printf("FAIL midifuzz %u: %d FM6 voices\n", seed, eng_fm6_voices_active());
+        fails++;
+    }
+    if (eng_noise_voices_active() != 0) {
+        printf("FAIL midifuzz %u: %d NOISE voices\n", seed, eng_noise_voices_active());
+        fails++;
+    }
+    if (!fails)
+        printf("  ok midifuzz %u (%d events)\n", seed, n);
+    return fails;
+}
+
 #ifndef X0X_WEB
 int main(int argc, char **argv)
 {
@@ -1116,6 +1193,23 @@ int main(int argc, char **argv)
             uint32_t s = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
             uint32_t cin = s >= 0xF0 ? 0x0F : s >> 4;
             min_q[mi_w++ % MQ] = cin | s << 8 | d1 << 16 | d2 << 24;
+        } else if (!strcmp(cmd, "midicfg")) {           /* T11i: LIVE SETUP, for the tests: CHANNEL PC */
+            midi_live_set_song_cfg((uint8_t)atoi(a), (uint8_t)(b[0] ? atoi(b) : 0));
+        } else if (!strcmp(cmd, "midiclock")) {         /* T11i: N F8 ticks at BPM, sample-accurate */
+            int bpm = atoi(a), n = b[0] ? atoi(b) : 25, k;
+            uint32_t step, span, base;
+            if (bpm < 20)
+                bpm = 20;
+            if (n < 1)
+                n = 1;
+            step = (60u * 44100u) / ((uint32_t)bpm * 24u);
+            span = (uint32_t)(n - 1) * step;
+            base = host_sample > span ? host_sample - span : 0u;
+            for (k = 0; k < n; k++)
+                midi_live_feed(0x0000F80Fu, base + (uint32_t)k * step);
+            midi_live_tick(host_sample);
+        } else if (!strcmp(cmd, "midifuzz")) {          /* T11i: a deterministic MIDI fuzz */
+            fails += host_midi_fuzz((uint32_t)atoi(a), b[0] ? atoi(b) : 200);
         } else if (!strcmp(cmd, "wav")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
             wav_open(out);
