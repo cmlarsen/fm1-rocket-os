@@ -13,6 +13,9 @@ tapkey w0
 release ENV
 tap PLAY
 wait 400
+# HOME (X0X boots into PART)
+tap HOME
+wait 150
 shot s01_home.png
 # PART (the part's sound; EDIT)
 tap EDIT

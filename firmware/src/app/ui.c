@@ -456,7 +456,7 @@ static const char *pref_name(pref_t r)
                                            {"A RATE", "B RATE"}, {"A DIR", "B DIR"}, {"A TRANSP", "B TRANSP"}};
     static const char *const CHN[MX_NPARAMS] = {"LEVEL", "REV", "DLY", "PAN"};
     const x0x_param_t *d = pref_desc(r);
-    static const char *const SEQN[6] = {"LENGTH", "RATE", "LENGTH", "RATE", "DIRECTION", "TRANSP"};
+    static const char *const SEQN[6] = {"LENGTH", "RATE", "LENGTH", "RATE", "DIRECT", "TRANSP"};
     if (r.kind >= R_DLEN && r.kind <= R_BTRANS)       /* SEQ: the part's own; a list elsewhere: whose */
         return ui.view == V_SEQ ? SEQN[r.kind - R_DLEN] : PATN[r.kind - R_DLEN][r.a & 1];
     if (r.kind == R_ENG && r.a == T_MIX && ui.view == V_MIX && r.c < MX_NPARAMS)
@@ -3515,13 +3515,13 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         *b = "OCT-: MUTATE";
         return ui.gen_stale[bidx()] ? C_WHITE : C_AMB;
     } else if (is_drum()) {
-        *a = "BLACK: TRACK";
-        *b = "WHITE: STEP";
-        *c = "BLK: MUTE";
+        *a = "BLK TRACK";
+        *b = "WHT STEP";
+        *c = "HOME+BLK MUTE";
     } else if (is_303() && ui.rec) {
-        *a = "KEYS: NOTES";
-        *b = "ENV+OCT: RST";
-        *c = "LFO: TIE";
+        *a = "KEY NOTES";
+        *b = "ENV+OCT RST";
+        *c = "LFO+OCT TIE";
     } else if (is_303()) {
         *a = "PRESS: ON";
         *b = "TAP: OFF";

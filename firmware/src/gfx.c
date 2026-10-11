@@ -72,7 +72,7 @@ typedef struct {
 } palette_t;
 #define NEUTRALS TOK_LINE, TOK_DIM, TOK_MID
 static const palette_t PALETTES[] = {
-    {"GREY", {NEUTRALS, TOK_THEME, TOK_ACCENT}},
+    {"GREY", {NEUTRALS, TOK_THEME, TOK_TEXT}},   /* T2b: values=THEME, normal text=TEXT (design roles) */
     {"AMBER", {NEUTRALS, RGB(232, 136, 30), RGB(255, 184, 70)}},
     {"CYAN", {NEUTRALS, RGB(60, 180, 235), RGB(150, 225, 255)}},
     {"RED", {NEUTRALS, RGB(232, 76, 60), RGB(255, 132, 112)}},
