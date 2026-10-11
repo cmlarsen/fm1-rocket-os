@@ -110,7 +110,8 @@ Per the coordinator's call, the fast path is accepted **as-is**: no half-rate hi
 ## Verification
 
 Every target the task asks for, run on the Mac (`deltron.local` for the firmware builds); logs under
-`build/ladder/`.
+`build/ladder/`. Re-run on the tree merged with `integration` (the `TAKE_MAX_EVENTS 1024` take/model
+change) — all green, same sizes.
 
 | Command | Result |
 |---|---|
