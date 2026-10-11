@@ -143,7 +143,7 @@ static void reset_flash(void)
 }
 static void boot(void)
 {
-    song_io_boot(0, 1250u);                     /* pats is unused by the stub */
+    song_io_boot(0, 1250u, 0);                  /* pats is unused by the stub; T8i: no preferred slot */
 }
 
 /* ---- tests ---- */
