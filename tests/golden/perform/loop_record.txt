@@ -1,0 +1,2 @@
+# history under a loop: recorded current audio, and the full-buffer fallback
+tape_after_freeze_peak=0.456

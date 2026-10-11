@@ -13,13 +13,19 @@
  *   0 repeat 1/8   1 repeat 1/16   - a grid-aligned slice, looped until release;
  *   2 tape stop                   - the read head slows to zero over ~0.6 s;
  *   3 filter dive                 - a resonant low-pass, open down to 200 Hz;
- *   4 echo throw                  - a tempo-synced 1/8 note feedback echo;
+ *   4 echo throw                  - drives X0X's fxbus delay (no line of its own);
  *   5 freeze                      - a ~120 ms grain, looped until release.
  * Only one buffer effect (0, 1, 2 or 5) is active at a time; a new one
  * replaces the old with a crossfade. Filter dive and echo can stack with
  * them. Every hand-off (engage / release) is crossfaded so nothing clicks.
  *
- * MEMORY. One shared history buffer serves repeat, tape stop and freeze:
+ * ECHO has no delay line (the RAM plan gives it 0 bytes): it is a small
+ * controller that overrides X0X's fxbus delay while held and restores the
+ * song's own settings on release, so the tail decays naturally. See
+ * perform_echo_t / perform_echo_targets().
+ *
+ * MEMORY (the v1 RAM plan). One shared history buffer serves repeat, tape
+ * stop and freeze:
  *     int16_t hist[PERFORM_HIST_N]   mono int16, 16384 samples = 32 KiB.
  * The master signal is summed to mono into it (the live passthrough stays
  * stereo; a buffer effect collapses the image on purpose, as a punch-in).
@@ -28,11 +34,10 @@
  * Below that a slice is capped at PERFORM_HIST_N samples - the longest that
  * fits - and documented (see reports/T10c.md). Tape stop reads the same
  * history with a lag that peaks near 0.3 s, so it always fits.
- * The echo has its own line:
- *     int16_t echo[PERFORM_ECHO_N]   mono int16, 8192 samples = 16 KiB.
- * A 1/8 note at 44.1 kHz is 13,230,000 / bpm_x10 samples, so in 16 KiB it
- * fits at >= ~161 BPM; below that the delay is halved (once per octave)
- * until it fits, still on the beat (1/16, 1/32, ...).
+ * The history keeps recording while a loop plays: the write head skips the
+ * loop's slice (see perform.c), so tape and repeat after a loop start from
+ * current audio. If a loop fills the whole buffer there is nowhere to write;
+ * the tape stop then plays the live signal instead of stale audio.
  *
  * FIXED POINT / FLOAT. The buffers are int16 and the arithmetic is 32-bit
  * integer where it matters (indices, the grid, the slice length). Float is
@@ -59,7 +64,6 @@ enum {
 #endif
 
 #define PERFORM_HIST_N 16384u     /* shared history: 32 KiB of mono int16 */
-#define PERFORM_ECHO_N 8192u      /* echo line: 16 KiB of mono int16 */
 #define PERFORM_CMD_RING 16u
 #define PERFORM_NO_GRID 0xFFFFFFFFu   /* the transport is stopped: no grid point */
 #define PERFORM_XFADE_IN 88u      /* engage hand-off: 2 ms */
@@ -67,16 +71,31 @@ enum {
 #define PERFORM_XFADE_FREEZE 441u /* freeze loop-wrap crossfade: 10 ms */
 #define PERFORM_FREEZE_N 5292u    /* freeze grain: ~120 ms */
 
+/* Echo throw targets for X0X's fxbus delay. T10i applies them with
+ * engine_set(T_MIX, part, MX_DLY, send), engine_set(T_FX, 0, FX_DL_FDBK, fdbk)
+ * and engine_set(T_FX, 0, FX_DL_TIME, time) whenever perform_echo_targets()
+ * reports a change. `time` is an fxbus division index: 5 is the 1/8 note. */
+typedef struct {
+    uint8_t send;   /* the part's delay send, 0..127 (T_MIX MX_DLY) */
+    uint8_t fdbk;   /* FX_DL_FDBK, 0..127                             */
+    uint8_t time;   /* FX_DL_TIME division index (5 = 1/8)            */
+    uint8_t on;     /* 1 while the throw is held                      */
+} perform_echo_t;
+
 /* internal buffer-effect states */
 enum { PERF_ST_FREE = 0, PERF_ST_WAIT_GRID, PERF_ST_RUN };
 /* crossfade modes */
-enum { PERF_XF_NONE = 0, PERF_XF_IN, PERF_XF_OUT };
+enum { PERF_XF_NONE = 0, PERF_XF_IN, PERF_XF_OUT, PERF_XF_OLD };
+
+#define PERFORM_ECHO_SEND 100u   /* ~0.79, opened while held */
+#define PERFORM_ECHO_FDBK 75u    /* ~0.50 of the 0.85 range  */
+#define PERFORM_ECHO_TIME 5u     /* fxbus "1/8"              */
 
 typedef struct {
     uint8_t  cmd;       /* PERF_CMD_* */
     uint8_t  fx;        /* PERF_* */
     uint8_t  latch;     /* engage: 1 = tap (latched), 0 = hold (momentary) */
-    uint16_t bpm_x10;   /* PERF_CMD_TEMPO */
+    uint16_t bpm_x10;   /* PERF_CMD_TEMPO (kept for the ring record) */
 } perform_cmd_t;
 
 enum { PERF_CMD_ENGAGE, PERF_CMD_RELEASE, PERF_CMD_RESET, PERF_CMD_TEMPO };
@@ -86,6 +105,8 @@ enum { PERF_CMD_ENGAGE, PERF_CMD_RELEASE, PERF_CMD_RESET, PERF_CMD_TEMPO };
 typedef struct {
     uint8_t  type;        /* PERF_REPEAT_8/16, PERF_TAPE, PERF_FREEZE */
     uint8_t  state;       /* PERF_ST_* */
+    uint8_t  degraded;    /* tape engaged while the history could not record */
+    uint8_t  rsv;
     /* loop (repeat / freeze) */
     uint32_t slice_start; /* index into hist */
     uint32_t slice_len;
@@ -102,11 +123,17 @@ typedef struct {
     perform_cmd_t cmd[PERFORM_CMD_RING];
     volatile uint8_t cmd_head;   /* producer writes here */
     volatile uint8_t cmd_tail;   /* consumer reads here */
+    /* coalesced tempo and override flags: a full ring never drops a release */
+    volatile uint16_t tempo_req;
+    volatile uint8_t  tempo_pending;
+    volatile uint8_t  reset_req;
+    volatile uint8_t  rel_req[PERF_NFX];
     uint16_t bpm_x10;            /* the ISR's copy, clamped */
 
     /* shared history, mono int16 (32 KiB) */
     int16_t  hist[PERFORM_HIST_N];
     uint32_t hist_w;             /* next slot to write */
+    uint8_t  hist_stalled;       /* the last sample could not be recorded */
 
     /* buffer effects */
     perf_slot_t act, old, pend;
@@ -116,13 +143,11 @@ typedef struct {
     uint8_t  xmode;              /* PERF_XF_* */
     volatile uint8_t latch[PERF_NFX];
 
-    /* echo: its own mono int16 line (16 KiB) */
-    int16_t  echo[PERFORM_ECHO_N];
-    uint32_t echo_w;
-    uint32_t echo_len;           /* current delay in samples */
-    uint8_t  echo_on;            /* held: keep sending */
-    uint8_t  echo_active;        /* tail still ringing */
-    uint32_t echo_quiet;         /* consecutive zero writes */
+    /* echo throw controller (drives X0X's fxbus delay; no line of its own) */
+    uint8_t  echo_on;
+    uint8_t  echo_base_send, echo_base_fdbk, echo_base_time;
+    uint8_t  echo_send, echo_fdbk, echo_time;
+    volatile uint8_t echo_changed;
 
     /* filter dive */
     uint8_t  filt_on;
@@ -141,14 +166,27 @@ void perform_init(perform_t *p);
  * A latched tap on an already-latched effect releases it. */
 void perform_engage(perform_t *p, int fx, int latch);
 
-/* Main loop: turn the effect off (the momentary button-up, or a tap release). */
+/* Main loop: turn the effect off (the momentary button-up, or a tap release).
+ * Never dropped, even when the command ring is full. */
 void perform_release(perform_t *p, int fx);
 
-/* HOME + FX: everything off at once, back to the dry signal. */
+/* HOME + FX: everything off at once, back to the dry signal. Never dropped. */
 void perform_reset(perform_t *p);
 
-/* Main loop: tempo in BPM x10 (applied at the next perform_process). */
+/* Main loop: tempo in BPM x10 (coalesced to the latest value, applied at the
+ * next perform_process). */
 void perform_set_tempo(perform_t *p, uint16_t bpm_x10);
+
+/* Echo throw: on = hold, off = release. Equivalent to engaging/releasing
+ * PERF_ECHO; the audio is untouched, the fxbus delay is driven instead. */
+void perform_echo_throw(perform_t *p, int on);
+
+/* The song's own fxbus delay settings, which the throw overrides and restores.
+ * T10i calls this whenever the project's delay parameters change. */
+void perform_echo_base(perform_t *p, uint8_t send, uint8_t fdbk, uint8_t time);
+
+/* If the echo targets changed since the last call, write them and return 1. */
+int perform_echo_targets(perform_t *p, perform_echo_t *out);
 
 /* Audio ISR: process nframes in place. next_8 / next_16 are the number of
  * samples from the start of this block to the transport's next 1/8 and 1/16

@@ -11,25 +11,29 @@
  *   out = live * (1 - a) + wet * a,   a = gain_act + gain_old
  * When nothing is engaged a == 0 and the output is the input, sample for
  * sample, so a released or reset effect leaves no residue.
+ *
+ * The history keeps recording while a loop plays. The recording head skips the
+ * active loop's slice (it is the only place the loop's audio lives), so the
+ * rolling history stays current and a later tape stop or repeat starts from
+ * the live signal. A loop that fills the whole buffer leaves nowhere to write;
+ * the head then stalls and a tape stop plays the live signal instead of the
+ * stale snapshot (the documented fallback).
  */
 #include "perform.h"
 #include "fastmath.h"
 
 #define HIST_MASK (PERFORM_HIST_N - 1u)
-#define ECHO_MASK (PERFORM_ECHO_N - 1u)
 
 /* publish a ring slot before its index (the clip engine's barrier) */
 #define PERF_BARRIER() __asm__ volatile("" ::: "memory")
 
 /* tape stop: 0.6 s from full speed to zero, linear in time */
 #define PERF_TAPE_MS 600u
-/* echo feedback / return level */
-#define ECHO_FB 0.5f
-#define ECHO_LVL 0.7f
-/* filter dive: open 16 kHz down to 200 Hz, Q = 12, slewed at control rate */
+/* filter dive: open 16 kHz down to 200 Hz, Q 0.707 -> 12, slewed at control rate */
 #define FILT_FC_OPEN 16000.0f
 #define FILT_FC_LO 200.0f
 #define FILT_Q 12.0f
+#define FILT_Q0 0.70710678f
 #define FILT_CR 8u
 
 /* ---------------------------------------------------------------- helpers --- */
@@ -51,28 +55,6 @@ static inline int is_loop(uint8_t t)
 static inline int is_buffer(int fx)
 {
     return fx == PERF_REPEAT_8 || fx == PERF_REPEAT_16 || fx == PERF_TAPE || fx == PERF_FREEZE;
-}
-
-/* echo delay: one 1/8 note, halved until it fits the 16 KiB line (still on the
- * beat: 1/8 -> 1/16 -> 1/32 ...). Documented slow-tempo fallback. */
-static void echo_retime(perform_t *p)
-{
-    uint32_t d = (uint32_t)(PERFORM_FS * 300u) / (uint32_t)p->bpm_x10;
-    while (d > PERFORM_ECHO_N - 1u)
-        d >>= 1;
-    p->echo_len = d ? d : 1u;
-}
-
-/* filter coefficients from the dive amount: the cutoff sweeps linearly in Hz
- * from 16 kHz (amt 0) down to 200 Hz (amt 1). No fm_exp2f: the sanitizer build
- * flags the inherited fastmath's 32-bit shift, and a linear-Hz sweep is smooth. */
-static void filt_set(perform_t *p)
-{
-    float fc = FILT_FC_OPEN + (FILT_FC_LO - FILT_FC_OPEN) * p->filt_amt;
-    float g = fm_tanf(FM_PI * fc / (float)PERFORM_FS);
-    p->filt_g = g;
-    p->filt_k = 1.0f / FILT_Q;
-    p->filt_a1 = 1.0f / (1.0f + g * (g + p->filt_k));
 }
 
 /* ------------------------------------------------- buffer effect engine --- */
@@ -100,8 +82,9 @@ static void capture_freeze(perform_t *p, perf_slot_t *s)
     s->wrap = PERFORM_XFADE_FREEZE;     /* grain: 10 ms wrap crossfade */
 }
 
-/* the wet sample of one buffer effect (advances its read head) */
-static float slot_wet(perform_t *p, perf_slot_t *s)
+/* the wet sample of one buffer effect (advances its read head); mono is the
+ * live mono sample, used by a tape stop that could not record (fallback) */
+static float slot_wet(perform_t *p, perf_slot_t *s, float mono)
 {
     switch (s->type) {
     case PERF_REPEAT_8:
@@ -121,15 +104,19 @@ static float slot_wet(perform_t *p, perf_slot_t *s)
             y = y * (1.0f - g) + head * g;
         }
         if (++s->loop_pos >= L)
-            s->loop_pos = 0;
+            s->loop_pos = X;                     /* do not replay the head */
         return y;
     }
     case PERF_TAPE: {
-        uint32_t i0 = (uint32_t)s->tape_read;
-        float fr = s->tape_read - (float)i0;
-        float b0 = i2f16(p->hist[i0 & HIST_MASK]);
-        float b1 = i2f16(p->hist[(i0 + 1u) & HIST_MASK]);
-        float y = (b0 + (b1 - b0) * fr) * s->tape_rate;   /* sag to silence with the rate */
+        uint32_t i0;
+        float fr, b0, b1, y;
+        if (s->degraded)                         /* nowhere to record: live signal */
+            return mono;
+        i0 = (uint32_t)s->tape_read;
+        fr = s->tape_read - (float)i0;
+        b0 = i2f16(p->hist[i0 & HIST_MASK]);
+        b1 = i2f16(p->hist[(i0 + 1u) & HIST_MASK]);
+        y = (b0 + (b1 - b0) * fr) * s->tape_rate;   /* sag to silence with the rate */
         s->tape_read += s->tape_rate;
         if (s->tape_read >= (float)PERFORM_HIST_N)
             s->tape_read -= (float)PERFORM_HIST_N;
@@ -143,6 +130,32 @@ static float slot_wet(perform_t *p, perf_slot_t *s)
     default:
         return 0.0f;
     }
+}
+
+/* is w inside an active loop's protected slice? (circular) */
+static int in_region(const perf_slot_t *s, int on, uint32_t w)
+{
+    if (!on || !is_loop(s->type) || s->slice_len == 0)
+        return 0;
+    return ((w - s->slice_start) & HIST_MASK) < s->slice_len;
+}
+
+/* the recording head skips active loop slices (at most two) */
+static uint32_t skip_loops(perform_t *p, uint32_t w)
+{
+    int g = 0;
+    while (g++ < 4) {
+        if (in_region(&p->act, p->act_on, w)) {
+            w = (p->act.slice_start + p->act.slice_len) & HIST_MASK;
+            continue;
+        }
+        if (in_region(&p->old, p->old_on, w)) {
+            w = (p->old.slice_start + p->old.slice_len) & HIST_MASK;
+            continue;
+        }
+        break;
+    }
+    return w;
 }
 
 /* Promote the pending effect to act and start its engage crossfade. */
@@ -173,9 +186,10 @@ static void engage_buffer(perform_t *p, int fx)
         p->pend_on = 1;
     } else if (fx == PERF_TAPE) {
         s.state = PERF_ST_RUN;
+        s.degraded = p->hist_stalled;     /* no history room: play the live signal */
         s.tape_rate = 1.0f;
         s.tape_dec = 1.0f / ((float)PERF_TAPE_MS * 0.001f * (float)PERFORM_FS);
-        s.tape_read = (float)p->hist_w;
+        s.tape_read = (float)((p->hist_w + PERFORM_HIST_N - 1u) & HIST_MASK);
         p->pend = s;
         p->pend_on = 1;
         slot_swap_in(p);
@@ -188,39 +202,49 @@ static void engage_buffer(perform_t *p, int fx)
     }
 }
 
-static void engage_filter(perform_t *p)
+/* Filter coefficients from the dive amount: the cutoff sweeps linearly in Hz
+ * from 16 kHz down to 200 Hz and Q from neutral to 12, so an engage never steps
+ * the resonance in. No fm_exp2f: the sanitizer build flags the inherited
+ * fastmath's 32-bit shift. */
+static void filt_set(perform_t *p)
 {
-    p->filt_on = 1;
-    p->filt_state = 1;                    /* diving */
-    p->filt_amt = 0.0f;
-    p->filt_step = (float)p->bpm_x10 / (float)(PERFORM_FS * 600u);   /* over one beat */
-    p->filt_ic1[0] = p->filt_ic1[1] = p->filt_ic2[0] = p->filt_ic2[1] = 0.0f;
-    p->filt_cr = 0;
-    filt_set(p);
+    float fc = FILT_FC_OPEN + (FILT_FC_LO - FILT_FC_OPEN) * p->filt_amt;
+    float q = FILT_Q0 + (FILT_Q - FILT_Q0) * p->filt_amt;
+    float g = fm_tanf(FM_PI * fc / (float)PERFORM_FS);
+    p->filt_g = g;
+    p->filt_k = 1.0f / q;
+    p->filt_a1 = 1.0f / (1.0f + g * (g + p->filt_k));
 }
 
-static void release_fx(perform_t *p, int fx)
+static void engage_filter(perform_t *p)
 {
-    if (is_buffer(fx)) {
-        if (p->pend_on && p->pend.type == (uint8_t)fx) {
-            p->pend_on = 0;
-        }
-        if (p->old_on && p->old.type == (uint8_t)fx) {
-            p->old_on = 0;
-            p->gain_old = 0.0f;
-        }
-        if (p->act_on && p->act.type == (uint8_t)fx) {
-            p->fade_inc = 1.0f / (float)PERFORM_XFADE_OUT;
-            p->xmode = PERF_XF_OUT;
-        }
-    } else if (fx == PERF_FILTER) {
-        if (p->filt_on) {
-            p->filt_state = 3;            /* sweep back over 1/4 beat */
-            p->filt_step = -4.0f * (float)p->bpm_x10 / (float)(PERFORM_FS * 600u);
-        }
-    } else if (fx == PERF_ECHO) {
-        p->echo_on = 0;                   /* stop sending; the tail decays */
+    uint32_t beat = (uint32_t)(PERFORM_FS * 600u) / (uint32_t)p->bpm_x10;
+    if (beat == 0u)
+        beat = 1u;
+    p->filt_on = 1;
+    if (p->filt_amt >= 1.0f) {            /* re-engaged at full dive: just hold */
+        p->filt_state = 2;
+        p->filt_step = 0.0f;
+    } else {                              /* continue from the current amount */
+        p->filt_state = 1;
+        p->filt_step = (1.0f - p->filt_amt) / (float)beat;
     }
+    filt_set(p);                          /* the state is not reset: no click */
+}
+
+static void echo_apply(perform_t *p, int on)
+{
+    p->echo_on = on ? 1u : 0u;
+    if (on) {
+        p->echo_send = (uint8_t)PERFORM_ECHO_SEND;
+        p->echo_fdbk = (uint8_t)PERFORM_ECHO_FDBK;
+        p->echo_time = (uint8_t)PERFORM_ECHO_TIME;
+    } else {
+        p->echo_send = p->echo_base_send;
+        p->echo_fdbk = p->echo_base_fdbk;
+        p->echo_time = p->echo_base_time;
+    }
+    p->echo_changed = 1;
 }
 
 static void engage_fx(perform_t *p, int fx)
@@ -229,18 +253,45 @@ static void engage_fx(perform_t *p, int fx)
         engage_buffer(p, fx);
     else if (fx == PERF_FILTER)
         engage_filter(p);
-    else if (fx == PERF_ECHO) {
-        if (!p->echo_active)
-            p->echo_quiet = 0;
-        p->echo_on = 1;
-        p->echo_active = 1;
-        echo_retime(p);
+    else if (fx == PERF_ECHO)
+        echo_apply(p, 1);
+}
+
+static void release_fx(perform_t *p, int fx)
+{
+    if (is_buffer(fx)) {
+        if (p->pend_on && p->pend.type == (uint8_t)fx)
+            p->pend_on = 0;
+        if (p->act_on && p->act.type == (uint8_t)fx) {
+            p->fade_inc = 1.0f / (float)PERFORM_XFADE_OUT;
+            p->xmode = PERF_XF_OUT;
+        }
+        if (p->old_on && p->old.type == (uint8_t)fx) {
+            /* the outgoing effect of a replacement: fade it, never cut it */
+            if (p->xmode != PERF_XF_IN) {
+                p->fade_inc = 1.0f / (float)PERFORM_XFADE_OUT;
+                p->xmode = PERF_XF_OLD;
+            }
+        }
+    } else if (fx == PERF_FILTER) {
+        if (p->filt_on) {
+            uint32_t qbeat = ((uint32_t)(PERFORM_FS * 600u) / (uint32_t)p->bpm_x10) / 4u;
+            if (qbeat == 0u)
+                qbeat = 1u;
+            if (p->filt_amt <= 0.0f) {
+                p->filt_state = 0;
+            } else {                      /* sweep back over 1/4 beat */
+                p->filt_state = 3;
+                p->filt_step = -p->filt_amt / (float)qbeat;
+            }
+        }
+    } else if (fx == PERF_ECHO) {
+        echo_apply(p, 0);
     }
 }
 
 static void reset_state(perform_t *p)
 {
-    unsigned k;
     p->act_on = p->old_on = p->pend_on = 0;
     p->gain_act = p->gain_old = 0.0f;
     p->xmode = PERF_XF_NONE;
@@ -249,32 +300,38 @@ static void reset_state(perform_t *p)
     p->filt_amt = 0.0f;
     p->filt_ic1[0] = p->filt_ic1[1] = p->filt_ic2[0] = p->filt_ic2[1] = 0.0f;
     p->echo_on = 0;
-    p->echo_active = 0;
-    p->echo_quiet = 0;
-    for (k = 0; k < PERFORM_ECHO_N; k++)
-        p->echo[k] = 0;
-    for (k = 0; k < PERF_NFX; k++)
-        p->latch[k] = 0;
+    p->echo_send = p->echo_base_send;
+    p->echo_fdbk = p->echo_base_fdbk;
+    p->echo_time = p->echo_base_time;
+    p->echo_changed = 1;
+    p->rel_req[PERF_REPEAT_8] = p->rel_req[PERF_REPEAT_16] = 0;
+    p->rel_req[PERF_TAPE] = p->rel_req[PERF_FILTER] = 0;
+    p->rel_req[PERF_ECHO] = p->rel_req[PERF_FREEZE] = 0;
+    p->latch[PERF_REPEAT_8] = p->latch[PERF_REPEAT_16] = 0;
+    p->latch[PERF_TAPE] = p->latch[PERF_FILTER] = 0;
+    p->latch[PERF_ECHO] = p->latch[PERF_FREEZE] = 0;
 }
 
 /* ------------------------------------------------------------- ring / ISR --- */
 
-static void ring_put(perform_t *p, uint8_t cmd, uint8_t fx, uint8_t latch, uint16_t bpm)
+static int ring_put(perform_t *p, uint8_t cmd, uint8_t fx, uint8_t latch)
 {
     uint8_t head = p->cmd_head;
     uint8_t next = (uint8_t)((head + 1u) % PERFORM_CMD_RING);
     if (next == p->cmd_tail)
-        return;                           /* full: drop */
+        return 0;                         /* full */
     p->cmd[head].cmd = cmd;
     p->cmd[head].fx = fx;
     p->cmd[head].latch = latch;
-    p->cmd[head].bpm_x10 = bpm;
+    p->cmd[head].bpm_x10 = 0;
     PERF_BARRIER();                       /* publish the slot before the head */
     p->cmd_head = next;
+    return 1;
 }
 
 static void drain(perform_t *p)
 {
+    int fx;
     for (;;) {
         uint8_t head;
         perform_cmd_t c;
@@ -285,27 +342,17 @@ static void drain(perform_t *p)
         c = p->cmd[p->cmd_tail];
         p->cmd_tail = (uint8_t)((p->cmd_tail + 1u) % PERFORM_CMD_RING);
         switch (c.cmd) {
-        case PERF_CMD_TEMPO: {
-            uint16_t b = c.bpm_x10;
-            if (b < 200u) b = 200u;
-            if (b > 3000u) b = 3000u;
-            p->bpm_x10 = b;
-            echo_retime(p);
-            break;
-        }
-        case PERF_CMD_ENGAGE: {
-            int fx = c.fx;
-            if (fx < 0 || fx >= PERF_NFX)
-                break;
-            if (c.latch && p->latch[fx]) {          /* a tap on a latched effect releases it */
-                p->latch[fx] = 0;
-                release_fx(p, fx);
-            } else {
-                p->latch[fx] = c.latch ? 1u : p->latch[fx];
-                engage_fx(p, fx);
+        case PERF_CMD_ENGAGE:
+            if (c.fx < PERF_NFX) {
+                if (c.latch && p->latch[c.fx]) {    /* a tap on a latch releases it */
+                    p->latch[c.fx] = 0;
+                    release_fx(p, c.fx);
+                } else {
+                    p->latch[c.fx] = c.latch ? 1u : p->latch[c.fx];
+                    engage_fx(p, c.fx);
+                }
             }
             break;
-        }
         case PERF_CMD_RELEASE:
             if (c.fx < PERF_NFX) {
                 p->latch[c.fx] = 0;
@@ -319,6 +366,26 @@ static void drain(perform_t *p)
             break;
         }
     }
+    /* the ring was full: a release or a reset overrides, and the tempo is the
+     * latest value (coalesced) */
+    for (fx = 0; fx < PERF_NFX; fx++)
+        if (p->rel_req[fx]) {
+            p->rel_req[fx] = 0;
+            p->latch[fx] = 0;
+            release_fx(p, fx);
+        }
+    if (p->reset_req) {
+        p->reset_req = 0;
+        p->cmd_tail = p->cmd_head;        /* the stale queued commands go too */
+        reset_state(p);
+    }
+    if (p->tempo_pending) {
+        uint16_t b = p->tempo_req;
+        p->tempo_pending = 0;
+        if (b < 200u) b = 200u;
+        if (b > 3000u) b = 3000u;
+        p->bpm_x10 = b;
+    }
 }
 
 /* --------------------------------------------------------------- public --- */
@@ -330,7 +397,13 @@ void perform_init(perform_t *p)
     for (k = 0; k < sizeof *p; k++)
         z[k] = 0;
     p->bpm_x10 = 1200u;
-    echo_retime(p);
+    p->echo_base_send = 0u;
+    p->echo_base_fdbk = 52u;      /* X0X's default DlFdbk */
+    p->echo_base_time = 7u;       /* X0X's default DlTime ("1/8.") */
+    p->echo_send = p->echo_base_send;
+    p->echo_fdbk = p->echo_base_fdbk;
+    p->echo_time = p->echo_base_time;
+    p->echo_changed = 1;
     filt_set(p);
 }
 
@@ -338,24 +411,60 @@ void perform_engage(perform_t *p, int fx, int latch)
 {
     if (fx < 0 || fx >= PERF_NFX)
         return;
-    ring_put(p, PERF_CMD_ENGAGE, (uint8_t)fx, latch ? 1u : 0u, 0u);
+    ring_put(p, PERF_CMD_ENGAGE, (uint8_t)fx, latch ? 1u : 0u);
 }
 
 void perform_release(perform_t *p, int fx)
 {
     if (fx < 0 || fx >= PERF_NFX)
         return;
-    ring_put(p, PERF_CMD_RELEASE, (uint8_t)fx, 0u, 0u);
+    if (!ring_put(p, PERF_CMD_RELEASE, (uint8_t)fx, 0u))
+        p->rel_req[fx] = 1;               /* never dropped */
 }
 
 void perform_reset(perform_t *p)
 {
-    ring_put(p, PERF_CMD_RESET, 0u, 0u, 0u);
+    if (!ring_put(p, PERF_CMD_RESET, 0u, 0u))
+        p->reset_req = 1;                 /* never dropped */
 }
 
 void perform_set_tempo(perform_t *p, uint16_t bpm_x10)
 {
-    ring_put(p, PERF_CMD_TEMPO, 0u, 0u, bpm_x10);
+    p->tempo_req = bpm_x10;               /* coalesced to the latest value */
+    p->tempo_pending = 1;
+}
+
+void perform_echo_throw(perform_t *p, int on)
+{
+    if (on)
+        ring_put(p, PERF_CMD_ENGAGE, (uint8_t)PERF_ECHO, 0u);
+    else
+        perform_release(p, PERF_ECHO);
+}
+
+void perform_echo_base(perform_t *p, uint8_t send, uint8_t fdbk, uint8_t time)
+{
+    p->echo_base_send = send;
+    p->echo_base_fdbk = fdbk;
+    p->echo_base_time = time;
+    if (!p->echo_on) {
+        p->echo_send = send;
+        p->echo_fdbk = fdbk;
+        p->echo_time = time;
+    }
+    p->echo_changed = 1;
+}
+
+int perform_echo_targets(perform_t *p, perform_echo_t *out)
+{
+    if (!p->echo_changed)
+        return 0;
+    out->send = p->echo_send;
+    out->fdbk = p->echo_fdbk;
+    out->time = p->echo_time;
+    out->on = p->echo_on;
+    p->echo_changed = 0;
+    return 1;
 }
 
 int perform_latched(const perform_t *p, int fx)
@@ -396,6 +505,16 @@ static void advance_fades(perform_t *p)
             p->xmode = PERF_XF_NONE;
             p->act_on = 0;
         }
+    } else if (p->xmode == PERF_XF_OLD) {
+        if (p->old_on) {
+            p->gain_old -= p->fade_inc;
+            if (p->gain_old <= 0.0f) {
+                p->gain_old = 0.0f;
+                p->old_on = 0;
+            }
+        }
+        if (!p->old_on)
+            p->xmode = PERF_XF_NONE;
     }
 }
 
@@ -407,16 +526,18 @@ void perform_process(perform_t *p, float *l, float *r, uint32_t nframes,
     for (i = 0; i < nframes; i++) {
         float ll = l[i], rr = r[i];
         float mono = (ll + rr) * 0.5f;
-        float wet = 0.0f, base_l, base_r, bm, a;
-        uint8_t frozen;
+        float wet = 0.0f, base_l, base_r, a;
+        uint32_t w;
 
-        /* 1. the shared history records the live mono signal unless a loop
-         *    holds a slice that must not be overwritten */
-        frozen = (uint8_t)((p->act_on && is_loop(p->act.type)) ||
-                           (p->old_on && is_loop(p->old.type)));
-        if (!frozen) {
-            p->hist[p->hist_w] = f2i16(mono);
-            p->hist_w = (p->hist_w + 1u) & HIST_MASK;
+        /* 1. the recording head writes the live signal, skipping the active
+         *    loop's slice so a loop does not stop the history */
+        w = skip_loops(p, p->hist_w);
+        if (in_region(&p->act, p->act_on, w) || in_region(&p->old, p->old_on, w)) {
+            p->hist_stalled = 1;          /* a loop fills the buffer: no room */
+        } else {
+            p->hist[w] = f2i16(mono);
+            p->hist_w = (w + 1u) & HIST_MASK;
+            p->hist_stalled = 0;
         }
 
         /* 2. a repeat waiting for its grid captures one slice and loops it */
@@ -436,43 +557,19 @@ void perform_process(perform_t *p, float *l, float *r, uint32_t nframes,
         if (a <= 0.0f) {
             base_l = ll;
             base_r = rr;
-            bm = mono;
         } else {
             if (p->gain_act > 0.0f && p->act_on)
-                wet += slot_wet(p, &p->act) * p->gain_act;
+                wet += slot_wet(p, &p->act, mono) * p->gain_act;
             if (p->gain_old > 0.0f && p->old_on)
-                wet += slot_wet(p, &p->old) * p->gain_old;
+                wet += slot_wet(p, &p->old, mono) * p->gain_old;
             {
                 float ia = 1.0f - a;
                 base_l = ll * ia + wet;
                 base_r = rr * ia + wet;
-                bm = mono * ia + wet;
             }
         }
 
-        /* 4. echo: a tempo-synced feedback send; after release only the tail */
-        if (p->echo_active) {
-            uint32_t rp = (p->echo_w + PERFORM_ECHO_N - p->echo_len) & ECHO_MASK;
-            float y = i2f16(p->echo[rp]);
-            float in = p->echo_on ? bm : 0.0f;
-            int16_t wv = f2i16(in + y * ECHO_FB);
-            p->echo[p->echo_w] = wv;
-            p->echo_w = (p->echo_w + 1u) & ECHO_MASK;
-            base_l += y * ECHO_LVL;
-            base_r += y * ECHO_LVL;
-            if (!p->echo_on) {
-                if (wv == 0) {
-                    if (++p->echo_quiet >= p->echo_len) {
-                        p->echo_active = 0;
-                        p->echo_quiet = 0;
-                    }
-                } else {
-                    p->echo_quiet = 0;
-                }
-            }
-        }
-
-        /* 5. filter dive: a resonant low-pass on the whole master signal */
+        /* 4. filter dive: a resonant low-pass on the whole master signal */
         if (p->filt_state != 0) {
             if (p->filt_state == 1) {                 /* diving */
                 p->filt_amt += p->filt_step;
@@ -491,19 +588,25 @@ void perform_process(perform_t *p, float *l, float *r, uint32_t nframes,
                 filt_set(p);
         }
         if (p->filt_state != 0) {
-            float g = p->filt_g, a1 = p->filt_a1;
-            float v3 = base_l - p->filt_ic2[0];
+            float in_l = base_l, in_r = base_r;
+            float amt, g = p->filt_g, a1 = p->filt_a1;
+            float v3 = in_l - p->filt_ic2[0];
             float v1 = a1 * p->filt_ic1[0] + g * a1 * v3;
             float v2 = p->filt_ic2[0] + g * v1;
+            float fl;
             p->filt_ic1[0] = fm_flush(2.0f * v1 - p->filt_ic1[0]);
             p->filt_ic2[0] = fm_flush(2.0f * v2 - p->filt_ic2[0]);
-            base_l = v2;
-            v3 = base_r - p->filt_ic2[1];
+            fl = v2;
+            v3 = in_r - p->filt_ic2[1];
             v1 = a1 * p->filt_ic1[1] + g * a1 * v3;
             v2 = p->filt_ic2[1] + g * v1;
             p->filt_ic1[1] = fm_flush(2.0f * v1 - p->filt_ic1[1]);
             p->filt_ic2[1] = fm_flush(2.0f * v2 - p->filt_ic2[1]);
-            base_r = v2;
+            /* blend the filtered signal in by the dive amount so the engage and
+             * release hand-offs cannot step, whatever the filter's state */
+            amt = p->filt_amt;
+            base_l = in_l * (1.0f - amt) + fl * amt;
+            base_r = in_r * (1.0f - amt) + v2 * amt;
         }
 
         l[i] = base_l;

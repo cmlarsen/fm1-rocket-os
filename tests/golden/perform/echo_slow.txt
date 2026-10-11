@@ -1,2 +1,0 @@
-# echo throw @ 120 bpm: 1/8 = 11025 > 8191, halved to 5512
-tap_at=5512 want=5512

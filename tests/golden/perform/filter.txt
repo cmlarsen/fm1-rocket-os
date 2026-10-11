@@ -1,2 +1,3 @@
 # filter dive @ 120 bpm, a 3 kHz tone held to 200 Hz
 rms_in=0.353553 rms_out=0.001531 drop_db=-47.27
+in_step=0.2120 engage_step=0.2121 mid_amt=0.500 re_step=0.2252

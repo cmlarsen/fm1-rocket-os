@@ -1,16 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* T10c punch FX tests. Synthetic input (a sine plus clicks on the beat) is fed
- * through perform_process the way the ISR will, and each effect is checked
- * against its acceptance: the repeat's exactness and grid alignment, the tape
- * stop's falling pitch and silence, the filter dive's >20 dB drop above 1 kHz,
- * the echo's 1/8-note taps and decaying tail, the freeze's periodicity, the
- * cleanup's exactness, and the tempo (60/120/200, plus the slow-tempo cap).
- *
- * Waveform summaries (period, RMS, dB, tap positions) are written to
- * tests/golden/perform/<case>.txt; GOLDEN_UPDATE=1 rewrites them. The numeric
- * checks are what make the test fail, the goldens record the shapes. The
- * signals are generated with fastmath.h, not libm, so the summaries are the
- * same on every host. */
+/* T10c punch FX tests (post-review). Synthetic input is fed through
+ * perform_process the way the ISR will, and each effect is checked against its
+ * acceptance. The step / seam tests use a click-free sine so the thresholds
+ * mean something; the grid-alignment test uses the sine too. Signals are
+ * generated with fastmath.h (not libm), so the waveform summaries in
+ * tests/golden/perform/ are the same on any host. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +25,7 @@ static float INL[NMAX], INR[NMAX], OUTL[NMAX], OUTR[NMAX];
 /* ---- synthetic transport (integer grid, like clip_engine's) -------------- */
 static uint16_t BPM10 = 1200;
 static uint32_t POS;
-static unsigned long long K16, K8;    /* index of the next 1/16, 1/8 grid */
+static unsigned long long K16, K8;
 static int STOPPED;
 
 static uint32_t grid16(unsigned long long k)
@@ -40,8 +34,7 @@ static uint32_t grid16(unsigned long long k)
 }
 static uint32_t grid8(unsigned long long k) { return grid16(2ULL * k); }
 
-/* feed nframes in place at the absolute transport position; POS advances and
- * the grid distances are recomputed each block */
+/* feed nframes in place at the absolute transport position */
 static void drive(uint32_t n)
 {
     uint32_t done = 0;
@@ -65,7 +58,7 @@ static void drive(uint32_t n)
     }
 }
 
-/* a fresh engine at bpm (the tempo command drains before the first sample) */
+/* a fresh engine at bpm; the tempo command drains before the first sample */
 static void start(uint16_t bpm)
 {
     memset(&P, 0, sizeof P);
@@ -75,11 +68,11 @@ static void start(uint16_t bpm)
     K16 = K8 = 0;
     STOPPED = 0;
     perform_set_tempo(&P, bpm);
-    perform_process(&P, INL, INR, 0u, 0u, 0u);   /* drain the tempo command only */
+    perform_process(&P, INL, INR, 0u, 0u, 0u);
 }
 
 /* ---- signal helpers ------------------------------------------------------ */
-static float q16(float x)                 /* the value the int16 history stores */
+static float q16(float x)
 {
     if (x >= 1.0f) return 32767.0f / 32768.0f;
     if (x <= -1.0f) return -32768.0f / 32768.0f;
@@ -91,17 +84,6 @@ static void gen_tone(float *l, float *r, uint32_t n, float hz, float amp)
     uint32_t i;
     for (i = 0; i < n; i++) {
         float v = amp * fm_sinf(6.28318530717959f * hz * (float)i / (float)PERFORM_FS);
-        l[i] = r[i] = v;
-    }
-}
-
-static void gen_sine_clicks(float *l, float *r, uint32_t n, uint32_t step)
-{
-    uint32_t i;
-    for (i = 0; i < n; i++) {
-        float v = 0.5f * fm_sinf(6.28318530717959f * 440.0f * (float)i / (float)PERFORM_FS);
-        if (step && i % step == 0)
-            v += 0.6f;
         l[i] = r[i] = v;
     }
 }
@@ -127,12 +109,17 @@ static float max_step(const float *x, uint32_t a, uint32_t b)
     return m;
 }
 
+static float boundary_step(uint32_t center)
+{
+    uint32_t a = center > 16u ? center - 16u : 0u;
+    return max_step(OUTL, a, center + 128u);
+}
+
 static int exact(const float *a, const float *b, uint32_t n)
 {
     return memcmp(a, b, (size_t)n * sizeof(float)) == 0;
 }
 
-/* zero-crossing frequency with a +/-0.02 deadband (amplitude independent) */
 static float zc_freq(const float *x, uint32_t a, uint32_t b)
 {
     uint32_t i;
@@ -144,17 +131,6 @@ static float zc_freq(const float *x, uint32_t a, uint32_t b)
         else if (v < -0.02f) { if (have && prev > 0.02f) cross++; prev = v; have = 1; }
     }
     return (float)cross * 0.5f * (float)PERFORM_FS / (float)(b - a);
-}
-
-static void find_peak(const float *x, uint32_t a, uint32_t b, uint32_t *at, float *amp)
-{
-    uint32_t i;
-    float best = 0.0f;
-    uint32_t bi = a;
-    for (i = a; i < b; i++)
-        if (fm_fabsf(x[i]) > best) { best = fm_fabsf(x[i]); bi = i; }
-    *at = bi;
-    *amp = best;
 }
 
 /* ---- golden summaries ---------------------------------------------------- */
@@ -200,13 +176,15 @@ static int golden(const char *name, const char *body)
     return 0;
 }
 
+#define XF_BOUND(in_step) ((in_step) + 2.2f / (float)PERFORM_XFADE_IN + 0.01f)
+
 /* ========================================================================== */
 
 static void case_cleanup(void)
 {
     printf("cleanup:\n");
     start(1200);
-    gen_sine_clicks(INL, INR, 40000, 11025);
+    gen_tone(INL, INR, 40000, 440.0f, 0.5f);
     drive(40000);
     CHECK(exact(OUTL, INL, 40000), "nothing engaged: output == input, sample for sample");
     outn = 0;
@@ -218,19 +196,18 @@ static void case_cleanup(void)
 static void case_repeat(int fx, uint16_t bpm, const char *name)
 {
     uint32_t warm, total, G, len, k;
-    float in_step, out_step;
+    float in_step, eng_step, rel_step, rs_in;
     int per = 1, aligned = 1;
     float worst = 0.0f;
 
-    len = (uint32_t)(PERFORM_FS * 300u) / bpm;             /* 1/8 */
+    len = (uint32_t)(PERFORM_FS * 300u) / bpm;
     if (fx == PERF_REPEAT_16) len = (uint32_t)(PERFORM_FS * 150u) / bpm;
-    if (len > PERFORM_HIST_N) len = PERFORM_HIST_N;
     warm = 3u * ((uint32_t)(PERFORM_FS * 300u) / bpm) + 4096u;
     total = warm + 6u * len + 4096u;
 
     printf("repeat %s @ %u bpm:\n", fx == PERF_REPEAT_16 ? "1/16" : "1/8", (unsigned)bpm);
     start(bpm);
-    gen_sine_clicks(INL, INR, total, (uint32_t)(PERFORM_FS * 300u) / bpm);
+    gen_tone(INL, INR, total, 440.0f, 0.5f);
     drive(warm);
     if (fx == PERF_REPEAT_16) {
         while (grid16(K16) < POS) K16++;
@@ -239,6 +216,7 @@ static void case_repeat(int fx, uint16_t bpm, const char *name)
         while (grid8(K8) < POS) K8++;
         G = grid8(K8);
     }
+    in_step = max_step(INL, G - 200u, G + 300u);
     perform_engage(&P, fx, 1);
     drive(total - warm);
 
@@ -253,48 +231,47 @@ static void case_repeat(int fx, uint16_t bpm, const char *name)
     }
     CHECK(aligned, "the slice is sample-aligned to the grid (worst |diff| %.5f)", worst);
 
-    in_step = max_step(INL, G - 200u, G + 300u);
-    out_step = max_step(OUTL, G - 200u, G + 300u);
-    CHECK(out_step <= in_step + 2.2f / (float)PERFORM_XFADE_IN + 0.01f,
-          "engage crossfade: no step beyond input %.4f + 2 ms (%u) -> out %.4f",
-          in_step, (unsigned)PERFORM_XFADE_IN, out_step);
+    eng_step = boundary_step(G);
+    CHECK(eng_step <= XF_BOUND(in_step),
+          "engage boundary: largest step %.4f <= input %.4f + 2 ms", eng_step, in_step);
 
     perform_release(&P, fx);
     {
         uint32_t rel, rel0 = POS;
-        float rs_in, rs_out;
         drive(256);
-        rs_in = max_step(INL, rel0 - 8u, rel0 + 128u);
-        rs_out = max_step(OUTL, rel0 - 8u, rel0 + 128u);
-        CHECK(rs_out <= rs_in + 2.2f / (float)PERFORM_XFADE_OUT + 0.01f,
-              "release crossfade: no step beyond input %.4f -> out %.4f", rs_in, rs_out);
+        rs_in = max_step(INL, rel0 - 16u, rel0 + 128u);
+        rel_step = boundary_step(rel0);
+        CHECK(rel_step <= XF_BOUND(rs_in),
+              "release boundary: largest step %.4f <= input %.4f + 2 ms", rel_step, rs_in);
         drive(256);
         rel = POS;
         drive(2000);
         CHECK(exact(OUTL + rel, INL + rel, 2000), "release: output == input exactly after the crossfade");
-        out_step = out_step > rs_out ? out_step : rs_out;
     }
     outn = 0;
-    putf("# repeat %s @ %u bpm\n", fx == PERF_REPEAT_16 ? "1/16" : "1/8", (unsigned)bpm);
+    putf("# repeat %s @ %u bpm (click-free input)\n", fx == PERF_REPEAT_16 ? "1/16" : "1/8", (unsigned)bpm);
     putf("period=%u grid=%u aligned=%d\n", (unsigned)len, (unsigned)G, aligned);
-    putf("max_step_in=%.4f max_step_out=%.4f\n", in_step, out_step);
+    putf("in_step=%.4f engage_step=%.4f release_step=%.4f\n", in_step, eng_step, rel_step);
     fails += golden(name, out);
 }
 
 static void case_tape(void)
 {
     uint32_t warm = 22050, T, i;
-    float f[6];
+    float f[6], in_step, eng_step, tail;
     int mono = 1;
-    float tail;
     printf("tape stop:\n");
     start(1200);
     gen_tone(INL, INR, warm + 44100, 220.0f, 0.5f);
     drive(warm);
     T = POS;
+    in_step = max_step(INL, T - 16u, T + 128u);
     perform_engage(&P, PERF_TAPE, 1);
     drive(44100);
 
+    eng_step = boundary_step(T);
+    CHECK(eng_step <= XF_BOUND(in_step),
+          "engage boundary: largest step %.4f <= input %.4f + 2 ms", eng_step, in_step);
     for (i = 0; i < 6; i++)
         f[i] = zc_freq(OUTL, T + i * 4410 + 200, T + (i + 1) * 4410);
     for (i = 1; i < 6; i++)
@@ -307,8 +284,13 @@ static void case_tape(void)
 
     perform_release(&P, PERF_TAPE);
     {
-        uint32_t rel;
-        drive(512);
+        uint32_t rel, rel0 = POS;
+        float rs_in, rs;
+        drive(256);
+        rs_in = max_step(INL, rel0 - 16u, rel0 + 128u);
+        rs = boundary_step(rel0);
+        CHECK(rs <= XF_BOUND(rs_in), "release boundary: largest step %.4f <= input %.4f + 2 ms", rs, rs_in);
+        drive(256);
         rel = POS;
         drive(2000);
         CHECK(exact(OUTL + rel, INL + rel, 2000), "release: output == input exactly after the crossfade");
@@ -316,24 +298,29 @@ static void case_tape(void)
     outn = 0;
     putf("# tape stop @ 120 bpm\n");
     putf("hz=%.1f %.1f %.1f %.1f %.1f %.1f\n", f[0], f[1], f[2], f[3], f[4], f[5]);
-    putf("tail_rms=%.6f\n", tail);
+    putf("in_step=%.4f engage_step=%.4f tail_rms=%.6f\n",
+         in_step, eng_step, tail);
     fails += golden("tape", out);
 }
 
 static void case_filter(void)
 {
     uint32_t warm = 4096, T, i;
-    float rin, rout, drop;
+    float rin, rout, drop, in_step, eng_step, mid_amt, re_step, rel_step;
     printf("filter dive:\n");
     start(1200);
     for (i = 0; i < warm + 140000u; i++) {
-        float v = 0.5f * fm_sinf(6.28318530717959f * 3000.0f * (float)i / (float)PERFORM_FS);
+        float v = 0.5f * fm_sinf(6.2831853f * 3000.0f * (float)i / (float)PERFORM_FS);
         INL[i] = INR[i] = v;
     }
     drive(warm);
     T = POS;
+    in_step = max_step(INL, T - 16u, T + 128u);
     perform_engage(&P, PERF_FILTER, 1);
     drive(140000);
+    eng_step = boundary_step(T);
+    CHECK(eng_step <= XF_BOUND(in_step),
+          "engage boundary: largest step %.4f <= input %.4f + 2 ms", eng_step, in_step);
     rin = rms(INL, T + 26460u, T + 44100u);
     rout = rms(OUTL, T + 26460u, T + 44100u);
     drop = 20.0f * 0.30102999566f * fm_log2f(rout / (rin + 1e-12f));
@@ -345,96 +332,67 @@ static void case_filter(void)
     }
     perform_release(&P, PERF_FILTER);
     {
-        uint32_t rel;
-        drive(5512u + 512u);
+        uint32_t rel, rel0 = POS;
+        float rs_in;
+        drive(256);
+        rs_in = max_step(INL, rel0 - 16u, rel0 + 128u);
+        rel_step = boundary_step(rel0);
+        CHECK(rel_step <= XF_BOUND(rs_in),
+              "release boundary: largest step %.4f <= input %.4f + 2 ms", rel_step, rs_in);
+        drive(5512u + 256u);
         rel = POS;
         drive(2000);
         CHECK(exact(OUTL + rel, INL + rel, 2000), "release: output == input exactly after the sweep back");
     }
+
+    /* re-engage mid-dive continues from the current amount, without a click */
+    start(1200);
+    for (i = 0; i < 80000; i++) {
+        float v = 0.5f * fm_sinf(6.2831853f * 3000.0f * (float)i / (float)PERFORM_FS);
+        INL[i] = INR[i] = v;
+    }
+    drive(4096);
+    T = POS;
+    perform_engage(&P, PERF_FILTER, 0);
+    drive(11025);                       /* half a beat: amt ~ 0.5 */
+    mid_amt = P.filt_amt;
+    in_step = max_step(INL, POS - 16u, POS + 128u);
+    perform_engage(&P, PERF_FILTER, 0); /* re-engage mid-dive */
+    drive(256);
+    re_step = boundary_step(POS - 256u);
+    CHECK(mid_amt > 0.3f && mid_amt < 0.7f, "half a beat in, the dive is at %.2f", mid_amt);
+    CHECK(P.filt_amt >= mid_amt, "re-engaging continues from the current amount (%.2f -> %.2f)",
+          mid_amt, P.filt_amt);
+    CHECK(re_step <= XF_BOUND(in_step),
+          "re-engage boundary: largest step %.4f <= input %.4f + 2 ms", re_step, in_step);
+
     outn = 0;
     putf("# filter dive @ 120 bpm, a 3 kHz tone held to 200 Hz\n");
     putf("rms_in=%.6f rms_out=%.6f drop_db=%.2f\n", rin, rout, drop);
+    putf("in_step=%.4f engage_step=%.4f mid_amt=%.3f re_step=%.4f\n", in_step, eng_step, mid_amt, re_step);
     fails += golden("filter", out);
-}
-
-static void case_echo(void)
-{
-    uint32_t D, i, k;
-    int taps_ok = 1, dec_ok = 1;
-    float amps[8];
-    printf("echo throw:\n");
-    start(2000);
-    D = (uint32_t)(PERFORM_FS * 300u) / 2000u;      /* 1/8 at 200 bpm = 6615 */
-    for (i = 0; i < D * 14; i++)
-        INL[i] = INR[i] = 0.0f;
-    INL[0] = INR[0] = 0.8f;                          /* one click into the echo */
-    perform_engage(&P, PERF_ECHO, 1);
-    drive(D * 6);                                    /* held for six taps */
-    perform_release(&P, PERF_ECHO);
-    drive(D * 8);                                    /* the tail decays, uncut */
-    for (k = 1; k <= 7; k++) {
-        uint32_t at;
-        float am;
-        find_peak(OUTL, k * D - 4, k * D + 5, &at, &am);
-        amps[k] = am;
-        if (at < k * D - 2 || at > k * D + 2) taps_ok = 0;
-        if (k >= 2 && !(amps[k] < amps[k - 1])) dec_ok = 0;
-    }
-    CHECK(taps_ok, "taps fall at 1/8-note spacing (D = %u samples)", (unsigned)D);
-    CHECK(dec_ok, "the taps decay: %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
-          amps[1], amps[2], amps[3], amps[4], amps[5], amps[6], amps[7]);
-    CHECK(amps[6] > 0.0005f && amps[7] < amps[6], "the tail keeps decaying after release (%.4f -> %.4f)",
-          amps[6], amps[7]);
-    outn = 0;
-    putf("# echo throw @ 200 bpm, 1/8 = %u samples\n", (unsigned)D);
-    putf("taps=%.4f %.4f %.4f %.4f %.4f %.4f %.4f\n",
-         amps[1], amps[2], amps[3], amps[4], amps[5], amps[6], amps[7]);
-    fails += golden("echo", out);
-
-    /* slow tempo: a 1/8 note needs more than the 16 KiB line, so it halves */
-    start(1200);
-    D = (uint32_t)(PERFORM_FS * 300u) / 1200u;       /* 1/8 = 11025, does not fit */
-    {
-        uint32_t want = D;
-        while (want > PERFORM_ECHO_N - 1u) want >>= 1;
-        for (i = 0; i < want * 8; i++)
-            INL[i] = INR[i] = 0.0f;
-        INL[0] = INR[0] = 0.8f;
-        perform_engage(&P, PERF_ECHO, 1);
-        drive(want * 4);
-        {
-            uint32_t at;
-            float am;
-            find_peak(OUTL, want - 4, want + 5, &at, &am);
-            CHECK(at >= want - 2 && at <= want + 2,
-                  "at 120 bpm a 1/8 note does not fit 16 KiB: the delay halves to %u samples", (unsigned)want);
-            outn = 0;
-            putf("# echo throw @ 120 bpm: 1/8 = %u > %u, halved to %u\n",
-                 (unsigned)D, (unsigned)(PERFORM_ECHO_N - 1u), (unsigned)want);
-            putf("tap_at=%u want=%u\n", (unsigned)at, (unsigned)want);
-            fails += golden("echo_slow", out);
-        }
-    }
 }
 
 static void case_freeze(void)
 {
-    uint32_t warm = 20000, T, i, len = PERFORM_FREEZE_N;
+    uint32_t warm = 20000, T, i, len = PERFORM_FREEZE_N, X = PERFORM_XFADE_FREEZE, period = len - X;
     int per = 1;
-    float a, b;
+    float in_step, seam_step;
     printf("freeze:\n");
     start(1200);
-    gen_sine_clicks(INL, INR, warm + 5u * len + 4096u, 11025u);
+    gen_tone(INL, INR, warm + 6u * len + 4096u, 440.0f, 0.5f);
+    in_step = max_step(INL, 0, 4096);
     drive(warm);
     T = POS;
     perform_engage(&P, PERF_FREEZE, 1);
-    drive(5u * len + 4096u);
-    for (i = T + 256; i + len < POS; i++)
-        if (OUTL[i] != OUTL[i + len]) { per = 0; break; }
-    CHECK(per, "the freeze output is periodic with the %u-sample grain", (unsigned)len);
-    a = rms(OUTL, T + 256, T + 256 + len);
-    b = rms(OUTL, T + 256 + len, T + 256 + 2u * len);
-    CHECK(fm_fabsf(a - b) < 1e-4f, "consecutive grains are the same (%.5f vs %.5f)", a, b);
+    drive(6u * len + 4096u);
+    /* pass 1 plays [0, L); from pass 2 the loop is [X, L) with period L - X */
+    for (i = T + len + 256u; i + period < POS; i++)
+        if (OUTL[i] != OUTL[i + period]) { per = 0; break; }
+    CHECK(per, "after the first pass the freeze is periodic with the %u-sample loop", (unsigned)period);
+    seam_step = max_step(OUTL, T + 256u, POS);
+    CHECK(seam_step <= 2.0f * in_step,
+          "the seam's largest step %.4f stays within 2x the input step %.4f", seam_step, in_step);
     perform_release(&P, PERF_FREEZE);
     {
         uint32_t rel;
@@ -444,71 +402,78 @@ static void case_freeze(void)
         CHECK(exact(OUTL + rel, INL + rel, 2000), "release: output == input exactly after the crossfade");
     }
     outn = 0;
-    putf("# freeze @ 120 bpm\n");
-    putf("grain=%u periodic=%d\n", (unsigned)len, per);
-    putf("rms_a=%.6f rms_b=%.6f\n", a, b);
+    putf("# freeze @ 120 bpm (click-free input)\n");
+    putf("grain=%u wrap=%u period=%u periodic=%d\n", (unsigned)len, (unsigned)X, (unsigned)period, per);
+    putf("in_step=%.4f seam_step=%.4f\n", in_step, seam_step);
     fails += golden("freeze", out);
 }
 
-static void case_engage_rules(void)
+static void case_replacement(void)
 {
-    uint32_t warm = 40000, total = 130000, G, k, len = 13230000u / 1200u, rel;
+    uint32_t warm = 40000, total = 130000, k, len = 13230000u / 1200u, rel, G, rr0;
+    float in_step, rep_step, rel_step;
     int per = 1, finite = 1;
-    float in_step, out_step;
     printf("engagement rules:\n");
 
-    /* a new buffer effect replaces the old, with a crossfade (tape -> repeat 1/8) */
+    /* a new buffer effect replaces the old, with a crossfade (tape -> repeat) */
     start(1200);
-    gen_sine_clicks(INL, INR, total, 11025u);
+    gen_tone(INL, INR, total, 440.0f, 0.5f);
     drive(warm);
     perform_engage(&P, PERF_TAPE, 1);
     drive(total - warm - 60000);
     while (grid8(K8) < POS) K8++;
     G = grid8(K8);
+    in_step = max_step(INL, G - 16u, G + 128u);
     perform_engage(&P, PERF_REPEAT_8, 1);
     drive(60000);
+    rep_step = boundary_step(G);
+    CHECK(rep_step <= XF_BOUND(in_step), "replace boundary: largest step %.4f <= input %.4f + 2 ms", rep_step, in_step);
     for (k = G + 512; k + len < POS; k++)
         if (OUTL[k] != OUTL[k + len]) { per = 0; break; }
-    CHECK(per, "a new buffer effect replaces the old: the repeat loop is periodic (%u)", (unsigned)len);
-    in_step = max_step(INL, G - 16u, G + 128u);
-    out_step = max_step(OUTL, G - 16u, G + 128u);
-    CHECK(out_step <= in_step + 2.2f / (float)PERFORM_XFADE_IN + 0.02f,
-          "the replacement hand-off does not click (in %.3f -> out %.3f)", in_step, out_step);
-    perform_release(&P, PERF_REPEAT_8);
+    CHECK(per, "the new repeat replaced the tape: the loop is periodic (%u)", (unsigned)len);
+
+    /* releasing the *outgoing* effect mid-replacement fades it, never cuts it */
+    start(1200);
+    gen_tone(INL, INR, total, 440.0f, 0.5f);
+    drive(warm);
+    perform_engage(&P, PERF_REPEAT_8, 1);
+    drive(4u * len);                    /* the repeat is looping */
+    perform_engage(&P, PERF_FREEZE, 1);
+    drive(20);                          /* the replacement crossfade is under way */
+    in_step = max_step(INL, POS - 16u, POS + 128u);
+    rr0 = POS;
+    perform_release(&P, PERF_REPEAT_8); /* release the old, mid-replacement */
+    drive(256);
+    rel_step = boundary_step(rr0);
+    CHECK(rel_step <= XF_BOUND(in_step),
+          "releasing the old mid-replacement: largest step %.4f <= input %.4f + 2 ms", rel_step, in_step);
+    perform_reset(&P);
     drive(512);
     rel = POS;
     drive(2000);
-    CHECK(exact(OUTL + rel, INL + rel, 2000), "after the replacement, release is exact again");
-    outn = 0;
-    putf("# engagement: tape replaced by repeat 1/8 at %u\n", (unsigned)G);
-    putf("period=%u max_step_in=%.4f max_step_out=%.4f\n", (unsigned)len, in_step, out_step);
-    fails += golden("replace", out);
+    CHECK(exact(OUTL + rel, INL + rel, 2000), "reset after the replacement is exact");
 
     /* filter dive and echo stack on top of a buffer effect */
     start(1200);
-    gen_sine_clicks(INL, INR, total, 11025u);
+    gen_tone(INL, INR, total, 440.0f, 0.5f);
     drive(warm);
     perform_engage(&P, PERF_REPEAT_8, 1);
     perform_engage(&P, PERF_FILTER, 1);
-    perform_engage(&P, PERF_ECHO, 1);
+    perform_echo_throw(&P, 1);
     drive(60000);
     for (k = warm; k < warm + 60000u; k++)
-        if (!(OUTL[k] > -1e30f && OUTL[k] < 1e30f)) finite = 0;   /* no NaN / inf */
+        if (!(OUTL[k] > -1e30f && OUTL[k] < 1e30f)) finite = 0;
     CHECK(finite, "repeat + filter dive + echo stack and stay finite");
     perform_reset(&P);
     drive(512);
     rel = POS;
     drive(2000);
     CHECK(exact(OUTL + rel, INL + rel, 2000), "reset clears the stacked effects exactly");
-    outn = 0;
-    putf("# engagement: repeat + filter + echo stacked, then reset\n");
-    putf("finite=%d exact_after_reset=%d\n", finite, (int)exact(OUTL + rel, INL + rel, 2000));
-    fails += golden("stack", out);
 
-    /* a repeat engaged while the transport is stopped falls back to the last period */
+    /* a repeat engaged while the transport is stopped freezes the last period */
     start(1200);
     STOPPED = 1;
-    gen_sine_clicks(INL, INR, total, 11025u);
+    gen_tone(INL, INR, total, 440.0f, 0.5f);
     drive(warm);
     perform_engage(&P, PERF_REPEAT_8, 1);
     drive(40000);
@@ -516,28 +481,145 @@ static void case_engage_rules(void)
     for (k = warm + 512; k + len < POS; k++)
         if (OUTL[k] != OUTL[k + len]) { per = 0; break; }
     CHECK(per, "a stopped transport has no grid: the repeat freezes the last %u-sample period", (unsigned)len);
+
     outn = 0;
-    putf("# engagement: repeat 1/8 engaged while stopped (no grid)\n");
-    putf("period=%u periodic=%d\n", (unsigned)len, per);
-    fails += golden("stopped", out);
+    putf("# engagement: replace / release-old / stack / stopped\n");
+    putf("replace_step=%.4f release_old_step=%.4f stacked_finite=%d stopped_periodic=%d\n",
+         rep_step, rel_step, finite, per);
+    fails += golden("replace", out);
 }
 
-static void case_reset(void)
+static void case_tape_after_loop(void)
 {
-    uint32_t rel;
-    printf("reset (HOME+FX):\n");
+    uint32_t phase = 60000, warm = 20000;
+    float amp;
+    printf("history keeps recording under a loop:\n");
+
+    /* a freeze plays while the input amplitude steps 0.1 -> 0.5; a tape engaged
+     * then reads the *current* audio, not the frozen snapshot */
     start(1200);
-    gen_sine_clicks(INL, INR, 60000, 11025u);
-    drive(20000);
-    perform_engage(&P, PERF_FREEZE, 1);
-    perform_engage(&P, PERF_FILTER, 1);
-    perform_engage(&P, PERF_ECHO, 1);
-    drive(4000);
+    {
+        uint32_t i;
+        for (i = 0; i < phase + 60000; i++) {
+            float amp_i = i < phase ? 0.1f : 0.5f;
+            INL[i] = INR[i] = amp_i * fm_sinf(6.2831853f * 440.0f * (float)i / (float)PERFORM_FS);
+        }
+    }
+    drive(warm);
+    perform_engage(&P, PERF_FREEZE, 1);   /* freezes the 0.1-amplitude grain */
+    drive(phase - warm + 20000);          /* the input has stepped to 0.5 */
+    CHECK(P.hist_stalled == 0, "a freeze does not stop the history recording");
+    perform_engage(&P, PERF_TAPE, 1);     /* replace the freeze with a tape stop */
+    drive(400);
+    {
+        uint32_t t0 = POS;
+        drive(4000);
+        amp = rms(OUTL, t0, t0 + 4000u) * 1.41421356f;   /* peak estimate */
+        CHECK(amp > 0.3f && amp < 0.7f,
+              "tape after a loop reads current audio (peak %.2f, not the frozen 0.1)", amp);
+    }
     perform_reset(&P);
-    drive(256);
+
+    /* fallback: a loop that fills the whole buffer leaves nowhere to record, so
+     * a tape stop plays the live signal instead of the stale snapshot */
+    start(600);                            /* 60 bpm: 1/8 = 22050 > 16384, capped */
+    gen_tone(INL, INR, 120000, 440.0f, 0.5f);
+    drive(warm);
+    perform_engage(&P, PERF_REPEAT_8, 1);
+    drive(80000);
+    CHECK(P.hist_stalled == 1, "a loop that fills the buffer stalls the recording head");
+    {
+        uint32_t t = POS;
+        perform_engage(&P, PERF_TAPE, 1);
+        drive(512);
+        {
+            uint32_t rel = POS;
+            drive(2000);
+            CHECK(exact(OUTL + rel, INL + rel, 2000),
+                  "fallback: the tape plays the live signal, not stale audio");
+        }
+        (void)t;
+    }
+    outn = 0;
+    putf("# history under a loop: recorded current audio, and the full-buffer fallback\n");
+    putf("tape_after_freeze_peak=%.3f\n", amp);
+    fails += golden("loop_record", out);
+}
+
+static void case_echo(void)
+{
+    perform_echo_t e;
+    int r;
+    printf("echo throw controller:\n");
+    start(1200);
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.send == 0u && e.fdbk == 52u && e.time == 7u && e.on == 0u,
+          "init: the song's own delay settings are the base (%u,%u,%u)", e.send, e.fdbk, e.time);
+    perform_echo_base(&P, 10, 30, 4);
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.send == 10u && e.fdbk == 30u && e.time == 4u && e.on == 0u,
+          "base update is emitted (%u,%u,%u)", e.send, e.fdbk, e.time);
+    perform_echo_throw(&P, 1);
+    perform_process(&P, INL, INR, 0u, 0u, 0u);      /* drain the throw */
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.on == 1u && e.send == PERFORM_ECHO_SEND && e.fdbk == PERFORM_ECHO_FDBK &&
+          e.time == PERFORM_ECHO_TIME,
+          "held: the delay is overridden to send %u, fdbk %u, 1/8 time %u", e.send, e.fdbk, e.time);
+    CHECK(perform_echo_targets(&P, &e) == 0, "targets are one-shot (no change -> 0)");
+    perform_echo_throw(&P, 0);
+    perform_process(&P, INL, INR, 0u, 0u, 0u);
+    r = perform_echo_targets(&P, &e);
+    CHECK(r && e.on == 0u && e.send == 10u && e.fdbk == 30u && e.time == 4u,
+          "release: the song's own settings are restored (%u,%u,%u)", e.send, e.fdbk, e.time);
+
+    /* the echo is external: engaged, the audio is untouched */
+    start(1200);
+    gen_tone(INL, INR, 40000, 440.0f, 0.5f);
+    perform_echo_throw(&P, 1);
+    drive(40000);
+    CHECK(exact(OUTL, INL, 40000), "the echo controller leaves the audio untouched");
+    outn = 0;
+    putf("# echo throw controller: base/held/release targets\n");
+    putf("send=%u fdbk=%u time=%u held_send=%u held_fdbk=%u held_time=%u\n",
+         10u, 30u, 4u, (unsigned)PERFORM_ECHO_SEND, (unsigned)PERFORM_ECHO_FDBK, (unsigned)PERFORM_ECHO_TIME);
+    fails += golden("echo", out);
+}
+
+static void case_ring(void)
+{
+    uint32_t rel, i, warm = 20000;
+    uint16_t co;
+    printf("command ring:\n");
+    start(1200);
+    gen_tone(INL, INR, warm + 8000, 440.0f, 0.5f);
+    drive(warm);
+    perform_engage(&P, PERF_TAPE, 1);
+    drive(1000);
+    CHECK(perform_latched(&P, PERF_TAPE) == 1, "the tape is engaged");
+    for (i = 0; i < 20u; i++)
+        perform_set_tempo(&P, (uint16_t)(1200u + i));   /* coalesced */
+    perform_release(&P, PERF_TAPE);
+    drive(400);
+    CHECK(perform_latched(&P, PERF_TAPE) == 0, "20 tempo commands then a release: the effect is off");
+    CHECK(P.bpm_x10 == 1219u, "the tempo coalesced to the latest value (%u)", (unsigned)P.bpm_x10);
+    co = P.bpm_x10;
     rel = POS;
-    drive(4000);
-    CHECK(exact(OUTL + rel, INL + rel, 4000), "reset returns the output to the input exactly");
+    drive(2000);
+    CHECK(exact(OUTL + rel, INL + rel, 2000), "after the release the output is the input exactly");
+
+    /* a full ring never drops a release */
+    start(1200);
+    drive(warm);
+    perform_engage(&P, PERF_TAPE, 0);
+    for (i = 0; i < 20u; i++)
+        perform_engage(&P, PERF_TAPE, 0);               /* the ring fills */
+    perform_release(&P, PERF_TAPE);                     /* goes to the override flag */
+    drive(400);
+    CHECK(perform_latched(&P, PERF_TAPE) == 0, "a release overrides a full ring");
+    outn = 0;
+    putf("# command ring: coalesced tempo, and a release that overrides a full ring\n");
+    putf("tempo=%u latched_after_release=%d\n", (unsigned)co, perform_latched(&P, PERF_TAPE));
+    fails += golden("ring", out);
 }
 
 static void case_tempo(int bpm)
@@ -551,7 +633,7 @@ static void case_tempo(int bpm)
     if (expect > PERFORM_HIST_N) expect = PERFORM_HIST_N;
     warm = 2u * ((uint32_t)(PERFORM_FS * 300u) / (uint32_t)bpm) + 4096u;
     total = warm + 5u * expect + 4096u;
-    gen_sine_clicks(INL, INR, total, (uint32_t)(PERFORM_FS * 300u) / (uint32_t)bpm);
+    gen_tone(INL, INR, total, 440.0f, 0.5f);
     drive(warm);
     while (grid8(K8) < POS) K8++;
     G = grid8(K8);
@@ -578,10 +660,11 @@ int main(void)
     case_repeat(PERF_REPEAT_16, 1200, "repeat_16");
     case_tape();
     case_filter();
-    case_echo();
     case_freeze();
-    case_engage_rules();
-    case_reset();
+    case_replacement();
+    case_tape_after_loop();
+    case_echo();
+    case_ring();
     case_tempo(600);
     case_tempo(1200);
     case_tempo(2000);

@@ -1,0 +1,2 @@
+# command ring: coalesced tempo, and a release that overrides a full ring
+tempo=1219 latched_after_release=0
