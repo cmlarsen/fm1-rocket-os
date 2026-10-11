@@ -1,0 +1,42 @@
+# T7b STUDIO 15: motion. Turning K1-K4 on the motion page while a pass records writes motion at
+# the playhead step; the first two distinct params claim lane 0 and lane 1, a third stays off with
+# "2 lanes max"; the page draws each lane's curve; the lanes play back as the clip engine's motion
+# events.
+wait 300
+cursor 1 0
+tap SEQ
+tap HOME
+tap SEL
+tap PLAY
+wait-bar 1
+expect liveclip1 7
+# the editor, then its motion page
+tap SEQ
+tap SEQ
+expect view 14
+tap REC
+expect recrec 1
+wait 200
+spin K1 30
+wait 250
+spin K1 30
+wait 250
+spin K1 -20
+wait 250
+spin K2 40
+wait 250
+spin K2 20
+# a third param: no lane, "2 lanes max"
+spin K3 40
+expect mlparam7.1 >0
+tap REC
+wait-bar 2
+expect recrec 0
+expect mlparam7.0 >0
+expect mlparam7.1 >0
+wait 1400
+shot studio_clipmotion.png
+dump studio_clipmotion.json
+events studio_clipmotion_events.txt
+wait-bar 1
+eventsstop

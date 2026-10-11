@@ -224,6 +224,7 @@ static void run_script(const char *script)
             else if (!strcmp(t[0], "launchnow")) clip_engine_launch_now(&eng, (uint8_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "stoprole"))  clip_engine_stop(&eng, (uint8_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "unused"))    song.clip[atoi_tok(t, 1)].used = 0;
+            else if (!strcmp(t[0], "reload"))    clip_engine_reload(&eng, (uint8_t)atoi_tok(t, 1));
             else if (!strcmp(t[0], "clip")) {
                 int idx = atoi_tok(t, 1), len = atoi_tok(t, 3);
                 if (!strcmp(t[2], "drum")) clip_drum(idx, len);
@@ -726,6 +727,18 @@ int main(void)
         "query\n"
         "runto 30000\n"
         "query\n");
+
+    /* T7b: the ISR reads its own copy of the playing clip. An edit to the song's clip does not
+     * reach the audio until a reload (or a loop); reload takes it at the next step boundary. */
+    run_case("edit_while_playing",
+        "clip 0 drum 4\n"
+        "hit 0 0 0\n"
+        "play\n"
+        "launch 0 0\n"
+        "run 30000\n"
+        "hit 0 0 2\n"                   /* edit the song's clip while it plays */
+        "reload 0\n"                    /* the ISR re-takes its copy at the next step */
+        "runto 150000\n");
 
     drift_check();
     window_check();

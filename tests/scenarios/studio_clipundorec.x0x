@@ -1,0 +1,27 @@
+# T7b: a record pass is one undo entry. After REC closes, HOME + REC undoes the whole pass (the
+# clip goes back to what it held before it), and the redo stack holds the recorded clip.
+wait 300
+cursor 1 0
+tap REC
+key w0 down
+key w0 up
+wait 200
+key w2 down
+key w2 up
+wait 200
+key w4 down
+key w4 up
+tap REC
+wait-bar 2
+expect clipnotes7 3
+expect cliplen7 16
+expect undodepth 1
+# HOME + REC undoes the pass
+press HOME
+tap REC
+release HOME
+expect clipnotes7 0
+expect undopos 0
+wait 1400
+shot studio_clipundorec.png
+dump studio_clipundorec.json

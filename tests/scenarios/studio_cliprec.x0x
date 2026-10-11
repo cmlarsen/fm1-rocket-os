@@ -1,0 +1,32 @@
+# T7b: REC on an empty slot arms a pass from the next bar; the keys record into a new BASS clip
+# until REC closes the loop at the next bar. The length becomes the recorded bar count (1 bar) and
+# the clip starts looping; its notes play back as events.
+wait 300
+cursor 1 0
+tap REC
+expect view 13
+expect editclip 7
+expect recrec 1
+key w0 down
+key w0 up
+wait 300
+key w2 down
+key w2 up
+wait 300
+key w4 down
+key w4 up
+wait 300
+key w7 down
+key w7 up
+expect clipnotes7 4
+tap REC
+wait-bar 2
+expect recrec 0
+expect cliplen7 16
+expect liveclip1 7
+wait 1400
+shot studio_cliprec.png
+dump studio_cliprec.json
+events studio_cliprec_events.txt
+wait-bar 1
+eventsstop

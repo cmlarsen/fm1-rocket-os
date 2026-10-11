@@ -1,0 +1,31 @@
+# T7b: REC on a loaded clip overdubs. A 1-bar pass records two notes; a second pass adds two more;
+# the length is untouched and the note count grows.
+wait 300
+cursor 1 0
+tap REC
+key w0 down
+key w0 up
+wait 200
+key w2 down
+key w2 up
+tap REC
+wait-bar 2
+expect clipnotes7 2
+expect cliplen7 16
+# overdub: REC again adds notes to the same clip
+tap REC
+expect recrec 1
+key w4 down
+key w4 up
+wait 200
+key w7 down
+key w7 up
+wait 200
+tap REC
+wait-bar 2
+expect recrec 0
+expect clipnotes7 4
+expect cliplen7 16
+wait 1400
+shot studio_clipoverdub.png
+dump studio_clipoverdub.json
