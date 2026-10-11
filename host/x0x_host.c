@@ -280,6 +280,7 @@ static int rc_host_words;                            /* fields the last `stats` 
 static FILE *events_log;
 static uint32_t host_sample;             /* frames rendered since boot: the only clock */
 static uint32_t bar_count;               /* the 909's wraps since the transport started */
+static uint32_t boffs;                   /* T7a: note-offs the tap has seen (leaving LIVE releases) */
 static uint8_t tr_prev_pos;
 static int was_playing;
 static uint8_t prev_pcue[NPARTS];
@@ -299,6 +300,7 @@ static void host_engine_tap(uint32_t sample, uint32_t cmd)
             fprintf(events_log, "%u bon %u %u %u %u\n", sample, a, b, v & 1u, (v >> 1) & 1u);
         break;
     case 10:
+        boffs++;
         if (a == PART_FM6 || a == PART_NOISE)              /* T5i: b = note */
             fprintf(events_log, "%u boff %u %u\n", sample, a, b);
         else
@@ -781,6 +783,12 @@ static int expect(const char *what, const char *val)
         got = song_io_clip_motion(atoi(what + 10));
     else if (!strcmp(what, "songswing"))
         got = song_io_swing();
+    else if (!strcmp(what, "songkey"))             /* T7a follow-up: the song's key (0..11) and scale */
+        got = song_io_key();
+    else if (!strcmp(what, "songscale"))
+        got = song_io_scale();
+    else if (!strcmp(what, "boffs"))               /* T7a D1: note-offs the tap logged */
+        got = (int)boffs;
     else if (!strcmp(what, "undodepth"))
         got = song_io_undo_depth();
     else if (!strcmp(what, "undopos"))

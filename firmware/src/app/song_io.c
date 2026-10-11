@@ -228,6 +228,8 @@ void song_io_name(char *out, int n)
         out[i] = song()->name[i];
     out[i] = 0;
 }
+int song_io_key(void) { return (int)song()->key; }
+int song_io_scale(void) { return (int)song()->scale; }
 int song_io_undo_clip(void) { return undo.cur ? (int)undo.e[undo.cur - 1u].index : -1; }
 int song_io_redo_clip(void) { return undo.cur < undo.n ? (int)undo.e[undo.cur].index : -1; }
 int song_io_undo_depth(void) { return (int)undo.n; }

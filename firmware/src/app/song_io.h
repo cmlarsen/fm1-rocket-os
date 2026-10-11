@@ -56,6 +56,8 @@ int  song_io_swing(void);
 void song_io_set_swing(int v);            /* 0..100 */
 void song_io_set_bpm(int bpm_x10);
 void song_io_name(char *out, int n);      /* the song's name, NUL-terminated */
+int  song_io_key(void);                   /* 0..11 (C..B) */
+int  song_io_scale(void);                 /* model.h's SCALE_* */
 
 /* Undo entry points (T7 wires the UI; no UI yet). The clip args are the model's `clip_t *`, passed
  * as void here. `push_*` are called after the edit, with the value it replaced. `undo`/`redo`

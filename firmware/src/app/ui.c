@@ -23,8 +23,8 @@ static const int8_t KEY_WHITE[NKEYS] = {0, -1, 1, -1, 2, -1, 3, 4, -1, 5, -1, 6,
 static const int8_t KEY_BLACK[NKEYS] = {-1, 0, -1, 1, -1, 2, -1, -1, 3, -1, 4, -1, -1, 5, -1, 6, -1, 7, -1, -1, 8, -1, 9, -1, -1, 10, -1};
 static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
-enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, NVIEWS };
-static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO"};
+enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND, NVIEWS };
+static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND"};
 /* T7a: the classic X0X pages (the pattern editors) are not on the normal button paths any more;
  * they are reached from the GLOBAL list's "Classic patterns" row. `classic` is that mode: X0X's
  * sequencer is the audio source and its views behave exactly as before. */
@@ -79,6 +79,7 @@ typedef struct {
     uint32_t turn_t;                   /* the last encoder turn */
     uint8_t song_sel;                  /* the SONG screen's bar */
     uint8_t classic;                   /* T7a: the classic X0X pages own the audio (X0X's sequencer) */
+    uint8_t sound_role;                /* T7a: the role whose FM6/NOISE sound card V_SOUND shows (3/4) */
 } ui_t;
 static ui_t ui;
 static uint8_t any_button;             /* a button has been pressed since power-on (the footer's first line) */
@@ -133,6 +134,9 @@ int  studio_cursor(void);                      /* packed role<<8 | clip, for the
 static void studio_sound_key(int k, int down); /* the sound page's keys audition the role */
 static void studio_undo(void);
 static void studio_redo(void);
+static void studio_draw_part(int band);        /* V_PART outside Classic: a sound card, no step grid */
+static void studio_draw_sound(int band);       /* V_SOUND: the FM6/NOISE sound card */
+static uint16_t studio_footer_sound(const char **a, const char **b, const char **c);
 /* the clip-setting knob refs (R_CLIP_*), used by build_pages / pref_* in ui.c */
 enum { RK_CLIP_LEN, RK_CLIP_MODE, RK_CLIP_QUANT, RK_CLIP_SWING };
 
@@ -572,7 +576,7 @@ static const char *pref_name(pref_t r)
     if (r.kind == R_CLIP_LEN || r.kind == R_CLIP_MODE || r.kind == R_CLIP_QUANT || r.kind == R_CLIP_SWING)
         return d->name;
     if (r.kind == R_ACT && r.a == ACT_CLASSIC)       /* T7a: enter Classic, or back to the song home */
-        return ui.classic ? "SONG HOME" : "CLASSIC PATTERNS";
+        return ui.classic ? "BACK TO SONG" : "CLASSIC PATTERNS";
     if (ui.view == V_LIVE && r.kind == R_ENG) {       /* T3: the LIVE performance knobs' design labels */
         if (r.a == T_MST && r.c == MST_DJF)
             return "FILTER";
@@ -941,6 +945,14 @@ static void build_pages(void)
         add_page("CLIP", PR(R_CLIP_LEN, 0, 0, 0), PR(R_CLIP_MODE, 0, 0, 0), PR(R_CLIP_QUANT, 0, 0, 0),
                  PR(R_CLIP_SWING, 0, 0, 0));
         break;
+    case V_SOUND: {                                    /* T7a: CHORDS/FM6 and FX/NOISE, T_RSV macros */
+        int v = ui.sound_role == 3 ? 0 : 1;
+        add_page(v ? "NOISE" : "FM6", PR(R_ENG, T_RSV, v, 0), PR(R_ENG, T_RSV, v, 1),
+                 PR(R_ENG, T_RSV, v, 2), PR(R_ENG, T_RSV, v, 3));
+        add_page(v ? "NOISE" : "FM6", PR(R_ENG, T_RSV, v, 4), PR(R_ENG, T_RSV, v, 5),
+                 PR(R_ENG, T_RSV, v, 6), PR(R_ENG, T_RSV, v, 7));
+        break;
+    }
     default: break;
     }
     if (pg.n == 0)
@@ -2137,7 +2149,7 @@ static void key_event(int k, int down)
     }
     if (ui.view == V_CLIPSET)
         return;                                            /* the clip settings page: the keys are inert */
-    if (!ui.classic && ui.view == V_PART) {                /* sound page: the keys audition the role */
+    if (!ui.classic && (ui.view == V_PART || ui.view == V_SOUND)) {   /* sound pages: audition the role */
         studio_sound_key(k, down);
         return;
     }
@@ -2306,7 +2318,28 @@ static void button_tap(int b)
         live_handle_button(b);
         return;
     }
-    if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {   /* T7a: the song home owns its buttons */
+    /* T7a: outside Classic, HOME and SEQ on an X0X page return to the song home; inside Classic,
+     * HOME on X0X's song arranger (V_SONG) leaves Classic the same way. */
+    if (b == B_HOME || b == B_SEQ) {
+        if (ui.classic && b == B_HOME && ui.view == V_SONG && ui.overlay == O_NONE) {
+            studio_set_classic(0);
+            return;
+        }
+        if (!ui.classic && ui.view != V_STUDIO && ui.view != V_CLIPSET && ui.view != V_LIVE) {
+            if (b == B_HOME && ui.overlay != O_NONE) {
+                close_overlay();
+                return;
+            }
+            set_view(V_STUDIO);
+            studio_enter();
+            return;
+        }
+    }
+    if (!ui.classic && b == B_ARP) {                   /* T7a D2: TB-3PO is a classic pattern tool */
+        say("CLASSIC: GLO", 0);
+        return;
+    }
+    if (ui.view == V_STUDIO || ui.view == V_CLIPSET || ui.view == V_SOUND) {   /* T7a: the song pages */
         if (studio_handle_button(b))
             return;
     }
@@ -3716,6 +3749,8 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         return live_footer(a, b, c);
     } else if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {
         return studio_footer(a, b, c);
+    } else if (ui.view == V_SOUND || (!ui.classic && ui.view == V_PART)) {
+        return studio_footer_sound(a, b, c);        /* T7a: sound-only pages */
     } else if (ui.view == V_HOME) {
         *a = "WHITE: PATTERN";
         *b = "TWO: CHAIN";
@@ -3756,6 +3791,15 @@ static void draw_footer(void)
 {
     const char *a, *b, *c;
     uint16_t col = footer_text(&a, &b, &c);
+    if (ui.classic) {                                  /* T7a: how out of the classic pages */
+        if (ui.view == V_SONG) {
+            a = "GLO: BACK TO SONG";
+            b = c = 0;
+        } else {
+            b = "GLO: BACK TO SONG";
+            c = 0;
+        }
+    }
     segs(4, vc(&AF_S, FOOT_Y, 9), &AF_S, col, FOOT_GAP, a, b, c, 0);
 }
 
@@ -3787,6 +3831,10 @@ static void draw_main(void)
             live_draw(band);
         else if (ui.view == V_STUDIO || ui.view == V_CLIPSET)
             studio_draw(band);
+        else if (ui.view == V_SOUND)
+            studio_draw_sound(band);
+        else if (!ui.classic && ui.view == V_PART)
+            studio_draw_part(band);                      /* T7a: sound-only, no X0X step grid */
         else if (is_drum())
             draw_drum(band);
         else

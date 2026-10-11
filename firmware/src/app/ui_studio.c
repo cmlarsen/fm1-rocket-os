@@ -77,6 +77,22 @@ static char st_letter(int clip)
     int role = live_bridge_role_of(clip), first = role >= 0 ? live_bridge_role_first(role) : -1;
     return (first >= 0 && clip >= first) ? (char)('A' + (clip - first)) : '?';
 }
+/* model.h's key/scale names (the enum is not included here; the values are frozen) */
+static const char *const ST_KEY[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *const ST_SCALE[5] = {"major", "minor", "dorian", "penta", "chromatic"};
+
+/* a clip length, as the card and the ring read it: bars when it lands on a bar, else steps ("12
+ * steps"), never "0 bars" (T7a D6). */
+static char *st_len(char *q, int len)
+{
+    if (len > 0 && len % 16 == 0) {
+        q = put_i(q, len / 16);
+        return put_s(q, len == 16 ? " bar" : " bars");
+    }
+    q = put_i(q, len < 1 ? 1 : len);
+    return put_s(q, len == 1 ? " step" : " steps");
+}
+
 static void st_toast(const char *tag, const char *msg)
 {
     put_s(st.tag, tag);
@@ -145,9 +161,11 @@ void studio_set_classic(int on)
 
 static void st_finish_clear(void)
 {
-    int c = st.clear_clip;
+    int c = st.clear_clip, role = live_bridge_role_of(c);
     char nm[16];
     st_name(c, nm);
+    if (role >= 0 && live_bridge_playing_clip((uint8_t)role) == c)
+        live_bridge_stop((uint8_t)role);      /* T7a D7: clearing the playing clip stops the role */
     song_io_clip_clear(c);
     st_toast("CLEAR", nm);
     if (st.clear_sel)
@@ -169,11 +187,17 @@ static void st_clear_start(int clip, int sel, int key)
 void studio_tick(void)
 {
     uint32_t now = plat_ms();
-    /* SEL held on the cursor: a clear, like HOME + a pad */
-    if ((ui.view == V_STUDIO) && (ui.btn & (1u << B_SEL)) && !(ui.btn & (1u << B_HOME)) && st.clear_clip == 0xFF) {
+    /* SEL held on the cursor: a clear after a 250 ms hold (T7a D4: a tap is only a launch), like
+     * HOME + a pad; the ring runs 1.5 s from the press. */
+    if ((ui.view == V_STUDIO) && (ui.btn & (1u << B_SEL)) && !(ui.btn & (1u << B_HOME)) &&
+        st.clear_clip == 0xFF && (now - ui.down_t[B_SEL]) >= 250u) {
         int c = st_cursor_clip();
-        if (c >= 0 && live_bridge_clip_used(c))
-            st_clear_start(c, 1, 0xFF);
+        if (c >= 0 && live_bridge_clip_used(c)) {
+            st.clear_clip = (uint8_t)c;
+            st.clear_sel = 1;
+            st.clear_key = 0xFF;
+            st.clear_t0 = ui.down_t[B_SEL];
+        }
     }
     if (st.clear_clip != 0xFF) {
         int held = st.clear_sel ? (ui.btn & (1u << B_SEL)) != 0 : ((ui.keys >> st.clear_key) & 1u) != 0;
@@ -257,20 +281,51 @@ static void studio_handle_key(int k, int down)
     }
 }
 
+/* T7a D2: outside Classic, EDIT opens the cursor role's sound page (never an X0X pattern editor):
+ * DRUMS -> the 909, BASS -> 303A, LEAD -> 303B, CHORDS -> the FM6 card, FX -> the NOISE card. */
+static void studio_open_sound(void)
+{
+    ui.sound_role = st.role;
+    if (st.role == 0)
+        ui.part = PART_909;
+    else if (st.role == 1)
+        ui.part = PART_303A;
+    else if (st.role == 2)
+        ui.part = PART_303B;
+    else {
+        set_view(V_SOUND);
+        return;
+    }
+    set_view(V_PART);
+}
+
 static int studio_handle_button(int b)
 {
+    if (ui.view == V_SOUND) {                            /* the FM6/NOISE sound card */
+        if (b == B_EDIT) {
+            *page_of(V_SOUND) = (uint8_t)((cur_page() + 1) % pg.n);
+            return 1;
+        }
+        return 0;                                        /* FX/MIX/GLO still open; HOME/SEQ handled */
+    }
     if (ui.view == V_CLIPSET) {
         switch (b) {
         case B_HOME:
             set_view(V_STUDIO);
             studio_enter();
             return 1;
+        case B_EDIT:
+            studio_open_sound();
+            return 1;
         case B_SEL:
+            return 1;
+        case B_ARP:
+            say("CLASSIC: GLO", 0);
             return 1;
         case B_REC:
             return (ui.btn & (1u << B_HOME)) ? 0 : 1;    /* HOME + REC: undo, handled by ui.c */
         default:
-            return 0;                                    /* EDIT / FX / GLO ... still work */
+            return 0;                                    /* FX / GLO ... still work */
         }
     }
     switch (b) {
@@ -279,6 +334,9 @@ static int studio_handle_button(int b)
         return 1;
     case B_HOME:
         return 1;                                        /* the song home is the root */
+    case B_EDIT:
+        studio_open_sound();
+        return 1;
     case B_SEQ: {                                        /* STUDIO 2/5: create the clip, open settings */
         int c = st_cursor_clip();
         if (c >= 0) {
@@ -289,13 +347,16 @@ static int studio_handle_button(int b)
         }
         return 1;
     }
+    case B_ARP:                                          /* TB-3PO is a classic pattern tool */
+        say("CLASSIC: GLO", 0);
+        return 1;
     case B_REC:
         if (ui.btn & (1u << B_HOME))
             return 0;                                    /* HOME + REC: undo, handled by ui.c */
         say(ui.rec ? "REC OFF" : "REC: T7B", 0);         /* T7b records the clip */
         return 1;
     default:
-        return 0;                                        /* EDIT, FX, LFO, GLO, ARP, PLAY, SAVE ... */
+        return 0;                                        /* FX, LFO, GLO, PLAY, SAVE ... */
     }
 }
 
@@ -343,10 +404,12 @@ static void studio_input(void)
     }
 }
 
-/* the sound page's keys (EDIT from the song home): audition the part's role, never edit steps */
+/* the sound pages' keys (EDIT from the song home): audition the role, as LIVE's PLAY layer does,
+ * never edit X0X steps */
 static void studio_sound_key(int k, int down)
 {
-    int role = ui.part == PART_303A ? 1 : ui.part == PART_303B ? 2 : 0;   /* BASS / LEAD / DRUMS */
+    int role = ui.view == V_SOUND ? (int)ui.sound_role
+             : ui.part == PART_303A ? 1 : ui.part == PART_303B ? 2 : 0;   /* BASS / LEAD / DRUMS */
     live_bridge_play_key((uint8_t)role, (uint8_t)(41 + k), down, 88);
 }
 
@@ -370,7 +433,14 @@ static void st_cell(int cx, int cy, int role, int clip, int cursor)
     L[0] = st_letter(clip);
     L[1] = 0;
     if (!used) {
-        rframe(cx, cy, ST_CELL, ST_CELL, 3, C_DIM);
+        if (st.copy_src != 0xFF && live_bridge_role_of(st.copy_src) == role) {
+            uint16_t bg = (ui.frame & 32u) ? TOK_RAISE : TOK_BG;   /* T7a D7: a copy target blinks */
+            box(cx, cy, ST_CELL, ST_CELL, bg);
+            frame(cx, cy, ST_CELL, ST_CELL, TOK_ACCENT);
+            text_c(cx + ST_CELL / 2, vc(&AF_S, cy, ST_CELL), &AF_S, "+", TOK_ACCENT);
+        } else {
+            rframe(cx, cy, ST_CELL, ST_CELL, 3, C_DIM);
+        }
     } else {
         int playing = live_bridge_playing_clip((uint8_t)role) == clip;
         int q = live_bridge_queued_clip((uint8_t)role), qstart = q == clip;
@@ -432,13 +502,19 @@ static void st_draw_card(int band)
     }
     song_io_name(nm, sizeof nm);
     cv_text(10, vc(&AF_M, ST_CARD_Y + 1, 15), &AF_M, nm[0] ? nm : "UNTITLED", TOK_THEME);
-    put_s(put_s(put_i(put_s(t, "5 roles - "), song_io_clip_motion(c)), " lanes"), "");
+    {   /* T7a D6: "<key> <scale> - 5 roles" */
+        char *q = put_s(t, ST_KEY[song_io_key() % 12]);
+        *q++ = ' ';
+        q = put_s(q, ST_SCALE[song_io_scale() % 5]);
+        put_s(q, " - 5 roles");
+    }
     cv_text(10, vc(&AF_S, ST_CARD_Y + 16, 11), &AF_S, t, TOK_MID);
     st_name(c, nm);
     text_r(230, vc(&AF_M, ST_CARD_Y + 1, 15), &AF_M, nm, ST_COL[live_bridge_role_of(c)]);
-    {
-        char u[20], *q = put_i(u, song_io_clip_len(c) / 16);
-        put_s(q, song_io_clip_len(c) == 16 ? " bar - loop" : " bars - loop");
+    {   /* T7a D6: the real length (steps under a bar) and mode */
+        char u[24], *q = st_len(u, song_io_clip_len(c));
+        q = put_s(q, " - ");
+        put_s(q, song_io_clip_mode(c) ? "once" : "loop");
         text_r(230, vc(&AF_S, ST_CARD_Y + 16, 11), &AF_S, u, TOK_MID);
     }
 }
@@ -471,11 +547,14 @@ static void st_draw_toast(int band)
     if (!st.toast_until || band != 1)
         return;
     {
+        /* T7a D3: the toast lives in the band it is drawn into (the main area is banded), so it
+         * is actually blitted: absolute y 100 -> 31 in band 1 */
+        int32_t y = 100 - band * BAND_H;
         int32_t w = tw(&AF_S, st.tag) + 8 + tw(&AF_S, st.msg) + 16;
         int32_t x = 120 - w / 2;
-        box(x, 96, w, 22, TOK_THEME);
-        cv_text(x + 8, vc(&AF_S, 96, 22), &AF_S, st.tag, TOK_MID);
-        cv_text(x + 8 + tw(&AF_S, st.tag) + 8, vc(&AF_S, 96, 22), &AF_S, st.msg, TOK_INK);
+        box(x, y, w, 22, TOK_THEME);
+        cv_text(x + 8, vc(&AF_S, y, 22), &AF_S, st.tag, TOK_MID);
+        cv_text(x + 8 + tw(&AF_S, st.tag) + 8, vc(&AF_S, y, 22), &AF_S, st.msg, TOK_INK);
     }
 }
 
@@ -508,6 +587,43 @@ static void st_draw_clipset(int band)
         }
         cv_text(8, vc(&AF_S, 46, 12), &AF_S, "loops until stopped or replaced", TOK_MID);
     }
+}
+
+/* T7a D2: outside Classic, V_PART is a sound page only — a card, no X0X step grid or gestures */
+static void studio_draw_part(int band)
+{
+    int role = ui.part == PART_303A ? 1 : ui.part == PART_303B ? 2 : 0;
+    if (band == 0) {
+        box(3, 2, 234, 64, TOK_SURF);
+        cv_text(14, vc(&AF_L, 4, 34), &AF_L, ST_ROLE[role], ST_COL[role]);
+        cv_text(14, vc(&AF_S, 42, 12), &AF_S, is_303() ? "303 tone - K1-K4" : "909 kit - K1-K4", TOK_MID);
+        cv_text(14, vc(&AF_S, 54, 12), &AF_S, is_303() ? "keys play the line" : "keys play the kit", TOK_MID);
+    } else {
+        cv_text(10, vc(&AF_S, 4, 12), &AF_S, "HOME: song    GLO: classic pages", TOK_MID);
+    }
+}
+
+/* V_SOUND: the CHORDS/FM6 and FX/NOISE sound cards (T_RSV macros on K1-K4) */
+static void studio_draw_sound(int band)
+{
+    int role = ui.sound_role;
+    const char *eng = role == 3 ? "FM6" : "NOISE";
+    if (band == 0) {
+        box(3, 2, 234, 64, TOK_SURF);
+        cv_text(14, vc(&AF_L, 4, 34), &AF_L, eng, ST_COL[role % ST_ROLE_N]);
+        cv_text(14, vc(&AF_S, 42, 12), &AF_S, role == 3 ? "the CHORDS sound" : "the FX sound", TOK_MID);
+        cv_text(14, vc(&AF_S, 54, 12), &AF_S, "macros on K1-K4; EDIT: next page", TOK_MID);
+    } else {
+        cv_text(10, vc(&AF_S, 4, 12), &AF_S, "HOME: song    GLO: classic pages", TOK_MID);
+    }
+}
+
+static uint16_t studio_footer_sound(const char **a, const char **b, const char **c)
+{
+    *a = "K1-K4: SOUND";
+    *b = "HOME: SONG";
+    *c = 0;
+    return C_DIM;
 }
 
 static void studio_draw_ring(void)
@@ -567,13 +683,20 @@ static void studio_draw_header(void)
     w = tw(&AF_S, "STUDIO") + 10;
     box(4, 3, w, 14, TOK_KEY);
     cv_text(4 + 5, vc(&AF_S, 3, 14), &AF_S, "STUDIO", TOK_INK);
-    if (ui.view == V_CLIPSET) {
-        st_name(st_cursor_clip(), nm);
-        cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S, nm, TOK_MID);
-    } else {
-        cv_text(4 + w + 6, vc(&AF_S, 3, 14), &AF_S, st.copy_src != 0xFF ? "COPY" : "SONG", TOK_MID);
+    {
+        const char *layer;
+        int32_t lx = 4 + w + 6;
+        if (ui.view == V_CLIPSET) {
+            st_name(st_cursor_clip(), nm);
+            layer = nm;
+        } else {
+            layer = st.copy_src != 0xFF ? "COPY" : "SONG";
+        }
+        cv_text(lx, vc(&AF_S, 3, 14), &AF_S, layer, TOK_MID);
+        x = lx + tw(&AF_S, layer) + 2;               /* T7a D6: 2 px clearance from the transport */
+        if (x < 104)
+            x = 104;
     }
-    x = 104;
     if (playing)
         play_icon(x, 4, C_WHITE);
     else

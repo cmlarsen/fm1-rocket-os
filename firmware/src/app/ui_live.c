@@ -59,8 +59,20 @@ static void live_enter(void)
     say("LIVE", 0);
 }
 
+/* T7a D1: leaving LIVE releases the note every held key started, so nothing hangs. */
+static void live_release_held(void)
+{
+    int k;
+    for (k = 0; k < NKEYS; k++)
+        if (held_on[k]) {
+            live_bridge_play_key(held_role[k], held_note[k], 0, 0);
+            held_on[k] = 0;
+        }
+}
+
 static void live_leave(void)
 {
+    live_release_held();
     live_clear_held();
     if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
         ui.classic = 1;
@@ -68,6 +80,8 @@ static void live_leave(void)
         engine_all_off();
         set_view(live.back == V_LIVE ? V_HOME : live.back);
     } else {                              /* back to the song: the clips keep playing (T7a dec. 7) */
+        if (!live_bridge_transport_playing())
+            engine_all_off();             /* safety: release any other held voice when stopped */
         set_view(live.back == V_LIVE ? V_STUDIO : live.back);
         if (ui.view == V_STUDIO)
             studio_enter();
