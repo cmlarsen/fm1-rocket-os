@@ -88,3 +88,17 @@ check: fw
 
 clean-remote:
 	@$(SSH) 'rm -rf $(REMOTE_DIR)/build'
+
+HOST_CC ?= cc
+CORE_CFLAGS = -std=c99 -O2 -ffp-contract=off -Wall -Wextra -Wdouble-promotion
+SAN_CFLAGS = -std=c99 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra
+
+.PHONY: unit-clip
+unit-clip:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/clip_engine_test \
+	    tests/host/clip_engine_test.c core/seq/clip_engine.c
+	build/host/clip_engine_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/clip_engine_test_san \
+	    tests/host/clip_engine_test.c core/seq/clip_engine.c
+	build/host/clip_engine_test_san

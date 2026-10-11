@@ -1,0 +1,18 @@
+# case drum_clip_accent
+# script:
+clip 0 drum 16
+hit 0 0 0
+hit 0 3 4
+accent 0 0
+play
+launch 0 0
+run 30000
+
+# events:
+0 clip_queued drums 0 0 0
+0 playing bass 0 0 0
+0 clip_started drums 0 0 0
+0 drum drums 0 1 0
+24000 drum drums 3 0 0
+
+# events=5

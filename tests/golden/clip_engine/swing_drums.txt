@@ -1,0 +1,22 @@
+# case swing_drums
+# script:
+clip 0 drum 16
+hit 0 0 0
+hit 0 0 1
+hit 0 0 2
+hit 0 0 4
+swing 66
+play
+launch 0 0
+run 30000
+
+# events:
+0 clip_queued drums 0 0 0
+0 playing bass 0 0 0
+0 clip_started drums 0 0 0
+0 drum drums 0 0 0
+7980 drum drums 0 0 0
+12000 drum drums 0 0 0
+24000 drum drums 0 0 0
+
+# events=7

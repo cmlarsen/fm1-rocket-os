@@ -1,0 +1,48 @@
+# case all_five_roles
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+clip 7 melodic 4
+note 7 0 40 100 1
+clip 19 melodic 4
+note 19 0 64 100 1
+clip 0 drum 4
+hit 0 0 0
+clip 24 melodic 4
+note 24 0 72 80 1
+play
+launch 0 0
+launch 7 0
+launch 12 0
+launch 19 0
+launch 24 0
+runto 30000
+
+# events:
+0 clip_queued drums 0 0 0
+0 clip_queued bass 0 0 7
+0 clip_queued lead 0 0 12
+0 clip_queued chords 0 0 19
+0 clip_queued fx 0 0 24
+0 playing bass 0 0 0
+0 clip_started drums 0 0 0
+0 clip_started bass 0 0 7
+0 clip_started lead 0 0 12
+0 clip_started chords 0 0 19
+0 clip_started fx 0 0 24
+0 drum drums 0 0 0
+0 note_on bass 40 100 7
+0 note_on lead 60 100 12
+0 note_on chords 64 100 19
+0 note_on fx 72 80 24
+6000 note_off bass 40 0 0
+6000 note_off lead 60 0 0
+6000 note_off chords 64 0 0
+6000 note_off fx 72 0 0
+24000 drum drums 0 0 0
+24000 note_on bass 40 100 7
+24000 note_on lead 60 100 12
+24000 note_on chords 64 100 19
+24000 note_on fx 72 80 24
+
+# events=25

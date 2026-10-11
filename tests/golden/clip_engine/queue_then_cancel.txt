@@ -1,0 +1,18 @@
+# case queue_then_cancel
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+clip 13 melodic 4
+note 13 0 62 100 1
+play
+run 6000
+launch 13 0
+launch 13 0
+runto 30000
+
+# events:
+0 playing bass 0 0 0
+6000 clip_queued lead 0 0 13
+6000 clip_cancelled lead 0 0 13
+
+# events=3
