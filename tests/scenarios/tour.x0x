@@ -23,16 +23,7 @@ tap OCT+
 turn ALGO 1
 tap ARP
 tap OCT+
-turn ALGO 1
-tapkey w0
-tapkey w2
-tapkey w4
-tapkey w6
-tapkey w8
-tapkey w10
-tapkey w12
-tapkey w14
-turn ALGO -4
+turn ALGO -3
 tap PLAY
 wait 600
 shot t01_909.png
@@ -63,13 +54,6 @@ shot t06_tb3po.png
 tap OCT+
 shot t07_new_line_msg.png
 wait 1500
-turn ALGO 2
-wait 300
-shot t08_break.png
-tap EDIT
-tap EDIT
-tap EDIT
-shot t09_break_loops.png
 tap HOME
 wait 200
 shot t10_home.png
@@ -94,7 +78,7 @@ shot t16_list_edit.png
 tap HOME
 tap GLO
 shot t17_global.png
-turn SELECT 15
+turn SELECT 14
 shot t18_global_reset.png
 tap SEL
 shot t19_ask.png

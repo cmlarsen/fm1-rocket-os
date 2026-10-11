@@ -52,27 +52,6 @@ tap EDIT
 turn K1 20
 turn K2 30
 shot 05_303b_sound.png
-# BREAK: all 16 steps on
-turn ALGO 1
-expect part 4
-tapkey w0
-tapkey w1
-tapkey w2
-tapkey w3
-tapkey w4
-tapkey w5
-tapkey w6
-tapkey w7
-tapkey w8
-tapkey w9
-tapkey w10
-tapkey w11
-tapkey w12
-tapkey w13
-tapkey w14
-tapkey w15
-expect brk15 1
-shot 06_break.png
 # tempo 128, play and record 4 bars
 press HOME
 turn SELECT 3
@@ -82,7 +61,7 @@ wav groove.wav
 tap PLAY
 expect playing 1
 wait 7500
-shot 07_playing_break.png
+shot 07_playing.png
 tap HOME
 wait 200
 shot 08_home.png

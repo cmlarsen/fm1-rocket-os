@@ -13,7 +13,7 @@ turn SELECT 1
 turn K4 2
 expect songbar1.0 1
 tap SEL
-turn SELECT 7
+turn SELECT 6
 turn ALGO 1
 tap HOME
 expect songon 1
