@@ -2,9 +2,9 @@
 /* T6c host test of core/model/song_store.c against a simulated NOR flash.
  *
  * The simulator models erase -> 0xFF and program that can only clear bits, does
- * not wrap a 256-byte page, and can be told to stop after N programmed bytes: a
- * power cut at any byte of a save. Every write is range-checked against the
- * store's region. Nothing here touches hardware.
+ * not wrap a 256-byte page, and can be cut at the Nth programmed byte (a power
+ * cut) or the Nth flash operation (a torn erase or program). Every write is
+ * range-checked against the store's region. Nothing here touches hardware.
  *
  * Build: cc -std=c99 -I. tests/host/song_store_test.c core/model/song_store.c */
 #include <stdio.h>
@@ -17,8 +17,10 @@
 #define NOR_SIZE 0x100000u
 static uint8_t nor[NOR_SIZE];
 
-static long prog_budget = -1;              /* -1 = unlimited; else bytes left before the cut */
-static uint32_t wrote_lo, wrote_hi;        /* programming/erase range seen since the last reset */
+static long prog_budget = -1;              /* byte cut: -1 = unlimited, else bytes left */
+static long op_at = -1, op_count;          /* op cut: the operation index that dies */
+static int op_dead;
+static uint32_t wrote_lo, wrote_hi;
 
 static int sim_read(void *ctx, uint32_t off, void *dst, uint32_t n)
 {
@@ -34,6 +36,14 @@ static int sim_erase(void *ctx, uint32_t off)
     (void)ctx;
     if (off > NOR_SIZE || 4096u > NOR_SIZE - off)
         return -1;
+    if (op_dead)
+        return -1;
+    if (op_at >= 0 && op_count == op_at) {         /* the power died mid-erase */
+        memset(nor + off, 0xFF, 1500);
+        op_dead = 1;
+        return -1;
+    }
+    op_count++;
     memset(nor + off, 0xFF, 4096);
     if (off < wrote_lo)
         wrote_lo = off;
@@ -53,6 +63,15 @@ static int sim_program(void *ctx, uint32_t off, const void *src, uint32_t n)
     }
     if (off > NOR_SIZE || n > NOR_SIZE - off)
         return -1;
+    if (op_dead)
+        return -1;
+    if (op_at >= 0 && op_count == op_at) {         /* the power died mid-program */
+        for (i = 0; i < n / 2u; i++)
+            nor[off + i] &= s[i];
+        op_dead = 1;
+        return -1;
+    }
+    op_count++;
     if (prog_budget >= 0) {
         if (prog_budget == 0)
             return -9;
@@ -60,7 +79,7 @@ static int sim_program(void *ctx, uint32_t off, const void *src, uint32_t n)
             for (i = 0; i < (uint32_t)prog_budget; i++)
                 nor[off + i] &= s[i];
             prog_budget = 0;
-            return -9;                     /* the power went off inside the page */
+            return -9;                         /* the power went off inside the page */
         }
         prog_budget -= (long)n;
     }
@@ -97,7 +116,7 @@ static uint32_t take_ext_off(int j)
                               (uint32_t)j * SONG_STORE_TAKE_SECTORS) * SONG_STORE_SECTOR;
 }
 
-static int newest_song_ext(int slot)
+static int newest_song_ext(int slot, int want_deleted_ok)
 {
     int i, best = -1;
     uint32_t best_seq = 0;
@@ -105,6 +124,8 @@ static int newest_song_ext(int slot)
         hdrv_t h;
         memcpy(&h, nor + song_ext_off(i), sizeof h);
         if (h.magic != 0x31545353u || h.kind != 1u || h.slot != (uint8_t)slot)
+            continue;
+        if (!want_deleted_ok && (h.flags & 1u))
             continue;
         if (best < 0 || h.seq > best_seq) {
             best = i;
@@ -140,7 +161,6 @@ static void make_starter(song_t *s)
     s->bpm_x10 = 1240u;
     s->swing = 8u;
     s->quant_default = Q_BAR;
-    /* 4 drum, 3 bass, 3 lead, 2 chords, 1 fx */
     static const int drums[4] = {0, 1, 2, 3};
     static const int bass[3] = {7, 8, 9};
     static const int lead[3] = {12, 13, 14};
@@ -206,13 +226,12 @@ static void make_starter(song_t *s)
             c->d.notes[k].len = 1;
         }
     }
-    /* 2 motion lanes used (on lead A and chords A) */
-    s->clip[lead[0]].motion[0].param = 0x1234u;
+    s->clip[lead[0]].motion[0].param = 0x0123u;    /* a T5i-range param (< 0x0800) */
     for (j = 0; j < (int)CLIP_MAX_STEPS; j++)
-        s->clip[lead[0]].motion[0].v[j] = (uint8_t)(j * 3);
+        s->clip[lead[0]].motion[0].v[j] = (uint8_t)(j * 2);      /* 0..126 */
     s->clip[chords[0]].motion[1].param = 0x00ABu;
     for (j = 0; j < (int)CLIP_MAX_STEPS; j += 2)
-        s->clip[chords[0]].motion[1].v[j] = (uint8_t)(255 - j);
+        s->clip[chords[0]].motion[1].v[j] = (uint8_t)(127 - (j / 2));
 }
 
 /* every clip full of random, high-entropy but still valid data */
@@ -241,15 +260,15 @@ static void make_worst(song_t *s)
             for (k = 0; k < (int)CLIP_MAX_NOTES; k++) {
                 cl->d.notes[k].step = (uint8_t)(rnd() % CLIP_MAX_STEPS);
                 cl->d.notes[k].note = (uint8_t)(rnd() % 128u);
-                cl->d.notes[k].vel = (uint8_t)(rnd() % 128u);
+                cl->d.notes[k].vel = (uint8_t)(1u + rnd() % 127u);
                 cl->d.notes[k].len = (uint8_t)(1u + rnd() % CLIP_MAX_STEPS);
             }
         }
         for (j = 0; j < (int)CLIP_MOTION_LANES; j++) {
             int n;
-            cl->motion[j].param = (uint16_t)rnd();
+            cl->motion[j].param = (uint16_t)(rnd() % 0x800u);       /* valid T5i range */
             for (n = 0; n < (int)CLIP_MAX_STEPS; n++)
-                cl->motion[j].v[n] = (uint8_t)rnd();
+                cl->motion[j].v[n] = (uint8_t)((rnd() & 1u) ? MOTION_NONE : (rnd() & 0x7Fu));
         }
     }
 }
@@ -259,8 +278,6 @@ static int songs_equal(const song_t *a, const song_t *b)
     return memcmp(a, b, sizeof *a) == 0;
 }
 
-/* ---- tests -------------------------------------------------------------- */
-
 static void roundtrip(const char *what, song_t *s, int slot)
 {
     song_t got;
@@ -269,6 +286,8 @@ static void roundtrip(const char *what, song_t *s, int slot)
     rc |= song_store_load(&store, slot, &got);
     check(what, rc == 0 && songs_equal(s, &got));
 }
+
+/* ---- power cut at every byte of a save --------------------------------- */
 
 static void test_power_cut(const char *name, song_t *old_s, song_t *new_s, int stride)
 {
@@ -308,18 +327,92 @@ static void test_power_cut(const char *name, song_t *old_s, song_t *new_s, int s
         if (n >= record_bytes)
             break;
         if (n + stride > record_bytes)
-            n = record_bytes - stride;   /* next step lands exactly on record_bytes */
+            n = record_bytes - stride;
     }
-    printf("  %-10s power cut: %d cuts over 0..%d bytes of a %d-byte record\n", name, cuts, record_bytes, record_bytes);
+    printf("  %-10s byte cut: %d cuts over 0..%d bytes of a %d-byte record\n", name, cuts, record_bytes, record_bytes);
     {
         char l[96];
-        snprintf(l, sizeof l, "%s power cut: old or new, never garbage", name);
+        snprintf(l, sizeof l, "%s byte cut: old or new, never garbage", name);
         check(l, ok);
-        snprintf(l, sizeof l, "%s power cut: saw the old copy", name);
+        snprintf(l, sizeof l, "%s byte cut: saw the old copy", name);
         check(l, saw_old);
-        snprintf(l, sizeof l, "%s power cut: saw the new copy", name);
+        snprintf(l, sizeof l, "%s byte cut: saw the new copy", name);
         check(l, saw_new);
     }
+}
+
+/* ---- power cut at every flash operation across a burst of saves --------- */
+
+static void mkfill(song_t *s, char c)
+{
+    song_store_empty(s);
+    memset(s->name, c, 4);
+}
+
+static void test_power_cut_ops(void)
+{
+    static uint8_t snap[0x100000];
+    song_t a1, a2, b1, b2, o;
+    long total, c;
+    int bad_cuts = 0, s;
+    mkfill(&a1, 'A');
+    a1.name[1] = '1';
+    mkfill(&a2, 'A');
+    a2.name[1] = '2';
+    mkfill(&b1, 'B');
+    b1.name[1] = '1';
+    mkfill(&b2, 'B');
+    b2.name[1] = '2';
+
+    memset(nor, 0xFF, sizeof nor);
+    song_store_init(&store, &FLASH);
+    for (s = 0; s < (int)SONG_STORE_SLOTS; s++) {      /* fill every slot: only the spare is free */
+        song_t x;
+        mkfill(&x, 'F');
+        x.name[3] = (char)('0' + s);
+        song_store_save(&store, s, &x);
+    }
+    song_store_save(&store, 0, &a1);
+    song_store_save(&store, 1, &b1);
+    memcpy(snap, nor, sizeof nor);
+
+    op_at = -1;
+    op_count = 0;
+    op_dead = 0;
+    song_store_init(&store, &FLASH);
+    song_store_save(&store, 0, &a2);
+    song_store_save(&store, 0, &a1);
+    song_store_save(&store, 1, &b2);
+    total = op_count;
+
+    for (c = 0; c < total; c++) {
+        memcpy(nor, snap, sizeof nor);
+        op_count = 0;
+        op_dead = 0;
+        op_at = c;
+        song_store_init(&store, &FLASH);
+        song_store_save(&store, 0, &a2);
+        song_store_save(&store, 0, &a1);
+        song_store_save(&store, 1, &b2);
+        op_at = -1;
+        op_dead = 0;
+        song_store_init(&store, &FLASH);
+        if (song_store_load(&store, 0, &o) || (memcmp(o.name, "A1", 2) && memcmp(o.name, "A2", 2)))
+            bad_cuts++;
+        if (song_store_load(&store, 1, &o) || (memcmp(o.name, "B1", 2) && memcmp(o.name, "B2", 2)))
+            bad_cuts++;
+        for (s = 2; s < (int)SONG_STORE_SLOTS; s++)
+            if (song_store_load(&store, s, &o) || memcmp(o.name, "F", 1))
+                bad_cuts++;
+    }
+    printf("  op cut: %ld flash operations across three saves\n", total);
+    {
+        char l[96];
+        snprintf(l, sizeof l, "op cut at every flash op: all slots old or new (%ld cuts)", total);
+        check(l, bad_cuts == 0);
+    }
+    op_at = -1;
+    op_dead = 0;
 }
 
 int main(void)
@@ -339,6 +432,9 @@ int main(void)
     make_worst(&worst);
     for (i = 0; i < (int)sizeof raw; i++)
         ((uint8_t *)&raw)[i] = (uint8_t)rnd();
+    check("empty song validates", song_validate(&empty) == 0);
+    check("starter song validates", song_validate(&starter) == 0);
+    check("worst-case song validates", song_validate(&worst) == 0);
 
     printf("  compressed: empty %d B, starter %d B, worst(valid) %d B, worst(random) %d B\n",
            song_store_measure(&empty), song_store_measure(&starter),
@@ -354,7 +450,6 @@ int main(void)
     roundtrip("round trip: starter", &starter, 1);
     roundtrip("round trip: worst", &worst, 2);
 
-    /* list */
     song_store_list(&store, 1, &info);
     check("list: used", info.used == 1u);
     check("list: name", memcmp(info.name, "STARTER", 7) == 0);
@@ -367,34 +462,43 @@ int main(void)
         int ext;
         song_store_save(&store, 3, &empty);
         song_store_save(&store, 3, &starter);
-        ext = newest_song_ext(3);
+        ext = newest_song_ext(3, 1);
         check("newest copy wins", ext >= 0 && song_store_load(&store, 3, &got) == 0 && songs_equal(&got, &starter));
         nor[song_ext_off(ext) + 40 + 100] ^= 0x40;       /* bit rot in the newest payload */
         check("corrupt newest -> the older copy loads",
               song_store_load(&store, 3, &got) == 0 && songs_equal(&got, &empty));
-    }
-
-    /* a completely unreadable slot falls back to an empty song, never garbage */
-    {
-        int j;
-        for (j = 0; j < (int)SONG_STORE_SONG_EXTENTS; j++)
-            nor[song_ext_off(j)] = 0x00;                  /* break every magic */
+        for (i = 0; i < (int)SONG_STORE_SONG_EXTENTS; i++)
+            nor[song_ext_off(i)] = 0x00;                  /* break every magic */
         memset(&got, 0xA5, sizeof got);
         check("all copies broken -> empty song, error",
               song_store_load(&store, 3, &got) == -1 && songs_equal(&got, &empty));
     }
 
-    /* delete / undelete keep the data */
+    /* delete survives a reboot, keeps the data, and undelete brings it back */
     {
         song_store_save(&store, 0, &starter);
         check("delete", song_store_delete(&store, 0) == 0 && song_store_is_deleted(&store, 0) == 1);
+        song_store_init(&store, &FLASH);                  /* reboot */
+        check("delete survives reboot", song_store_is_deleted(&store, 0) == 1);
         song_store_list(&store, 0, &info);
-        check("list: deleted, still used", info.used == 1u && info.deleted == 1u);
+        check("list reports a deleted slot as free",
+              info.used == 0u && info.deleted == 1u && info.name[0] == 0 && info.has_take == 0u);
+        check("load of a deleted slot is refused (free)", song_store_load(&store, 0, &got) == -1);
         check("undelete", song_store_undelete(&store, 0) == 0 && song_store_is_deleted(&store, 0) == 0);
-        check("data survived delete", song_store_load(&store, 0, &got) == 0 && songs_equal(&got, &starter));
+        song_store_init(&store, &FLASH);                  /* reboot */
+        song_store_list(&store, 0, &info);
+        check("undelete survives reboot", song_store_is_deleted(&store, 0) == 0 && info.used == 1u);
+        check("data survived delete+undelete",
+              song_store_load(&store, 0, &got) == 0 && songs_equal(&got, &starter));
+        song_store_delete(&store, 0);
+        song_store_save(&store, 0, &empty);               /* a save into a deleted slot supersedes it */
+        song_store_init(&store, &FLASH);
+        check("save into a deleted slot supersedes it",
+              song_store_is_deleted(&store, 0) == 0 && song_store_load(&store, 0, &got) == 0 &&
+              songs_equal(&got, &empty));
     }
 
-    /* takes: save, replace, the previous stays loadable, swap (undo) */
+    /* takes: save, replace, the previous stays loadable, restore survives reboot */
     {
         take_hdr_t h1, h2, hg;
         take_event_t e1[3], e2[5], eg[TAKE_MAX_EVENTS];
@@ -422,12 +526,11 @@ int main(void)
               hg.nevents == 3 && eg[2].cmd == 0x102u);
         check("take replace 2", song_store_take_save(&store, 1, &h2, e2) == 0);
         check("take load 2", song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 && hg.nevents == 5);
-        check("take swap (undo)", song_store_take_swap(&store, 1) == 1);
-        check("take load 1 after undo", song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 &&
-              hg.nevents == 3 && eg[2].cmd == 0x102u);
-        check("take swap (redo)", song_store_take_swap(&store, 1) == 1);
-        check("take load 2 after redo", song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 &&
-              hg.nevents == 5);
+        check("take restore (undo)", song_store_take_restore(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0);
+        song_store_init(&store, &FLASH);                  /* reboot: the restored take is newest */
+        check("restored take survives reboot",
+              song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 && hg.nevents == 3 &&
+              eg[2].cmd == 0x102u);
         check("take load with too small a buffer is refused",
               song_store_take_load(&store, 1, &hg, eg, 2) == -1);
         {
@@ -448,7 +551,7 @@ int main(void)
     check("every erase/program inside 0xA0000..0xDC000",
           wrote_lo >= SONG_STORE_BASE && wrote_hi <= SONG_STORE_BASE + SONG_STORE_SECTORS * SONG_STORE_SECTOR);
 
-    /* validation rejects malformed fields, and save refuses them */
+    /* validator (the review's items 5a-5e) */
     {
         song_t v = starter;
         check("valid starter accepted", song_validate(&v) == 0);
@@ -469,12 +572,82 @@ int main(void)
         v = starter;
         v.clip[7].len = 200;
         check("save refuses a malformed song", song_store_save(&store, 4, &v) == -2);
+
+        v = empty;
+        memset(v.name, 'A', SONG_NAME_LEN);
+        check("unterminated name rejected", song_validate(&v) != 0);
+        v = empty;
+        v.bpm_x10 = 65535;
+        check("bpm 6553.5 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.bpm_x10 = 199;
+        check("bpm 19.9 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.bpm_x10 = 200;
+        check("bpm 20.0 accepted", song_validate(&v) == 0);
+        v = empty;
+        v.bpm_x10 = 3000;
+        check("bpm 300.0 accepted", song_validate(&v) == 0);
+        v = empty;
+        v.bpm_x10 = 3001;
+        check("bpm 300.1 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[7].used = 1;
+        v.clip[7].len = 4;
+        v.clip[7].nnotes = 1;
+        v.clip[7].d.notes[0].step = 63;
+        v.clip[7].d.notes[0].len = 4;
+        v.clip[7].d.notes[0].note = 60;
+        v.clip[7].d.notes[0].vel = 100;
+        check("note step >= clip.len rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[7].used = 1;
+        v.clip[7].len = 4;
+        v.clip[7].nnotes = 1;
+        v.clip[7].d.notes[0].step = 0;
+        v.clip[7].d.notes[0].len = 0;
+        v.clip[7].d.notes[0].note = 60;
+        v.clip[7].d.notes[0].vel = 100;
+        check("note len 0 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[7].used = 1;
+        v.clip[7].len = 4;
+        v.clip[7].nnotes = 1;
+        v.clip[7].d.notes[0].step = 0;
+        v.clip[7].d.notes[0].len = 4;
+        v.clip[7].d.notes[0].note = 60;
+        v.clip[7].d.notes[0].vel = 0;
+        check("note vel 0 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[0].motion[0].param = 0x0123u;
+        v.clip[0].motion[0].v[0] = 200;
+        check("motion value 200 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[0].motion[0].param = 0x1234u;
+        check("motion param 0x1234 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[0].motion[0].param = 0x0800u;
+        check("motion param 0x0800 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.clip[0].motion[0].param = 0x07FFu;
+        check("motion param 0x07FF accepted", song_validate(&v) == 0);
+        v = empty;
+        v.clip[0].motion[0].param = PARAM_NONE;
+        v.clip[0].motion[0].v[5] = MOTION_NONE;
+        check("MOTION_NONE and PARAM_NONE accepted", song_validate(&v) == 0);
+        v = empty;
+        v.live_channel = 17;
+        check("live_channel 17 rejected", song_validate(&v) != 0);
+        v = empty;
+        v.live_channel = 16;
+        check("live_channel 16 accepted", song_validate(&v) == 0);
     }
 
     /* power cut at every byte of a save, for a small record and the large
      * worst-case record */
     test_power_cut("a:small", &empty, &starter, 1);
     test_power_cut("b:large", &starter, &worst, 1);
+    test_power_cut_ops();
 
     printf("%s\n", bad ? "SONG STORE TEST FAILED" : "song store test passed");
     return bad ? 1 : 0;
