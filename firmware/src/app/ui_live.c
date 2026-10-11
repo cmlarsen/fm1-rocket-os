@@ -142,8 +142,8 @@ static void live_play_tick(uint32_t btn)
 
 /* ---- the FX layer's keys: the six effects and the role mutes ---- */
 
-static const char *const LV_FX_L1[6] = {"REPEAT", "REPEAT", "TAPE", "FILTER", "ECHO", "FREEZE"};
-static const char *const LV_FX_L2[6] = {"1/8", "1/16", "STOP", "DIVE", "THROW", ""};
+static const char *const LV_FX_NAME[6] = {"REPEAT 1/8", "REPEAT 1/16", "TAPE STOP",
+                                          "FILTER DIVE", "ECHO THROW", "FREEZE"};
 
 static void live_fx_key(int k, int down)
 {
@@ -265,8 +265,7 @@ static void live_fx_button(void)
             fx_held = 0;                           /* the reset press does not open the layer */
             say("FX RESET", 0);
         } else {
-            fx_press_t = now;
-            say("FX", 0);
+            fx_press_t = now;                      /* the header chip shows the layer; no toast (T10i review) */
         }
     } else if (!down && fx_held) {
         uint32_t dt = now - fx_press_t;
@@ -281,8 +280,7 @@ static void live_fx_button(void)
         if (dt < LIVE_FX_TAP_MS) {                 /* a tap */
             if (now - fx_last_tap < LIVE_FX_DBL_MS) {
                 fx_layer_latch = (uint8_t)!fx_layer_latch;   /* a double tap latches the layer */
-                fx_last_tap = 0;
-                say(fx_layer_latch ? "FX ON" : "FX OFF", 0);
+                fx_last_tap = 0;                   /* the header chip shows it; no toast */
             } else {
                 fx_last_tap = now;
             }
@@ -526,26 +524,51 @@ static void live_draw_play(int band)
     }
 }
 
-/* ---- the FX layer: the six punch cells (LIVE 6) ---- */
+/* ---- the FX layer: the K1-K4 strip above, the six punch cells below (LIVE 6) ---- */
+
+/* The design puts the performance knobs above the grid; the app's own strip is the bottom band, so
+ * the FX view draws its own compact K1-K4 row at the top of the main area (the generic cards are
+ * suppressed for this layer, see draw_knobs). */
+static void live_fx_knobs(void)
+{
+    int i, pgi = cur_page();
+    for (i = 0; i < 4; i++) {
+        pref_t r = pg.r[pgi][i];
+        const x0x_param_t *d = pref_desc(r);
+        char num[16], unit[8];
+        int cx = 3 + i * 59, val;
+        if (!d)
+            continue;
+        box(cx, 3, 57, 44, TOK_SURF);
+        text_c(cx + 28, vc(&AF_S, 6, 10), &AF_S, caps_of(pref_name(r)), TOK_MID);
+        val = pref_get(r);
+        pref_value_of(r, val, num, unit);
+        cell_value(cx + 28, vc(&AF_M, 19, 17), num, unit, C_HI);
+        box(cx + 4, 42, 49, 3, C_LINE);
+        if (d->max && val > 0)
+            box(cx + 4, 42, val * 49 / d->max, 3, TOK_THEME);
+    }
+}
 
 static void live_draw_fx(int band)
 {
     int i;
-    for (i = 0; i < 3; i++) {
-        int idx = band * 3 + i;
-        int cx = 3 + i * 78, cy = 3, w = 74, h = BAND_H - 6;
-        int lat = engine_perform_latched(idx);
-        int hold = fx_key_dn[idx];
+    if (band == 0) {                        /* the knob strip, above the grid, as the design */
+        live_fx_knobs();
+        return;
+    }
+    for (i = 0; i < 6; i++) {                /* three columns, two rows */
+        int lat = engine_perform_latched(i);
+        int hold = fx_key_dn[i];
         int act = lat || hold;
-        uint16_t bg = !act ? TOK_SURF : lat ? dim(TOK_ACCENT, 5) : dim(TOK_THEME, 5);
-        uint16_t fg = !act ? TOK_MID : lat ? TOK_ACCENT : TOK_THEME;
+        int cx = 3 + (i % 3) * 79, cy = 1 + (i / 3) * 34, w = 76, h = 32;
+        uint16_t bg = !act ? TOK_SURF : lat ? TOK_THEME : TOK_ACCENT;   /* solid fills; ink text */
+        uint16_t fg = act ? C_BLACK : TOK_TEXT;
         box(cx, cy, w, h, bg);
-        frame(cx, cy, w, h, act ? fg : TOK_LINE);
-        text_c(cx + w / 2, vc(&AF_S, cy + 6, 12), &AF_S, LV_FX_L1[idx], fg);
-        if (LV_FX_L2[idx][0])
-            text_c(cx + w / 2, vc(&AF_M, cy + 20, 18), &AF_M, LV_FX_L2[idx], fg);
-        text_c(cx + w / 2, vc(&AF_S, cy + h - 13, 10), &AF_S,
-               lat ? "LATCH" : hold ? "HOLD" : "OFF", act ? fg : TOK_DIM);
+        frame(cx, cy, w, h, act ? bg : TOK_LINE);
+        text_c(cx + w / 2, vc(&AF_S, cy + 4, 12), &AF_S, LV_FX_NAME[i], fg);
+        text_c(cx + w / 2, vc(&AF_S, cy + 18, 11), &AF_S,
+               lat ? "LATCH" : hold ? "HOLD" : "OFF", act ? C_BLACK : TOK_MID);
     }
 }
 

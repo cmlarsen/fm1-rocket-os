@@ -3914,6 +3914,7 @@ static uint32_t knobs_sig(void)
     MIXIN(seq.ppat[ui.part]);
     MIXIN(ui.song_sel);
     MIXIN(studio_cursor());
+    MIXIN(live_fx_layer());           /* T10i: the FX view draws its own top knob row */
     {
         const char *fa, *fb, *fc;
         MIXIN(footer_text(&fa, &fb, &fc));
@@ -3988,7 +3989,7 @@ static void draw_knobs(void)
         return;
     last_sig = sig;
     cv_begin(240, KNOB_H, C_BLACK);
-    {   /* the rule; at its right end, where you are: the tag, then the page dots */
+    if (!live_fx_layer()) {   /* T10i: the FX view's own K1-K4 row is in the main area; no rule/tag here */
         char t[28];
         int dots = pg.n > 1 && ui.view != V_GLO;
         int32_t xd = 237 - (dots ? pg.n * 5 : 0), xt;
@@ -4022,6 +4023,10 @@ static void draw_knobs(void)
             text_c(cx, vc(&AF_S, 13, 10), &AF_S, SN[i], C_GRAY);
             text_c(cx, vc(&AF_M, 30, 34), &AF_M, v, C_WHITE);
         }
+        cv_commit(3, 0, KNOB_Y);
+        return;
+    }
+    if (live_fx_layer()) {                     /* T10i: the FX view draws its own row above the grid */
         cv_commit(3, 0, KNOB_Y);
         return;
     }
