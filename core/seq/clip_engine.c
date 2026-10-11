@@ -283,6 +283,8 @@ static uint32_t action_lead(const clip_engine_t *e, uint8_t role, uint8_t quant)
 
 /* ---- transport ----------------------------------------------------------- */
 
+static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm);
+
 void clip_engine_init(clip_engine_t *e, song_t *song)
 {
     uint32_t i;
@@ -297,14 +299,15 @@ void clip_engine_init(clip_engine_t *e, song_t *song)
     }
     e->bpm_x10 = (song && song->bpm_x10) ? song->bpm_x10 : 1200u;
     e->bpm_src = e->bpm_x10;
+    e->song_bpm = e->bpm_x10;
     e->bpm_x10 = clamp_bpm(e->bpm_x10);
     e->step_L = CLIP_STEP_NUM / e->bpm_x10;
     e->step_f = CLIP_STEP_NUM % e->bpm_x10;
 }
 
 void clip_engine_start(clip_engine_t *e) { e->playing = 1; e->resume = 0; }
-void clip_engine_continue(clip_engine_t *e) { e->playing = 1; e->resume = 1; e->restart = 0; }
-void clip_engine_restart(clip_engine_t *e) { e->playing = 1; e->resume = 0; e->restart = 1; }
+void clip_engine_restart(clip_engine_t *e) { push_cmd(e, CLIP_CMD_RESTART, 0, 0, 0); }
+void clip_engine_continue(clip_engine_t *e) { push_cmd(e, CLIP_CMD_CONTINUE, 0, 0, 0); }
 void clip_engine_transport_stop(clip_engine_t *e) { e->playing = 0; }
 
 /* ---- UI entry points ----------------------------------------------------- */
@@ -463,6 +466,19 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             set_bpm(e, c.bpm_x10);
             continue;
         }
+        if (c.cmd == CLIP_CMD_RESTART) {       /* T11i: MIDI Start, applied here so only the ISR
+                                                * changes the transport */
+            e->playing = 1;
+            e->resume = 0;
+            e->restart = 1;
+            continue;
+        }
+        if (c.cmd == CLIP_CMD_CONTINUE) {      /* T11i: MIDI Continue */
+            e->playing = 1;
+            e->resume = 1;
+            e->restart = 0;
+            continue;
+        }
         if (c.cmd == CLIP_CMD_MUTE) {                          /* T10i */
             role = c.clip;
             if (role >= NROLES)
@@ -561,6 +577,11 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
 
     /* the song is the tempo source of truth: the UI writes song->bpm_x10 directly, or a
      * ring tempo command writes it (in consume_cmds) */
+    if (e->song->bpm_x10 && e->song->bpm_x10 != e->song_bpm) {
+        e->song_bpm = e->song->bpm_x10;     /* T11i: a loaded or edited song's tempo wins over a
+                                             * clock that is no longer present */
+        e->bpm_ext = 0;
+    }
     if (e->song->bpm_x10 && e->song->bpm_x10 != e->bpm_src && !e->bpm_ext)
         set_bpm(e, e->song->bpm_x10);
 
@@ -569,6 +590,8 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
     if (e->playing && (e->restart || !e->was_playing)) {
         uint8_t restart = e->restart;
         e->restart = 0;
+        for (r = 0; r < NROLES; r++)               /* T11i: a restart/continue leaves nothing sounding */
+            release_role(e, r, 0, sink);
         if (e->resume) {
             /* T11i: Continue resumes the stop point (time paused during the stop) */
             e->resume = 0;
@@ -583,19 +606,24 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
             ev(sink, 0, CLIPEV_PLAYING, 1, 0, 0, 0);
             base = e->elapsed;
         } else {
-            if (restart)                              /* T11i: MIDI Start relaunches what was playing */
-                for (r = 0; r < NROLES; r++)
-                    if (e->cur[r] == CLIP_NONE)
-                        e->cur[r] = e->s_cur[r];
-            e->global_step = 0;
-            e->step_sample = 0;
-            e->step_frac = 0;
-            e->elapsed = 0;
             for (r = 0; r < NROLES; r++) {
+                if (restart && !e->que_set[r]) {      /* T11i: MIDI Start relaunches what was playing
+                                                       * (or what a stop saved) from step 0, through the
+                                                       * launch path so step 0 fires, not step 1 */
+                    uint8_t clip = e->cur[r] != CLIP_NONE ? e->cur[r] : e->s_cur[r];
+                    if (clip != CLIP_NONE) {
+                        e->que[r] = clip;
+                        e->que_set[r] = 1;
+                    }
+                }
                 e->pos[r] = 0;
                 if (e->que_set[r])
                     e->que_at[r] = 0;
             }
+            e->global_step = 0;
+            e->step_sample = 0;
+            e->step_frac = 0;
+            e->elapsed = 0;
             ev(sink, 0, CLIPEV_PLAYING, 1, 0, 0, 0);
             do_step(e, 0, 0, sink);               /* step 0 fires at sample 0 */
             base = 0;

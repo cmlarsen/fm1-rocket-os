@@ -44,7 +44,7 @@ typedef struct {
 /* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, or a
  * tempo. */
 enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE,
-       CLIP_CMD_MUTE_CLEAR, CLIP_CMD_SET_BPM_SOFT };
+       CLIP_CMD_MUTE_CLEAR, CLIP_CMD_SET_BPM_SOFT, CLIP_CMD_RESTART, CLIP_CMD_CONTINUE };
 typedef struct {
     uint8_t  cmd;
     uint8_t  clip;     /* launch: the clip; stop / mute (T10i): the role */
@@ -64,6 +64,7 @@ typedef struct {
     uint16_t bpm_x10;        /* current tempo (clamped) */
     uint16_t bpm_src;        /* last tempo requested, to detect a real change */
     uint16_t bpm_ext;        /* T11i: a live tempo (the external clock) overriding the song; 0 = none */
+    uint16_t song_bpm;       /* T11i: the song's own bpm_x10 as last seen (a load/edit clears bpm_ext) */
     uint32_t step_L;         /* samples per 16th, integer part */
     uint32_t step_f;         /* remainder, in 1/bpm_x10 sample units */
     uint32_t step_sample;    /* absolute sample the current step starts on (unswung) */
@@ -99,7 +100,8 @@ void clip_engine_init(clip_engine_t *e, song_t *song);
 /* Transport. Tempo and swing come from the song (or a tempo command).
  * start() plays (resetting to bar 1, step 0 when it was stopped); restart() (T11i) forces the reset
  * and relaunches what was playing (MIDI Start); continue() (T11i) resumes from where
- * transport_stop() left it. */
+ * transport_stop() left it. restart() and continue() reach the engine through its command ring, so
+ * `playing` changes only in the ISR. */
 void clip_engine_start(clip_engine_t *e);
 void clip_engine_restart(clip_engine_t *e);
 void clip_engine_continue(clip_engine_t *e);
