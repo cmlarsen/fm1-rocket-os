@@ -11,20 +11,20 @@ void undo_stack_init(undo_stack_t *u)
     u->base_ser = 0u;
 }
 
-/* store one entry and clear the redo tail; drop the oldest when full */
+/* Store one entry; only a deferred take insertion keeps the redo tail. Drop the oldest when full. */
 static void undo_push_at(undo_stack_t *u, uint32_t pos, uint8_t type, uint8_t index, uint8_t aux,
-                         const clip_t *clip, uint32_t seq)
+                         const clip_t *clip, uint32_t seq, int keep_tail)
 {
     undo_entry_t *e;
     undo_entry_t tmp;
     uint32_t i;
-    int behind = pos < u->cur;            /* T9i r4: an entry inserted behind `cur` keeps the tail */
+    int behind = keep_tail && pos <= u->cur;
     /* T6c fix: a new edit at the top discards the redo tail. Without it, an entry above `cur` (a
      * state undone before this edit) would be restored by a later undo, replaying a branch that no
      * longer exists (edit v0->v1, undo, edit v0->v2, undo, undo restored v1).
-     * T9i r4 NIT: an entry inserted *behind* the current position (the deferred take flush) must
-     * keep the tail, so an edit made after the take and undone stays redoable. */
-    if (pos >= u->cur)
+     * T9i r5: the deferred take flush keeps the tail even at pos == cur, so an edit made after the
+     * take and undone stays redoable. Ordinary new edits still discard their redo branch. */
+    if (!keep_tail)
         u->n = u->cur;
     if (pos > u->n)
         pos = u->n;
@@ -59,7 +59,7 @@ static void undo_push_at(undo_stack_t *u, uint32_t pos, uint8_t type, uint8_t in
 
 static void undo_push(undo_stack_t *u, uint8_t type, uint8_t index, uint8_t aux, const clip_t *clip, uint32_t seq)
 {
-    undo_push_at(u, u->cur, type, index, aux, clip, seq);
+    undo_push_at(u, u->cur, type, index, aux, clip, seq, 0);
 }
 
 void undo_stack_push_clear(undo_stack_t *u, uint8_t clip, const clip_t *old)
@@ -94,7 +94,7 @@ void undo_stack_push_take_at(undo_stack_t *u, const song_store_t *store, uint8_t
     if (store && slot < (int)SONG_STORE_SLOTS && store->slot[slot].prev_take_ext >= 0)
         seq = store->slot[slot].prev_take_seq;
     pos = ser > u->base_ser ? ser - u->base_ser : 0u;
-    undo_push_at(u, pos, UNDO_REPLACE_TAKE, slot, 0u, 0, seq);
+    undo_push_at(u, pos, UNDO_REPLACE_TAKE, slot, 0u, 0, seq, 1);
 }
 
 void undo_stack_push_take(undo_stack_t *u, const song_store_t *store, uint8_t slot)

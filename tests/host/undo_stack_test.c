@@ -267,6 +267,20 @@ int main(void)
         check("flush: the tail redoes", undo_stack_redo(&u, &song, 0, 0) == UNDO_DONE);
     }
 
+    /* T9i r5: take ends, E1 is made and undone, then the flush inserts at pos == cur. */
+    {
+        clip_t e0, e1; uint32_t ser;
+        undo_stack_init(&u);
+        take(1, 111); take(1, 222);
+        fill_clip(&e0, 60); fill_clip(&e1, 61);
+        undo_stack_push_clear(&u, 3, &e0);
+        ser = undo_stack_serial(&u);
+        undo_stack_push_clear(&u, 3, &e1);
+        check("flush at cursor: undo E1", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE);
+        undo_stack_push_take_at(&u, &store, 1, ser);
+        check("flush at cursor: redo tail survives", undo_stack_redo_type(&u) == UNDO_CLEAR_CLIP);
+        check("flush at cursor: E1 redoes", undo_stack_redo(&u, &song, 0, 0) == UNDO_DONE);
+    }
     /* delete: persists, undoes and redoes with the sequence-number check */
     {
         song_t other;

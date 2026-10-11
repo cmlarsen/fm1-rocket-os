@@ -515,6 +515,74 @@ static void r4_relay_test(void)
     live_bridge_exit();
 }
 
+/* T9i r5: a song edit during playback returns at end only when no clock was followed.
+ * Edit just before stopping, without a render, to pin the source on the following render too. */
+static void r5_tempo_restore_test(void)
+{
+    int clock;
+    for (clock = 0; clock < 2; clock++) {
+        uint32_t *ev;
+        live_song_t *song;
+        live_bridge_take_init();
+        live_bridge_enter();
+        song = (live_song_t *)live_bridge_song();
+        song->bpm_x10 = 1200u;
+        g_now = 0;
+        live_bridge_set_bpm(1200u);
+        run_isr_block(0, 128);
+        if (clock) {
+            live_bridge_set_bpm_soft(1600u);
+            run_isr_block(128, 128);
+        }
+        ev = (uint32_t *)live_bridge_take_events_mut();
+        ev[0] = 0u; ev[1] = TAKE_MARK_TEMPO(1400u);
+        ev[2] = 400000u; ev[3] = TAKE_MARK_END;
+        live_bridge_take_loaded(2, 800000u, 1400u);
+        live_bridge_take_play();
+        run_isr_block(256, 128);
+        CHECK(live_bridge_bpm_x10() == 1400u);
+        song->bpm_x10 = 1800u;
+        live_bridge_take_stop_play();
+        CHECK(live_bridge_bpm_x10() == (clock ? 1600u : 1800u));
+        run_isr_block(384, 128);
+        CHECK(live_bridge_bpm_x10() == (clock ? 1600u : 1800u));
+        live_bridge_exit();
+    }
+}
+
+/* T9i r5: one UI-frame overflow must not poison later launches of the same role. */
+static void r5_drop_recovery_test(void)
+{
+    uint32_t *ev, s;
+    int d0;
+    live_bridge_take_init();
+    live_bridge_enter();
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u; ev[1] = TAKE_MARK_TEMPO(1200u);
+    ev[2] = 200u; ev[3] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[4] = 300u; ev[5] = TAKE_LAUNCH(1u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[6] = 400u; ev[7] = TAKE_LAUNCH(2u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[8] = 50000u; ev[9] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[10] = 100000u; ev[11] = TAKE_LAUNCH(1u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[12] = 400000u; ev[13] = TAKE_MARK_END;
+    live_bridge_take_loaded(7, 800000u, 1200u);
+    d0 = live_bridge_take_drops();
+    live_bridge_take_play();
+    for (s = 0; s < 150000u; s += 128u) {
+        if (s && s % 4352u == 0)
+            live_bridge_take_stage();
+        run_isr_block(s, 128u);
+        if (s == 60032u) CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 0);
+        if (s == 120064u) CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 1);
+        CHECK(live_bridge_test_consistent());
+    }
+    CHECK(live_bridge_take_drops() - d0 == 1);
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+}
+
 int main(void)
 {
     int i;
@@ -686,6 +754,8 @@ int main(void)
     r4_playing_role_test();
     r4_tempo_test();
     r4_relay_test();
+    r5_drop_recovery_test();
+    r5_tempo_restore_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

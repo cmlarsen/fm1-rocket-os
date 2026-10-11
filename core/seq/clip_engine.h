@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* T4c clip engine: a song_t plays as five per-role clips, launched at a quantize point.
  *
- * Pure C, no heap, no locks, no double and no 64-bit division. Time is the audio sample
+ * Pure C, no heap, no blocking locks, no double and no 64-bit division. Time is the audio sample
  * counter only. The main loop calls clip_engine_launch()/clip_engine_stop()/
  * clip_engine_launch_now(); the audio ISR calls clip_engine_render() and every event comes
  * back through the sink with its exact sample offset. The UI calls reach the engine through
- * a small single-producer / single-consumer ring, so the two sides never take a lock.
+ * a small single-producer / single-consumer ring. Snapshot copies and the take staging FIFO
+ * are guarded by the caller's short engine_crit sections; the ISR never waits.
  *
  * A clip's kind is decided by its role, not by its bytes: clip_role(clip) == ROLE_DRUMS uses
  * d.drum, every other role (FX included) uses d.notes[0..nnotes). An unused clip cannot be
@@ -117,9 +118,11 @@ typedef struct {
      * launch from the front and pops slot 0 into play[] at its boundary, then slot 1 becomes slot 0.
      * slot 0 holds the queued launch's copy while ts_queued[role] is set, otherwise the next event's
      * copy; slot 1 holds the one after. The producer only ever writes an empty slot; the ISR only
-     * pops. A launch whose copy is not staged is dropped and counted (take_drop). */
+     * pops. Both sides are serialized by engine_crit on the producer. Copies carry take event
+     * indices so the ISR can discard late copies. A missing copy drops and counts the launch. */
     clip_t  ts[NROLES][2];
     uint8_t ts_clip[NROLES][2]; /* the clip index of each staged copy */
+    uint16_t ts_event[NROLES][2]; /* take event index: a dropped event cannot desynchronize copies */
     uint8_t ts_n[NROLES];       /* copies staged: 0, 1 or 2 */
     uint8_t ts_queued[NROLES];  /* slot 0 holds a queued launch awaiting its boundary */
 } clip_engine_t;
@@ -205,7 +208,7 @@ void clip_engine_mute_clear(clip_engine_t *e);
  *                note-offs reach the sink (`on` = 0/1).
  *   take_bpm:    sets the running tempo AND holds it (bpm_take_on) against the song's own tempo AND
  *                an external clock; take_bpm_clear restores the pre-take source at end/stop.  */
-int  clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant);
+int  clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant, uint16_t event);
 void clip_engine_take_stop(clip_engine_t *e, uint8_t role);
 void clip_engine_take_mute(clip_engine_t *e, uint8_t role, int on);
 void clip_engine_take_mute_clear(clip_engine_t *e);   /* leaving/ending a take: no ring, ISR-safe */
@@ -218,7 +221,7 @@ int  clip_engine_take_drops(const clip_engine_t *e);  /* T9i r2: launches droppe
  * copy of `clip` (usually &song->clip[clip]) into the role's next free slot; returns 1 when staged,
  * 0 when both slots are full. take_stage_free reports the free slots; take_stage_clear drops every
  * staged copy (a reset/stop, so no stale copy survives into the next pass). */
-int  clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const clip_t *copy);
+int  clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const clip_t *copy, uint16_t event);
 int  clip_engine_take_stage_free(const clip_engine_t *e, uint8_t role);
 void clip_engine_take_stage_clear(clip_engine_t *e);
 

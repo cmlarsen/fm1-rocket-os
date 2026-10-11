@@ -147,11 +147,11 @@ static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
         if (b == TAKE_LAUNCH_STOP)
             clip_engine_take_stop(&g_eng, (uint8_t)(c & 0xFFu));
         else if (b == TAKE_LAUNCH_NOW)
-            clip_engine_take_launch(&g_eng, (uint8_t)a, 1u, 0u);
+            clip_engine_take_launch(&g_eng, (uint8_t)a, 1u, 0u, g_take.play_i);
         else if (b == TAKE_LAUNCH_QUANT)             /* S1: a Program Change launch's quantize */
-            clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, (uint8_t)((c >> 8) & 3u));
+            clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, (uint8_t)((c >> 8) & 3u), g_take.play_i);
         else
-            clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, 0xFFu);   /* the staged copy's own quant */
+            clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, 0xFFu, g_take.play_i);   /* the staged copy's own quant */
     } else if (type == TAKE_T_MUTE) {
         clip_engine_take_mute(&g_eng, (uint8_t)a, (int)b);
     } else if (type == TAKE_T_FX) {
@@ -649,29 +649,50 @@ void live_bridge_take_stage(void)
     if (!take_playing(&g_take))
         return;
     for (r = 0; r < NROLES; r++) {
-        uint32_t f = engine_crit_enter();
-        int free_slots = clip_engine_take_stage_free(&g_eng, (uint8_t)r);
-        while (free_slots > 0) {
-            uint16_t i;
+        while (clip_engine_take_stage_free(&g_eng, (uint8_t)r) > 0) {
+            uint16_t i = g_take_stage_i[r];
+            uint16_t play_i = g_take.play_i;
             uint8_t clip = CLIP_NONE;
-            for (i = g_take_stage_i[r]; i < g_take.n; i++) {
+            uint32_t f;
+            if (i < play_i)
+                i = play_i;
+            /* The immutable take log is scanned with interrupts enabled. Cache exhaustion so
+             * a role with no later launch does not rescan the tail on every UI frame. */
+            for (; i < g_take.n; i++) {
                 uint32_t cmd = g_take.ev[i].cmd;
-                if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH) {
-                    uint8_t how = (uint8_t)TAKE_CMD_B(cmd);
-                    if (how != TAKE_LAUNCH_STOP && (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == (uint8_t)r) {
-                        clip = (uint8_t)TAKE_CMD_A(cmd);
-                        g_take_stage_i[r] = (uint16_t)(i + 1u);
-                        break;
-                    }
+                if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH &&
+                    TAKE_CMD_B(cmd) != TAKE_LAUNCH_STOP &&
+                    (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == (uint8_t)r) {
+                    clip = (uint8_t)TAKE_CMD_A(cmd);
+                    break;
                 }
             }
-            if (clip == CLIP_NONE || clip >= NCLIPS)
-                break;                                    /* no more launches for this role */
-            if (!clip_engine_take_stage(&g_eng, (uint8_t)r, clip, &g_song.clip[clip]))
+            g_take_stage_i[r] = i;
+            if (i == g_take.n)
                 break;
-            free_slots--;
+            if (clip >= NCLIPS) {
+                g_take_stage_i[r] = (uint16_t)(i + 1u);
+                continue;
+            }
+            f = engine_crit_enter();
+            /* Playback may have advanced during the scan: never publish an already-replayed
+             * event. Recheck the play cursor and state while publishing the copy. */
+            if (!take_playing(&g_take)) {
+                engine_crit_exit(f);
+                return;
+            }
+            if (i < g_take.play_i) {
+                g_take_stage_i[r] = g_take.play_i;
+                engine_crit_exit(f);
+                continue;
+            }
+            if (!clip_engine_take_stage(&g_eng, (uint8_t)r, clip, &g_song.clip[clip], i)) {
+                engine_crit_exit(f);
+                break;
+            }
+            g_take_stage_i[r] = (uint16_t)(i + 1u);
+            engine_crit_exit(f);
         }
-        engine_crit_exit(f);
 #ifdef X0X_HOST
         if (live_bridge_test_hook)                       /* T9i r2: a test's ISR between roles */
             live_bridge_test_hook();

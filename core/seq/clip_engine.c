@@ -486,18 +486,33 @@ void clip_engine_mute_clear(clip_engine_t *e)
  * the boundary, so the sound is the staged snapshot. */
 
 /* how: 0 = queue at `quant` (0xFF = the staged copy's own quantize), 1 = next step. */
-int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant)
+int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t quant, uint16_t event)
 {
     uint8_t role;
     if (clip >= NCLIPS)
         return 0;
     role = clip_role(clip);
+    /* Keep a queued launch's front copy until it applies or is superseded. Any other copy older
+     * than this replayed event arrived too late; discard it before matching this event. */
+    if (e->ts_queued[role]) {
+        if (e->ts_n[role] > 1u && e->ts_event[role][1] < event)
+            e->ts_n[role] = 1u;
+    } else {
+        while (e->ts_n[role] && e->ts_event[role][0] < event) {
+            if (e->ts_n[role] > 1u) {
+                e->ts[role][0] = e->ts[role][1];
+                e->ts_clip[role][0] = e->ts_clip[role][1];
+                e->ts_event[role][0] = e->ts_event[role][1];
+            }
+            e->ts_n[role]--;
+        }
+    }
     /* T9i r4: the copy for this launch is the FIFO front (slot 0) when no launch is queued for the
      * role, or slot 1 when a queued launch is still waiting (this event overrides it). The main loop
      * stages copies ahead of the replayed events, so both are normally there; if the copy is missing
      * (the UI never staged it) DROP the launch, keep cur/play consistent, and count it. */
     if (e->ts_queued[role]) {
-        if (e->ts_n[role] < 2u || e->ts_clip[role][1] != clip) {
+        if (e->ts_n[role] < 2u || e->ts_event[role][1] != event || e->ts_clip[role][1] != clip) {
             e->take_drop++;
             return 0;
         }
@@ -513,9 +528,10 @@ int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t
         /* override: discard the queued launch's copy at slot 0, shift slot 1 into slot 0. */
         e->ts[role][0] = e->ts[role][1];
         e->ts_clip[role][0] = e->ts_clip[role][1];
+        e->ts_event[role][0] = e->ts_event[role][1];
         e->ts_n[role] = 1u;
     } else {
-        if (e->ts_n[role] < 1u || e->ts_clip[role][0] != clip) {
+        if (e->ts_n[role] < 1u || e->ts_event[role][0] != event || e->ts_clip[role][0] != clip) {
             e->take_drop++;
             return 0;
         }
@@ -546,6 +562,7 @@ void clip_engine_take_stop(clip_engine_t *e, uint8_t role)
         if (e->ts_n[role] > 1u) {
             e->ts[role][0] = e->ts[role][1];
             e->ts_clip[role][0] = e->ts_clip[role][1];
+            e->ts_event[role][0] = e->ts_event[role][1];
             e->ts_n[role] = 1u;
         } else {
             e->ts_n[role] = 0u;
@@ -603,6 +620,10 @@ void clip_engine_take_bpm_hold(clip_engine_t *e)
 void clip_engine_take_bpm_clear(clip_engine_t *e)
 {
     e->bpm_take_on = 0;
+    /* Account for a song edit even if no render has observed it yet, so the next render cannot
+     * mistake an edit made during the take for a new edit and clear the restored clock. */
+    if (e->song)
+        e->song_bpm = e->song->bpm_x10;
     if (e->bpm_ext_saved) {
         e->bpm_ext = e->bpm_ext_saved;
         set_bpm(e, e->bpm_ext_saved);
@@ -613,7 +634,7 @@ void clip_engine_take_bpm_clear(clip_engine_t *e)
 int clip_engine_take_drops(const clip_engine_t *e) { return e ? e->take_drop : 0; }
 
 /* T9i r4: the take staging FIFO's producer. */
-int clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const clip_t *copy)
+int clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const clip_t *copy, uint16_t event)
 {
     uint8_t n;
     if (role >= NROLES || !copy)
@@ -623,6 +644,7 @@ int clip_engine_take_stage(clip_engine_t *e, uint8_t role, uint8_t clip, const c
         return 0;
     e->ts[role][n] = *copy;
     e->ts_clip[role][n] = clip;
+    e->ts_event[role][n] = event;
     e->ts_n[role] = (uint8_t)(n + 1u);
     return 1;
 }
@@ -665,6 +687,7 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
         if (e->ts_n[role] > 1u) {
             e->ts[role][0] = e->ts[role][1];
             e->ts_clip[role][0] = e->ts_clip[role][1];
+            e->ts_event[role][0] = e->ts_event[role][1];
             e->ts_n[role] = 1u;
         } else {
             e->ts_n[role] = 0u;
