@@ -14,6 +14,7 @@
 #include "../dsp/fastmath.h"
 #include "../dsp/master.h"
 #include "../dsp/bass303.h"                    /* BASS303_* (the 303's pages) */
+#include "song_io.h"                           /* T6i: the current song on flash */
 #include "undo.c"
 
 /* ================================================================ model === */
@@ -3942,7 +3943,8 @@ void ui_init(void)
 
 /* AUTOSAVE: changes are saved by themselves while the pattern is stopped and nothing has been touched
  * for AUTOSAVE_QUIET ms, at most every AUTOSAVE_GAP ms. Stopped only: a flash erase silences the
- * audio. Only the objects that changed are written (project.c), usually one or two sectors. */
+ * audio. Only the objects that changed are written (project.c), usually one or two sectors. T6i: a
+ * change to the current song counts too; project_save() writes the song after the project. */
 #define AUTOSAVE_QUIET 4000u
 #define AUTOSAVE_GAP 20000u
 static void autosave(void)
@@ -3954,7 +3956,7 @@ static void autosave(void)
         save_project();
         return;
     }
-    if (!ui.dirty || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop || ui.rec || perf_testing() ||
+    if ((!ui.dirty && !song_io_wants_save()) || (proj.set.autosave_off && !ui.last_autosave) || seq.playing || seq.req_stop || ui.rec || perf_testing() ||
         ui.overlay == O_ASK || now - ui.act_t < AUTOSAVE_QUIET || (ui.saved_t && now - ui.saved_t < AUTOSAVE_GAP))
         return;
     ui.saved_t = now;

@@ -1,0 +1,30 @@
+# T6i review item 3: a failed song save shows the error and does not retry on a timer; the next
+# edit is what brings it back, and it then succeeds on a different extent.
+wait 300
+assignkey 0 5
+tap SAVE
+expect songsaves 1
+expect songfailed 0
+expect songdirty 0
+# inject a program failure, then force a save
+assignkey 0 9
+songfail
+tap SAVE
+expect songfailed 1
+expect songdirty 1
+expect songsaves 1
+# no further erase or program without a new edit
+tap SAVE
+wait 6000
+expect songfailed 1
+expect songsaves 1
+expect songwrites 8
+# a new edit re-enables saving; it succeeds on another extent
+assignkey 0 11
+expect songfailed 0
+tap SAVE
+expect songsaves 2
+expect songdirty 0
+expect songwrites 14
+reboot
+expect keyclip0 11

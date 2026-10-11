@@ -1,0 +1,42 @@
+# T6i: the current song on real flash. Boot with an empty store builds the song from the project
+# and marks it dirty; an edit made in LIVE (a key assignment, as T10 will do) is part of the
+# current song; leaving LIVE, stopping and waiting autosaves it to slot 0 (the project first, the
+# song after it); a reboot finds the stored song (and LIVE uses it, no fresh mapping).
+wait 300
+# --- boot: the store is empty, so the song is the project mapping, dirty ---
+expect songloaded 0
+expect songdirty 1
+expect songsaves 0
+expect songwrites 0
+# --- change a key assignment in LIVE ---
+turn ALGO 2
+tapkey w0
+turn ALGO -2
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 1
+assignkey 0 12
+expect keyclip0 12
+expect songdirty 1
+# while LIVE is active, nothing is written, however long it waits
+wait 6000
+expect songsaves 0
+expect songwrites 0
+# --- leave LIVE and stop: the autosave writes the song ---
+press PLAY
+wait 700
+release PLAY
+wait 20
+expect mode 0
+wait 5000
+expect songdirty 0
+expect songsaves 1
+expect songwrites >0
+shot t6i_song.png
+# --- reboot: slot 0 is the current song, assignments and all ---
+reboot
+expect songloaded 1
+expect songdirty 0
+expect keyclip0 12

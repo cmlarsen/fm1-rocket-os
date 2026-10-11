@@ -2,6 +2,8 @@
 
 The firmware side is `firmware/src/editor.c`. Commands 16-26 (user presets and live sync) form protocol v2; commands 27-30 (tracks) form protocol v3; commands 31-32 (any track's parameters) form protocol v4.
 
+**X0X's `editor.c` answers only `INFO` (1) and `PING` (25)** (plus debug commands in a development build). The sample-slot commands 11-15 were removed with the user-sample feature in T6i: 0xA0000..0xDBFFF is the song store's region now, and nothing plays user samples (the part that looped a slot was removed in T1).
+
 **v3 (four tracks):** the device has four tracks: 1..3 are synth parts, 4 is the drum track. One
 of them is *selected* (the TRACKS page on the device, or `TRACK`). Every v1 / v2 command acts on the
 selected track (its parameters, engine, preset, steps, the user presets it stores or loads); `TRACK`,
@@ -48,12 +50,6 @@ after an engine change.
 | 8 PRESET | engine, preset | engine, preset (applies the preset: sound, sends, arp, and its pattern if the sequencer is empty or still holds an untouched preset pattern) |
 | 9 PROJECT | op (0 load, 1 save, 2 query), slot 0..3 | op, slot, used (1/0). Save writes flash: allow ~2 s |
 | 10 NAMES | engine | engine, count, count preset-name strings, then the two edit-page titles |
-| 11 SMP_BEGIN | slot 0..2 | slot, rc (0 ok). Erases the slot's header sector: the slot is empty from now on |
-| 12 SMP_WRITE | slot, offset (3 × 7 bit, LSB first), pack7 data (≤ 256 bytes) | slot, offset, rc: 0 ok, 1 arguments, 2 erase, 3 write, 4 slot in use (send SMP_BEGIN first). Offset ≥ 512 and a multiple of 256; writes go in increasing order (a write at a 4 KiB boundary erases that sector) |
-| 13 SMP_END | slot, pack7 header (480 bytes) | slot, rc: 0 ok, 1 size, 2 header, 3 data CRC, 4 flash, 5 zones |
-| 14 SMP_ERASE | slot | slot, rc (erases the whole slot, ~1 s) |
-| 15 SMP_INFO | — | slots, slot KiB, then per slot: zone count (0 = empty), name string, data KiB |
-| 16 SMP_READ (X0X) | slot, offset (3 × 7 bits, from the slot's start, header included), count in pairs (7 bits) | slot, offset (3 × 7 bits), up to 224 bytes packed 7 to 8 as SMP_WRITE takes them |
 | 16 UP_LIST | start, count (1..16) | start, count, total slots, then per slot: used (0/1), engine, name string ("" if unused) |
 | 17 UP_GET | slot | slot, used, engine, name, P_COUNT × v14, 16 × (note, flags) |
 | 18 UP_PUT | slot, engine, name, P_COUNT × v14, 16 × (note, flags) | slot, rc (0 ok, 1 args, 2 flash). Writes flash: allow 1 s |
@@ -80,20 +76,6 @@ after an engine change.
 
 **pack7:** groups of up to 7 bytes, each preceded by one byte holding their top bits
 (bit j = bit 7 of byte j).
-
-**User sample slot** (80 KiB each, SAMPLE engine sets USR1..USR3; reference uploader
-`tools/fm1_sample_upload.py`, slot builder `sampleio.user_slot`; the editor's port of it is
-checked byte for byte by `web/test_web.mjs`): header at 0, ADPCM data at 512.
-
-| Offset | Field |
-| --- | --- |
-| 0 | magic `"FSMP"` (u32 0x504D5346), u16 version 1, u8 zone count 1..16, u8 0 |
-| 8 | name, 8 ASCII bytes (0-padded) |
-| 16 | u32 data length (bytes), u32 CRC-32 (zlib) of the data, 8 bytes 0 |
-| 32 | 16 zones × 28 bytes: u32 off (in the data), n (samples), loop start, loop end, rate (Hz / 44100 × 65536); i16 root × 16 (MIDI note), ADPCM predictor at the loop start; u8 step index at the loop start, lo note, hi note, looped (0/1) |
-
-Data is IMA ADPCM, 4 bit, low nibble first, starting from predictor 0 and step index 0.
-All little endian.
 
 `fmt` values (`firmware/src/core.h`):
 

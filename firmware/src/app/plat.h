@@ -44,6 +44,13 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max);   /* bytes loaded, <
 int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
 #define PLAT_STORE_MAX 3840u           /* bytes per object */
 
+/* T6i: the song store's flash backend (core/model/song_store.h). Absolute flash offsets, pinned to
+ * 0xA0000..0xDBFFF (fm1_flash.h FL_SONG_OK); each call goes through X0X's own guarded erase/program
+ * (st_erase / st_prog), so it takes the same IRQ-off path and audio-silence around an erase.
+ * Declared in song_flash.h so song_io.c (which sees model.h's own NKEYS) can include it without
+ * plat.h's NKEYS. The device definitions are in plat_fm1.c, the simulator's in host/x0x_host.c. */
+#include "song_flash.h"
+
 /* T5i: the FM6 patch sector, read in place from flash (32 packed 128-byte voices). X0X never writes
  * it, so it may be erased or hold leftovers; the engine validates it and falls back to its ROM voices.
  * Returns NULL (and 0) when there is no flash bank. */
@@ -53,14 +60,6 @@ const uint8_t *plat_fm6_vbank(uint32_t *len);
 enum { OBJ_SET, OBJ_SOUND, OBJ_PAT0, OBJ_PAT1, OBJ_PANEL, OBJ_SONG, OBJ_MOTION, OBJ_NOBJ };
 /* flash: OBJ_SET 0xFC000; SOUND / PAT0 / PAT1 / SONG 0x97000.. (2 sectors each); OBJ_PANEL 0xDC000,
  * OBJ_MOTION 0xDE000 (all inside Felucca's data area, 0x97000..0xDFFFF) */
-
-/* user sample slots, read in place; 0 = empty slot */
-#define PLAT_NSLOTS 3
-/* every zone of a slot is one loop (tools/fm1_sample_upload.py packs several bars per slot) */
-#define PLAT_SLOT_ZONES 16
-int plat_slot_zones(int k);            /* loops in slot k, 0 = empty */
-/* slot k, zone z: IMA ADPCM from predictor 0 / index 0, *nsamples, *rate in Hz; name = the slot's */
-const uint8_t *plat_slot(int k, int z, uint32_t *nsamples, uint32_t *rate, char name[9]);
 
 /* audio load in % of the render budget, and xruns since boot (device: from the ISR) */
 uint32_t plat_cpu_pct(void);

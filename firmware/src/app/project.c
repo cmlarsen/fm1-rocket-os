@@ -15,6 +15,8 @@
 #include "x0x.h"
 #include "../dsp/drum909.h"            /* DR_SD (the sound's revisions) */
 #include "../dsp/master.h"             /* MST_* (the sound's revisions) */
+#include "song_io.h"                   /* T6i: the song store, saved beside the project */
+#include "live_bridge.h"               /* T6i: keep the song's clips in step with the project */
 #include "lz.c"
 
 project_t proj;
@@ -517,5 +519,17 @@ int project_save(void)
         return -1;
     if (save_obj(OBJ_SOUND, &proj.sound, sizeof proj.sound))
         return -2;
-    return save_stream();
+    {
+        int rc = save_stream();
+        if (rc)
+            return rc;              /* -7 (or a write error): nothing more was written */
+    }
+    /* T6i: the project just changed. Re-derive the song's clips from it so the persisted song
+     * (saved next, with the matching hash) keeps STUDIO edits reaching LIVE across a reboot. Only
+     * when they actually differ; the song's own fields (key map, LIVE SETUP, tempo) are kept. */
+    if (live_bridge_pats_hash(&proj.pat[0]) != live_bridge_song_hash()) {
+        live_bridge_rebuild(&proj.pat[0]);
+        song_io_mark_dirty();
+    }
+    return song_io_flush();         /* T6i: the song, after the project, in the same idle window */
 }

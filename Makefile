@@ -167,6 +167,8 @@ check: fw
 	@$(SSH) 'cd $(REMOTE_DIR) && sh tools/check_symbols.sh build'
 	@echo "check: the flash write path refuses the protected regions"
 	@sh tests/lint/flash_guard_test.sh
+	@echo "check: the user-sample upload (a second writer in the song region) is gone"
+	@sh tests/lint/no_sample_writers_test.sh
 	@echo "check: make fw passed the build's own checks (soft-double routines, image/RAM/pool size)"
 
 # T2b: render the screen tour with a host build that records every text draw (-DX0X_LINT), then
@@ -228,29 +230,42 @@ unit-fm6bank:
 	build/host/fm6_bank_test_san
 
 # T6c: the song/take store and the undo stack. The store includes X0X's lz.c, so
-# it is its own translation unit.
+# it is its own translation unit. -DX0X_HOST (T6i): the host has no .pool section, so the
+# store's lz_head and its scratch stay ordinary statics (the device build omits the flag).
 .PHONY: unit-store
 unit-store:
 	@mkdir -p build/host
-	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/song_store_test \
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/song_store_test \
 	    tests/host/song_store_test.c core/model/song_store.c
 	build/host/song_store_test
-	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/undo_stack_test \
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/undo_stack_test \
 	    tests/host/undo_stack_test.c core/model/undo_stack.c core/model/song_store.c
 	build/host/undo_stack_test
-	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/song_fuzz \
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/song_fuzz \
 	    tests/host/song_fuzz.c core/model/song_store.c
 	build/host/song_fuzz
 	@echo "store: ASan/UBSan"
-	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/song_store_test_san \
+	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/song_store_test_san \
 	    tests/host/song_store_test.c core/model/song_store.c
 	build/host/song_store_test_san
-	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/undo_stack_test_san \
+	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/undo_stack_test_san \
 	    tests/host/undo_stack_test.c core/model/undo_stack.c core/model/song_store.c
 	build/host/undo_stack_test_san
-	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/song_fuzz_san \
+	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/song_fuzz_san \
 	    tests/host/song_fuzz.c core/model/song_store.c
 	build/host/song_fuzz_san
+
+# T6i: song_io glues the store, the LIVE song and undo; its own test stubs live_bridge and drives
+# a RAM song flash (the power cut included). Song_store.c is its own unit (it includes lz.c).
+.PHONY: unit-songio
+unit-songio:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/song_io_test \
+	    tests/host/song_io_test.c firmware/src/app/song_io.c core/model/song_store.c core/model/undo_stack.c
+	build/host/song_io_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/song_io_test_san \
+	    tests/host/song_io_test.c firmware/src/app/song_io.c core/model/song_store.c core/model/undo_stack.c
+	build/host/song_io_test_san
 
 .PHONY: unit-take
 unit-take:
@@ -263,7 +278,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-take unit-midi unit-fx unit-name
+unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens

@@ -1,0 +1,21 @@
+# T6i: a corrupt slot-0 record falls back to the project mapping at boot. The store's CRC/header
+# checks reject the record; the current song is then built from the project and marked dirty.
+wait 300
+expect songloaded 0
+assignkey 0 5
+wait 5000
+expect songsaves 1
+expect songdirty 0
+# --- flip every record's magic (a torn/flashed-over header) and reboot ---
+songcorrupt
+reboot
+expect songloaded 0
+expect songdirty 1
+expect keyclip0 0
+# a further save commits a fresh, valid record
+tap SAVE
+expect songsaves 2
+expect songdirty 0
+reboot
+expect songloaded 1
+expect keyclip0 0

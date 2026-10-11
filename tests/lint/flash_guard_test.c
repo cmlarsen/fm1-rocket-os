@@ -31,6 +31,23 @@ static void want_allow(uint32_t off, uint32_t n, const char *what)
     }
 }
 
+/* T6i: the song store's backend pins 0xA0000..0xDBFFF (FL_SONG_OK) */
+static void song_refuse(uint32_t off, uint32_t n, const char *what)
+{
+    if (FL_SONG_OK(off, n)) {
+        printf("FAIL: song region allowed in %s (%#x + %u)\n", what, off, n);
+        fails++;
+    }
+}
+
+static void song_allow(uint32_t off, uint32_t n, const char *what)
+{
+    if (!FL_SONG_OK(off, n)) {
+        printf("FAIL: song region refused in %s (%#x + %u)\n", what, off, n);
+        fails++;
+    }
+}
+
 int main(void)
 {
     /* the regions that must never be written */
@@ -56,10 +73,35 @@ int main(void)
     want_allow(0xDE000u, 0x1000u, "motion");
     want_allow(0xFC000u, 0x1000u, "settings");
 
+    /* T6i: the song store's backend (0xA0000..0xDBFFF) refuses anything outside the region */
+    song_allow(0xA0000u, 0x1000u, "song region base");
+    song_allow(0xDB000u, 0x1000u, "song region top sector");
+    song_allow(0xA0000u, 0x3C000u, "the whole song region");
+    song_refuse(0x9FFFFu, 1u, "just below the song region");
+    song_refuse(0x9F000u, 0x1000u, "the FM6 patch sector");
+    song_refuse(0xDC000u, 1u, "just past the song region");
+    song_refuse(0xDC000u, 0x1000u, "PANEL's sector");
+    song_refuse(0xDB000u, 0x2000u, "a range running past 0xDC000");
+    song_refuse(0x4000u, 1u, "the app image");
+    song_refuse(0xE8000u, 1u, "the stock VM backup");
+    /* the song region sits inside the store, so the driver's own FL_STORE_OK also accepts it */
+    want_allow(0xA0000u, 0x3C000u, "the song region inside the store");
+    want_refuse(0xA0000u, 0x40001u, "a song read that would run past the store");
+    /* T6i: the other guarded windows (the OTA staging the loader uses, the settings block) must
+     * never cover the song region: only the song backend may write it */
+    if (FL_IN(0xA0000u, 0x1000u, FL_OTA_LO, FL_OTA_HI) || FL_IN(0xDB000u, 0x1000u, FL_OTA_LO, FL_OTA_HI)) {
+        printf("FAIL: the OTA window covers the song region\n");
+        fails++;
+    }
+    if (FL_IN(0xA0000u, 0x1000u, FL_GLOB_LO, FL_GLOB_HI) || FL_IN(0xDB000u, 0x1000u, FL_GLOB_LO, FL_GLOB_HI)) {
+        printf("FAIL: the settings window covers the song region\n");
+        fails++;
+    }
+
     if (fails) {
         printf("flash guard: %d FAILED\n", fails);
         return 1;
     }
-    printf("flash guard: protected regions refused, store accepted\n");
+    printf("flash guard: protected regions refused, store accepted, song region pinned\n");
     return 0;
 }

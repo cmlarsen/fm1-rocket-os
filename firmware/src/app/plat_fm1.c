@@ -99,29 +99,35 @@ void plat_midi_out(uint32_t pkt) { midi_out_event(pkt); }
 int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? st_load(obj, dst, max) : -1; }
 int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
 
-/* the FM6 patch sector (T5i): read in place through the XIP window, as the user samples are */
+/* T6i: the song store's flash backend. The region 0xA0000..0xDBFFF is pinned here (FL_SONG_OK);
+ * st_erase/st_prog add X0X's own FL_STORE_OK check and the IRQ-off / audio-silence path, so the
+ * song writes are the same kind of flash access as a project save. Offsets are absolute.
+ * Erase and program are refused when the flash was not identified at boot (as plat_store_*). */
+int plat_song_read(uint32_t off, void *dst, uint32_t n)
+{
+    if (!flash_ok || !FL_SONG_OK(off, n))
+        return -1;
+    return st_read(off, dst, n);
+}
+int plat_song_erase(uint32_t off)
+{
+    if (!flash_ok || !FL_SONG_OK(off, PLAT_SONG_SECTOR) || (off & (PLAT_SONG_SECTOR - 1u)))
+        return -1;
+    return st_erase(off);
+}
+int plat_song_program(uint32_t off, const void *src, uint32_t n)
+{
+    if (!flash_ok || !FL_SONG_OK(off, n) || n == 0 || n > 256u || ((off & 0xFFu) + n) > 256u)
+        return -1;
+    return st_prog(off, src, n);
+}
+
+/* the FM6 patch sector (T5i): read in place through the XIP window */
 const uint8_t *plat_fm6_vbank(uint32_t *len)
 {
     if (len)
         *len = PLAT_FM6_VBANK_LEN;
     return flash_ok ? fm1_xip_ptr(PLAT_FM6_VBANK_OFF) : 0;
-}
-
-int plat_slot_zones(int k) { return (k >= 0 && k < SMP_USER_SLOTS) ? usr_nz[k] : 0; }
-
-const uint8_t *plat_slot(int k, int z, uint32_t *nsamples, uint32_t *rate, char name[9])
-{
-    const smp_user_hdr_t *h;
-    uint32_t i;
-    if (k < 0 || k >= SMP_USER_SLOTS || z < 0 || z >= usr_nz[k])
-        return 0;
-    h = (const smp_user_hdr_t *)smp_user_xip((uint32_t)k);
-    for (i = 0; i < 8u; i++)
-        name[i] = h->name[i] >= 32 && h->name[i] < 127 ? h->name[i] : 0;
-    name[8] = 0;
-    *nsamples = h->zone[z].n;
-    *rate = (h->zone[z].rate * 44100u + 32768u) >> 16;
-    return smp_user_xip((uint32_t)k) + SMP_USER_DATA + h->zone[z].off;
 }
 
 static volatile uint32_t audio_cpu_pct, audio_xruns, audio_peak_pct;

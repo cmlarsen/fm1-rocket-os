@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-"""Sample helpers shared by gen_samples.py (built-in sets), fm1_sample_upload.py
-(user slots) and tests/pitch.py. The web editor (web/editor.html) has a JS port of
-read_any_wav / resample / ima_encode / user_slot that must give the same bytes
-(web/test_web.mjs checks it).
+"""Sample helpers for the built-in sets (tools/gen_drum_samples.py). The float arithmetic
+here is part of the generated output: keep the order of operations (and Python's sum()
+where it is used) when touching these functions.
 
-The float arithmetic here is part of the generated output: keep the order of
-operations (and Python's sum() where it is used) when touching these functions.
-"""
+T6i removed the user-sample pipeline (the uploader, the slot builder and the firmware's
+SMP_* commands): 0xA0000..0xDBFFF is the song store's region now, and nothing plays user
+samples (the part that looped a slot was removed in T1)."""
 import math
 import re
 import struct
@@ -241,55 +240,3 @@ def ima_encode(samples, loop_start):
     return bytes(a | (b << 4) for a, b in zip(nib[0::2], nib[1::2])), state_at_loop
 
 
-def key_split(roots):
-    """sorted root notes -> [(lo, hi)]: each zone reaches halfway to its neighbours, the
-    outer zones to the ends of the keyboard"""
-    n = len(roots)
-    return [(0 if j == 0 else (roots[j - 1] + r) // 2 + 1, 127 if j == n - 1 else (r + roots[j + 1]) // 2)
-            for j, r in enumerate(roots)]
-
-
-# ---- user sample slots (firmware/src/eng_sample.c, web/EDITOR_PROTOCOL.md)
-SLOT_SIZE, SLOT_DATA_OFF, SLOT_RATE, SLOT_ZONES = 0x14000, 512, 22050, 16
-SLOT_HDR_LEN = 32 + SLOT_ZONES * 28
-SLOT_MAX_DATA = SLOT_SIZE - SLOT_DATA_OFF
-
-
-def note_from_name(name, default=60):
-    """"C4" / "F#3" / "Bb2" in a file name, C4 = 60 (as the web editor), clamped to 0..127"""
-    m = re.search(r"(?<![A-Za-z])([A-G])([#b]?)(-?\d)(?!\d)", name)
-    if not m:
-        return default
-    pc = "C D EF G A B".index(m.group(1)) + {"#": 1, "b": -1, "": 0}[m.group(2)]
-    return max(0, min(127, (int(m.group(3)) + 1) * 12 + pc))
-
-
-def to_int16(x):
-    """mono float -> int16 list, peak normalised to 30000"""
-    pk = peak(x)
-    return [max(-32768, min(32767, int(v / pk * 30000))) for v in x]
-
-
-def user_slot(name, zones):
-    """zones: [(int16 samples at SLOT_RATE, root, lo or None, hi or None)] -> (header bytes, ADPCM data).
-    Zones without lo/hi split the keyboard between their roots."""
-    zs, data = [], bytearray()
-    for s, root, lo, hi in zones:
-        adp, st = ima_encode(s, 0)
-        zs.append(dict(off=len(data), n=len(s), ls=0, le=len(s) - 1, root=root, lo=lo, hi=hi, pred=st[0], idx=st[1]))
-        data += adp
-    if len(data) > SLOT_MAX_DATA:
-        raise ValueError(f"too long: {len(data)} B of ADPCM, a slot holds {SLOT_MAX_DATA} B "
-                         f"({SLOT_MAX_DATA * 2 / SLOT_RATE:.1f} s in all)")
-    if not 1 <= len(zs) <= SLOT_ZONES:
-        raise ValueError(f"1..{SLOT_ZONES} files per slot")
-    zs.sort(key=lambda z: z["root"])
-    for z, (lo, hi) in zip(zs, key_split([z["root"] for z in zs])):
-        if z["lo"] is None:
-            z["lo"], z["hi"] = lo, hi
-    rate = int(round(SLOT_RATE / 44100 * 65536))
-    zb = b"".join(struct.pack("<5I2h4B", z["off"], z["n"], z["ls"], z["le"], rate, z["root"] * 16, z["pred"],
-                              z["idx"], z["lo"], z["hi"], 0) for z in zs)
-    nm = re.sub(r"[^\x20-\x7E]", "", name.upper())[:8].encode().ljust(8, b"\0")
-    hdr = struct.pack("<IHBB8sII8x", 0x504D5346, 1, len(zs), 0, nm, len(data), zlib.crc32(data)) + zb
-    return hdr.ljust(SLOT_HDR_LEN, b"\0"), bytes(data)

@@ -11,7 +11,10 @@
  * The compressor writes through a sink (a run of bytes at a time), so its output can go to the
  * flash objects one chunk at a time, and reads its input in place. It remembers the last position
  * of each 3-byte hash (lz_head, 4 KB) and tries the byte before too (runs). The decompressor reads
- * a byte at a time from a source and writes into place. No allocation; inputs under 64 KB. */
+ * a byte at a time from a source and writes into place. No allocation; inputs under 64 KB.
+ *
+ * lz_head's section is LZ_HEAD_ATTR: project.c leaves it in .bss, song_store.c (a second copy of
+ * this file, T6c) pins it to .pool (T6i), so the same 4 KB table is not paid for twice in .bss. */
 #include <stdint.h>
 
 #define LZ_MIN 3u
@@ -19,6 +22,10 @@
 #define LZ_MAXLIT 128u
 #define LZ_HBITS 11
 #define LZ_NONE 0xFFFFu
+
+#ifndef LZ_HEAD_ATTR
+#define LZ_HEAD_ATTR          /* project.c: .bss; song_store.c: the pool (T6i) */
+#endif
 
 typedef struct {
     int (*put)(void *ctx, const uint8_t *p, uint32_t n);   /* 0 = taken; else the compression stops */
@@ -30,7 +37,7 @@ typedef struct {
     void *ctx;
 } lz_src_t;
 
-static uint16_t lz_head[1u << LZ_HBITS];
+static uint16_t lz_head[1u << LZ_HBITS] LZ_HEAD_ATTR;
 
 static uint32_t lz_hash(const uint8_t *p)
 {

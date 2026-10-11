@@ -1,0 +1,23 @@
+# T6i: a power cut during an autosave, simulated with the runner's flash, leaves the previous song.
+# The store writes the header last, so a cut leaves the new record unusable and slot 0 still loads
+# the version before it.
+wait 300
+# --- a song edit, saved: v1 ---
+assignkey 0 5
+wait 5000
+expect songsaves 1
+expect songdirty 0
+# --- another edit, and the power dies on the next song flash op ---
+songcut 0
+assignkey 0 9
+expect songdirty 1
+tap SAVE
+wait 300
+expect songsaves 1
+expect songdirty 1
+songcut -1
+# --- a reboot scans what committed: the previous song ---
+reboot
+expect songloaded 1
+expect songdirty 0
+expect keyclip0 5

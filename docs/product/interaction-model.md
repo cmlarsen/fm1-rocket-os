@@ -41,6 +41,7 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 - **The song on screen is the song.** It autosaves when the transport is stopped and no voices are sounding.
 - **SAVE tap saves now.** The header dot means "not yet written".
 - **There is no separate saved copy** that can disagree with what you hear. Recovery comes from **undo**, which covers clears, copies, record passes and the take.
+- **The song persists in slot 0 on the flash** (0xA0000–0xDBFFF, beside the project). Its record is written header-last, so a power cut during an autosave leaves the version before it. At boot the stored song *is* the current song; with an empty slot the current song is built from the project. LIVE performs the current song — it is not rebuilt from the project on every entry — and changes that belong to the song (T10 adds assign-keys, K1–K4 and the launch default) mark it dirty.
 
 ## Modes
 

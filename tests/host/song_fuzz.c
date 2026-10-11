@@ -96,10 +96,11 @@ typedef struct {
     uint8_t slot, flags;
     uint16_t rawlen;
     uint32_t seq, len, crc;
+    uint32_t phash;                            /* T6i: the caller tag (song_io's project hash) */
     char name[SONG_NAME_LEN];
     uint32_t hcrc;
 } fhdr_t;
-_Static_assert(sizeof(fhdr_t) == 40, "header");
+_Static_assert(sizeof(fhdr_t) == 44, "header");
 
 static uint32_t f_crc(uint32_t c, const uint8_t *p, uint32_t n)
 {
@@ -148,9 +149,9 @@ static void encode_extent0(const song_t *m)
     for (i = 0; i < SONG_STORE_SONG_SECTORS; i++)
         sim_erase(0, base + i * SONG_STORE_SECTOR);
     for (off = 0; off < len;) {
-        uint32_t room = 256u - ((base + 40u + off) & 0xFFu);
+        uint32_t room = 256u - ((base + 44u + off) & 0xFFu);
         uint32_t k = len - off < room ? len - off : room;
-        sim_program(0, base + 40u + off, payload + off, k);
+        sim_program(0, base + 44u + off, payload + off, k);
         off += k;
     }
     memset(&h, 0, sizeof h);

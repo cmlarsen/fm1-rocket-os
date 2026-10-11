@@ -20,6 +20,7 @@ static uint8_t nor[NOR_SIZE];
 static long prog_budget = -1;              /* byte cut: -1 = unlimited, else bytes left */
 static long op_at = -1, op_count;          /* op cut: the operation index that dies */
 static int op_dead;
+static int fail_next_prog;                 /* T6i: the next program fails (a bad block) */
 static uint32_t wrote_lo, wrote_hi;
 
 static int sim_read(void *ctx, uint32_t off, void *dst, uint32_t n)
@@ -63,6 +64,10 @@ static int sim_program(void *ctx, uint32_t off, const void *src, uint32_t n)
     }
     if (off > NOR_SIZE || n > NOR_SIZE - off)
         return -1;
+    if (fail_next_prog) {                          /* T6i: a bad block: refuse this program */
+        fail_next_prog = 0;
+        return -9;
+    }
     if (op_dead)
         return -1;
     if (op_at >= 0 && op_count == op_at) {         /* the power died mid-program */
@@ -102,6 +107,7 @@ typedef struct {
     uint8_t slot, flags;
     uint16_t rawlen;
     uint32_t seq, len, crc;
+    uint32_t phash;                            /* T6i */
     char name[SONG_NAME_LEN];
     uint32_t hcrc;
 } hdrv_t;
@@ -299,7 +305,7 @@ static void test_power_cut(const char *name, song_t *old_s, song_t *new_s, int s
     song_store_init(&store, &FLASH);
     song_store_save(&store, 0, old_s);
     memcpy(snap, nor + SONG_STORE_BASE, snap_len);
-    record_bytes = song_store_measure(new_s) + 40;
+    record_bytes = song_store_measure(new_s) + 44;   /* the record: payload + the 44-byte header */
     for (n = 0;; n += stride) {
         memcpy(nor + SONG_STORE_BASE, snap, snap_len);
         song_store_init(&store, &FLASH);
@@ -464,7 +470,7 @@ int main(void)
         song_store_save(&store, 3, &starter);
         ext = newest_song_ext(3, 1);
         check("newest copy wins", ext >= 0 && song_store_load(&store, 3, &got) == 0 && songs_equal(&got, &starter));
-        nor[song_ext_off(ext) + 40 + 100] ^= 0x40;       /* bit rot in the newest payload */
+        nor[song_ext_off(ext) + 44 + 100] ^= 0x40;       /* bit rot in the newest payload */
         check("corrupt newest -> the older copy loads",
               song_store_load(&store, 3, &got) == 0 && songs_equal(&got, &empty));
         for (i = 0; i < (int)SONG_STORE_SONG_EXTENTS; i++)
@@ -472,6 +478,34 @@ int main(void)
         memset(&got, 0xA5, sizeof got);
         check("all copies broken -> empty song, error",
               song_store_load(&store, 3, &got) == -1 && songs_equal(&got, &empty));
+    }
+
+    /* T6i: the record's tag survives a reboot, and a failed save switches extent (item 3) */
+    {
+        int ext0, ext1;
+        song_t bad;
+        memset(nor, 0xFF, sizeof nor);
+        song_store_init(&store, &FLASH);
+        song_store_empty(&empty);
+        bad = empty;
+        bad.magic = 0u;
+        check("save_tag refuses a malformed song", song_store_save_tag(&store, 0, &bad, 0x55u) == -2);
+        check("save_tag commits", song_store_save_tag(&store, 0, &empty, 0xDEADBEEFu) == 0);
+        check("tag round trip", song_store_tag(&store, 0) == 0xDEADBEEFu);
+        song_store_init(&store, &FLASH);                  /* a reboot re-scans */
+        check("tag survives a reboot", song_store_tag(&store, 0) == 0xDEADBEEFu);
+        ext0 = newest_song_ext(0, 1);
+        fail_next_prog = 1;                               /* the next program fails */
+        check("a failed save errors", song_store_save_tag(&store, 0, &starter, 0x1234u) != 0);
+        check("the failed save left the old song",
+              song_store_load(&store, 0, &got) == 0 && songs_equal(&got, &empty));
+        check("the failed save did not take the new tag", song_store_tag(&store, 0) == 0xDEADBEEFu);
+        check("the next save succeeds on another extent",
+              song_store_save_tag(&store, 0, &starter, 0x1234u) == 0 &&
+              (ext1 = newest_song_ext(0, 1)) >= 0 && ext1 != ext0);
+        check("the new tag is in charge", song_store_tag(&store, 0) == 0x1234u);
+        memset(nor, 0xFF, sizeof nor);                    /* leave the region clean for the next block */
+        song_store_init(&store, &FLASH);
     }
 
     /* delete survives a reboot, keeps the data, and undelete brings it back */

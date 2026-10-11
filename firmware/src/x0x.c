@@ -123,7 +123,6 @@ static void ota_commit(const uint8_t *parm)
     fm1_enter_update(parm);
 }
 
-#include "app/slots.c"
 #include "app/x0x.h"
 #include "app/panel.c"
 #include "app/plat_fm1.c"
