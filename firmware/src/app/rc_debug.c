@@ -41,8 +41,10 @@ typedef char rc_prof_n_fixed[(ENG_PROF_N == 9) ? 1 : -1];
 
 /* The generated song lives here, never in proj: the LIVE bridge copies it into its own song and
  * the X0X baseline points the sequencer at it. T10i: one pattern, not NPAT — live_bridge_map_n()
- * maps just it, so the debug build need not carry a full pattern array in the pool. */
-static pattern_t rc_pat X0X_POOL;
+ * maps just it, so the debug build need not carry a full pattern array in the pool. T9i r1: this
+ * debug-only buffer lives in .bss (not the pool), which frees the pool's 8 KiB headroom for the
+ * take after the FM6 array dropped to 4 voices. */
+static pattern_t rc_pat;
 
 /* The 909 / 808 track orders come from drum909.h / drum808.h (DR_* / D8_*, included above). */
 

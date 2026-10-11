@@ -218,11 +218,11 @@ def build_app():
         v = os.environ.get(flag)    # unset: the default in firmware/src/x0x.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
-    # RC1p/T9i: the debug build's FM6 array is 6 so the stress command can raise the voice cap to 6
-    # without an eng_fm6.c change (the 8-voice measurement is done; T9i freed the extra pool for the
-    # take). A release build keeps eng_fm6.h's 4 (see the probe docs).
+    # RC1p/T9i r1: the debug build's FM6 array was 6 so the stress command could raise the voice cap to
+    # 6; the r1 pool fix drops it to eng_fm6.h's release 4 (the 8- and 6-voice measurements are done)
+    # and the stress content moves to .bss, so the debug pool keeps its 8 KiB headroom.
     if os.environ.get("X0X_DEBUG") == "1":
-        flags.append("-DENG_FM6_VOICES=6")
+        flags.append("-DENG_FM6_VOICES=4")
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DX0X_VERSION="{VERSION}"')

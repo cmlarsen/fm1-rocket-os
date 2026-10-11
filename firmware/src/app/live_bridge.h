@@ -161,8 +161,12 @@ void live_bridge_take_fx(int id, int how);                       /* record a pun
 
 void live_bridge_take_arm(void);            /* the REC tap: at the next bar, or the next PLAY */
 void live_bridge_take_stop(void);           /* the second REC tap: end at the next bar */
+void live_bridge_take_finish(void);         /* T9i/B2: close the take at once (leaving LIVE) */
 void live_bridge_take_play(void);           /* play the song's take (or stop a playing one) */
 void live_bridge_take_stop_play(void);
+void live_bridge_take_stage(void);          /* T9i/B1: main loop: stage the queued launches' copies */
+void live_bridge_take_live(int on);         /* T9i/B2: enter (1) / leave (0) LIVE's take scope */
+int  live_bridge_take_end_pending(void);    /* T9i/B1: the ISR's natural end, polled by the main loop */
 void live_bridge_take_clear_ram(void);      /* the clear gesture: the in-RAM take is gone */
 void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_x10);
 

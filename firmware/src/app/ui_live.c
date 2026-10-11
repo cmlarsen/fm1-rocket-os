@@ -89,7 +89,12 @@ static void live_clear_take(void)
 static void live_rec_tap(void)
 {
     if (live_bridge_take_recording() || live_bridge_take_armed()) {
+        int armed_only = live_bridge_take_armed() && !live_bridge_take_recording();
         live_bridge_take_stop();
+        /* NIT: an arm-then-cancel (the transport was playing but the bar never came) must not empty
+         * the song's take: restore the in-RAM copy from the store. */
+        if (armed_only && !live_bridge_take_has() && !song_io_take_pending())
+            song_io_take_load_ram();
         say("TAKE STOP", 0);
     } else {
         live_bridge_take_arm();
@@ -146,11 +151,10 @@ static void live_take_tick(void)
         say(live_bridge_take_full() ? "TAKE FULL" : "TAKE SAVED", 0);
     }
     take_prev_state = (uint8_t)st;
-    /* T9i: the deferred store write. Once the transport is stopped and quiet (the normal save rule),
-     * write the take without waiting to leave LIVE, so a replace/clear can be undone in-session. */
-    if (song_io_take_pending() && !live_bridge_take_recording() && !live_bridge_take_armed() &&
-        !live_bridge_transport_playing())
-        song_io_flush();
+    /* T9i/B3: no in-LIVE flash write. A finished take's store write stays pending and rides the
+     * normal autosave path (stopped and idle, after leaving LIVE), so autosave's own rules hold. */
+    live_bridge_take_end_pending();             /* B1: clear the ISR's natural-end flag */
+    live_bridge_take_stage();                   /* B1: stage the queued launches ahead of the event time */
 }
 
 /* how much of the take each role covers, for the card's timeline (first/last event offsets) */
@@ -210,10 +214,11 @@ static void live_leave(void)
 {
     note_release_all();                   /* T7a D1/r2: leaving LIVE releases every held note */
     live_fx_reset_ui();                   /* T10i: the FX layer closes */
+    /* T9i B2/S3: finalize the take at once and stop any playback first, then reset the perform FX
+     * and mutes the take may have set (after the stop, as the review asks). */
+    live_bridge_take_live(0);
     engine_perform_reset();               /* T10i: leaving LIVE releases every effect */
     live_bridge_mute_all(0);              /* T10i: and clears every mute */
-    if (live_bridge_take_playing())       /* T9i: leaving LIVE stops a take playback */
-        live_bridge_take_stop_play();
     take_open = 0;
     rec_pressed = rec_cleared = 0;
     if (live.back_classic) {              /* back to the classic pages: X0X's sequencer resumes */
@@ -352,7 +357,7 @@ static int live_handle_key(int k, int down)
 static int live_handle_button(int b)
 {
     if (live_bridge_take_playing()) {                      /* T9i: only STOP is live during playback */
-        if (b == B_PLAY) {
+        if (b == B_PLAY || b == B_SEL) {                   /* NIT: SEL stops the take too, as the spec */
             live_bridge_take_stop_play();
             say("TAKE STOP", 0);
         }

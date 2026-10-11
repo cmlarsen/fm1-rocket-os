@@ -43,6 +43,7 @@ static uint32_t saves;
 enum { TAKE_NONE, TAKE_SAVE, TAKE_CLEAR };
 static uint8_t take_pending;
 static uint8_t take_ram_ok;
+static uint8_t take_pending_cur;        /* undo.cur when the pending write was queued (S6 ordering) */
 
 static song_t *song(void) { return (song_t *)live_bridge_song(); }
 
@@ -94,6 +95,7 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred)
     ready = 1;
     live_bridge_song_reload();                          /* the clip engine follows the new song */
     take_pending = TAKE_NONE;                           /* T9i: the take is the song's own */
+    take_pending_cur = 0;
     song_io_take_load_ram();
 }
 
@@ -533,6 +535,10 @@ static int undo_run(int redo)
                     : (undo.cur ? (int)undo.e[undo.cur - 1u].index : -1);
     undo_take_scratch_t ts;
     int rc;
+    /* B2: never memcpy the take buffer while an armed/recording/playing take owns it. */
+    if (type == (int)UNDO_REPLACE_TAKE &&
+        (live_bridge_take_recording() || live_bridge_take_armed() || live_bridge_take_playing()))
+        return UNDO_CANNOT;
     ts.hdr = (take_hdr_t *)live_bridge_take_hdr_mut();   /* T9i: the in-RAM take backs the take undo (T6c) */
     ts.ev = (take_event_t *)live_bridge_take_events_mut();
     ts.max_events = TAKE_MAX_EVENTS;
@@ -558,11 +564,16 @@ static int undo_run(int redo)
 
 int song_io_undo(void)
 {
-    if (take_pending != TAKE_NONE) {
-        /* T9i: a record/clear not yet flushed. The store still holds the previous take, so undo is
-         * just "cancel the pending write and reload it" (no second 16 KiB buffer). */
+    if (take_pending != TAKE_NONE && undo.cur <= take_pending_cur) {
+        if (live_bridge_take_recording() || live_bridge_take_armed() || live_bridge_take_playing())
+            return UNDO_CANNOT;                         /* B2: the live take owns the buffer */
+        /* T9i: a record/clear not yet flushed, and no newer edit sits above it. The store still
+         * holds the previous take, so undo is "cancel the pending write and reload it". S6: if a
+         * newer clip edit exists (undo.cur > take_pending_cur), undo that first — true order. */
         take_pending = TAKE_NONE;
-        song_io_take_load_ram();
+        song()->has_take = 1;                           /* a clear had cleared it; the load corrects it */
+        if (song_io_take_load_ram() != 0)
+            song()->has_take = 0;
         dirty = 1;
         failed = 0;
         return UNDO_DONE;
@@ -599,6 +610,7 @@ void song_io_take_request_save(void)
 {
     take_pending = TAKE_SAVE;
     take_ram_ok = 1;
+    take_pending_cur = undo.cur;                        /* S6: where this op sits in undo order */
     song()->has_take = (uint8_t)(live_bridge_take_nevents() > 0 ? 1 : 0);
     dirty = 1;
     failed = 0;
@@ -608,6 +620,7 @@ void song_io_take_request_clear(void)
     live_bridge_take_clear_ram();
     take_pending = TAKE_CLEAR;
     take_ram_ok = 1;
+    take_pending_cur = undo.cur;                        /* S6 */
     song()->has_take = 0;
     dirty = 1;
     failed = 0;
@@ -650,6 +663,8 @@ int song_io_take_load_ram(void)
     int slot = cur_slot;
     if (!ready)
         return -1;
+    if (live_bridge_take_recording() || live_bridge_take_armed() || live_bridge_take_playing())
+        return -1;                                      /* B2: never memcpy over a live take */
     hdr = (take_hdr_t *)live_bridge_take_hdr_mut();
     ev = (take_event_t *)live_bridge_take_events_mut();
     take_ram_ok = 0;
@@ -727,6 +742,7 @@ int song_io_songs_open(void *ctx, int slot)
     live_bridge_song_reload();
     live_bridge_song_baseline(song_store_tag(&store, slot));
     take_pending = TAKE_NONE;                            /* T9i: the new song's own take */
+    take_pending_cur = 0;
     song_io_take_load_ram();
     return 0;
 }

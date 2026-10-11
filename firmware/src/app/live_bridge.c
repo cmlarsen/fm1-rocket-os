@@ -35,10 +35,16 @@ static take_t g_take LIVE_POOL;                       /* 16,436 B: the song's on
 static uint8_t g_take_arm_at_start;                   /* REC while stopped: start at the next PLAY */
 static uint8_t g_bar_identity;                        /* the arm-to-start bar function (see below) */
 static uint32_t g_take_block_base;                    /* the block base the sink's offsets add to */
+static uint8_t g_take_live;                           /* T9i: LIVE is active: the take may record */
+static volatile uint8_t g_take_end_req;               /* the ISR's natural take end, polled by the main loop */
+#ifdef X0X_HOST
+/* T9i r1: the host test traps a main-loop ring push from the audio-ISR side (the take sink). */
+volatile int live_bridge_isr;
+#endif
 
 /* The main loop's launch / mute / FX intents, stamped by the ISR at the block boundary where
  * the clip engine will process them, so a recorded stream replays sample-exactly. SPSC ring. */
-enum { TP_LAUNCH, TP_STOP, TP_LAUNCH_NOW, TP_MUTE, TP_FX };
+enum { TP_LAUNCH, TP_STOP, TP_LAUNCH_NOW, TP_MUTE, TP_FX, TP_LAUNCH_Q, TP_BPM };
 #define TP_RING 32u
 static struct { uint8_t kind, a, b; } tp[TP_RING];
 static volatile uint8_t tp_h, tp_t;
@@ -46,6 +52,10 @@ static volatile uint8_t tp_h, tp_t;
 static void tp_post(uint8_t kind, uint8_t a, uint8_t b)
 {
     uint8_t next = (uint8_t)((tp_h + 1u) % TP_RING);
+#ifdef X0X_HOST
+    if (live_bridge_isr)               /* T9i r1: the ISR-side take sink must never post here */
+        __builtin_trap();
+#endif
     if (next == tp_t)
         return;                                       /* full: drop (a stray bump) */
     tp[tp_h].kind = kind;
@@ -56,17 +66,25 @@ static void tp_post(uint8_t kind, uint8_t a, uint8_t b)
 }
 
 /* The take's bar grid: the first bar boundary at or after `sample` (absolute samples). While the
- * transport is stopped it is the identity, so an arm stamps its own start (REC before PLAY). */
+ * transport is stopped it is the identity, so an arm stamps its own start (REC before PLAY).
+ * T9i/S4: the clip engine's position words are 32-bit and the audio ISR writes them every block, so
+ * the read is masked (a few instructions) rather than left torn. Only the main loop calls this
+ * (take_arm / take_stop). */
 static uint32_t bridge_bar_fn(void *ctx, uint32_t sample)
 {
-    uint32_t m, target;
+    uint32_t f, m, target, ret;
     (void)ctx;
-    if (g_bar_identity || !g_eng.playing || g_eng.bpm_x10 == 0u)
+    f = engine_crit_enter();
+    if (g_bar_identity || !g_eng.playing || g_eng.bpm_x10 == 0u) {
+        engine_crit_exit(f);
         return sample;
+    }
     m = STEPS_PER_BAR - (g_eng.global_step & (STEPS_PER_BAR - 1u));   /* steps to the next bar */
     target = g_eng.step_sample + m * g_eng.step_L +
              (g_eng.step_frac + m * g_eng.step_f) / g_eng.bpm_x10;
-    return sample + (target - g_eng.elapsed);
+    ret = sample + (target - g_eng.elapsed);
+    engine_crit_exit(f);
+    return ret;
 }
 
 /* The prelude: the state a replay starts from. The playing clip per role (or a stop), the mutes,
@@ -85,6 +103,17 @@ static void bridge_prelude(void *ctx, struct take *t)
         take_setup_event(t, TAKE_MUTE((uint8_t)r, clip_engine_muted(&g_eng, (uint8_t)r) ? 1u : 0u));
     }
     take_setup_event(t, TAKE_MARK_TEMPO(g_eng.bpm_x10));
+    /* T9i: the punch FX state a replay starts from (S2). All six are written: a latched effect as
+     * LATCH, a momentary one as ON, the rest as OFF, so the replay reconstructs the exact state
+     * (a momentary cannot be held across the arm, but a latched one can). */
+    {
+        int fx;
+        for (fx = 0; fx < 6; fx++) {
+            uint32_t how = engine_perform_latched(fx) ? TAKE_FX_LATCH
+                         : engine_perform_active(fx) ? TAKE_FX_ON : TAKE_FX_OFF;
+            take_setup_event(t, TAKE_FX((uint32_t)fx, how));
+        }
+    }
     if (!snd)
         return;
     for (tgt = 0; tgt < NTARGETS; tgt++)
@@ -94,7 +123,9 @@ static void bridge_prelude(void *ctx, struct take *t)
 }
 
 /* The playback sink: one recorded command, at its exact window offset. Parameters and notes go
- * straight to the engines (ISR); launches, mutes, FX and tempo drive the clip engine and perform. */
+ * straight to the engines (ISR); launches, mutes, FX and tempo drive the clip engine and perform
+ * through their ISR-side apply functions. Nothing here pushes onto a main-loop ring or reads
+ * song->clip[]: the main loop stages the launch copies in next[] ahead of the event time. */
 static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
 {
     uint32_t type = TAKE_CMD_TYPE(cmd), a = TAKE_CMD_A(cmd), b = TAKE_CMD_B(cmd), c = TAKE_CMD_C(cmd);
@@ -103,20 +134,19 @@ static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
         engine_take_cmd(cmd);
     } else if (type == TAKE_T_LAUNCH) {
         if (b == TAKE_LAUNCH_STOP)
-            live_bridge_stop((uint8_t)c);
+            clip_engine_take_stop(&g_eng, (uint8_t)(c & 0xFFu));
         else if (b == TAKE_LAUNCH_NOW)
-            live_bridge_launch_now((uint8_t)a);
+            clip_engine_take_launch(&g_eng, (uint8_t)a, 1u, 0u);
+        else if (b == TAKE_LAUNCH_QUANT)             /* S1: a Program Change launch's quantize */
+            clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, (uint8_t)((c >> 8) & 3u));
         else
-            live_bridge_launch((uint8_t)a);
+            clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, 0xFFu);   /* the staged copy's own quant */
     } else if (type == TAKE_T_MUTE) {
-        live_bridge_mute((uint8_t)a, (int)b);
+        clip_engine_take_mute(&g_eng, (uint8_t)a, (int)b);
     } else if (type == TAKE_T_FX) {
-        if (b == TAKE_FX_OFF)
-            engine_perform_release((int)a);
-        else
-            engine_perform_engage((int)a, b == TAKE_FX_LATCH);
+        engine_take_perform((int)a, (int)b);         /* ISR-side: no ring, no re-record */
     } else if (type == TAKE_T_MARK && a == 2u) {
-        live_bridge_set_bpm((uint16_t)TAKE_MARK_TEMPO_GET(b, c));
+        clip_engine_take_bpm(&g_eng, (uint16_t)TAKE_MARK_TEMPO_GET(b, c));
     }
     if (engine_tap)
         engine_tap(g_take_block_base + sample, cmd);
@@ -139,7 +169,10 @@ static void eng_reset_transport(void)
         g_eng.que[r] = CLIP_NONE;
         g_eng.que_set[r] = 0;
         g_eng.muted[r] = 0;
+        g_eng.next_set[r] = 0;                        /* T9i: no stale staged launch survives a reset */
+        g_eng.take_mute[r] = 0;
     }
+    g_eng.take_mute_set = 0;
     for (i = 0; i < (int)CLIP_ENGINE_MAX_VOICES; i++)
         g_eng.note[i].used = 0;
     g_eng.cmd_tail = g_eng.cmd_head;                  /* drop any stale UI ring entry */
@@ -393,6 +426,8 @@ void live_bridge_take_init(void)
     take_set_bar_fn(&g_take, bridge_bar_fn, 0);
     take_set_prelude(&g_take, bridge_prelude, 0);
     g_take_arm_at_start = 0;
+    g_take_live = 0;
+    g_take_end_req = 0;
     tp_h = tp_t = 0;
 }
 
@@ -403,7 +438,10 @@ void live_bridge_take_init(void)
  * played live; replay regenerates the clip notes from the launches. */
 void live_bridge_take_feed(uint32_t sample, uint32_t cmd)
 {
-    if (g_take.state == TAKE_REC && TAKE_CMD_TYPE(cmd) < 8u && g_take.n > 0) {
+    if (!g_take_live)                                 /* B2: never record outside LIVE */
+        return;
+    if (g_take.state == TAKE_REC && TAKE_CMD_TYPE(cmd) < 8u && g_take.n > 0 &&
+        !(g_take.stop_set && (int32_t)(sample - g_take.stop_at) >= 0)) {   /* NIT: never past stop_at */
         uint32_t bpm = g_take.hdr.bpm_x10 ? g_take.hdr.bpm_x10 : 1200u;
         uint32_t step = (CLIP_ENGINE_FS * 150u) / bpm;
         int32_t off = (int32_t)(sample - g_take.start);
@@ -440,6 +478,8 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
         case TP_STOP:       cmd = TAKE_LAUNCH(0u, TAKE_LAUNCH_STOP, a); break;
         case TP_MUTE:       cmd = TAKE_MUTE(a, b); break;
         case TP_FX:         cmd = TAKE_FX(a, b); break;
+        case TP_LAUNCH_Q:   cmd = TAKE_LAUNCH_Q(a, b, clip_role(a)); break;   /* b = quant (S1) */
+        case TP_BPM:        cmd = TAKE_MARK_TEMPO((uint16_t)(((uint16_t)a << 8) | b)); break;
         default: break;
         }
         if (cmd)
@@ -453,26 +493,40 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
     sink.ctx = 0;
     take_render(&g_take, nframes, &sink);
     if ((int32_t)(g_take.play_pos - g_take.hdr.length_samples) >= 0) {   /* the take ran out */
+        /* B1: the natural end must not push onto a main-loop ring. Stop the transport directly
+         * (the next clip render releases every role), clear what the take set, and let the main
+         * loop notice through g_take_end_req. */
         take_stop_play(&g_take);
-        clip_engine_transport_stop(&g_eng);
+        g_eng.playing = 0;
+        clip_engine_take_mute_clear(&g_eng);
+        engine_take_perform_reset();
         engine_all_off();
+        g_take_end_req = 1;
     }
 }
 
 void live_bridge_take_arm(void)
 {
+    if (!g_take_live)
+        return;
     if (take_recording(&g_take) || take_armed(&g_take)) {
         take_stop(&g_take, engine_sample_now());          /* the second tap ends it at the next bar */
         return;
     }
     if (take_playing(&g_take))
         return;
-    take_set_bpm(&g_take, g_eng.bpm_x10);
-    if (g_eng.playing) {
-        g_take_arm_at_start = 0;
-        take_arm(&g_take, engine_sample_now());           /* the next bar */
-    } else {
-        g_take_arm_at_start = 1;                          /* wait for PLAY: bar 0 */
+    {
+        uint32_t f = engine_crit_enter();
+        uint16_t bpm = g_eng.bpm_x10;
+        uint8_t playing = g_eng.playing;
+        engine_crit_exit(f);
+        take_set_bpm(&g_take, bpm);
+        if (playing) {
+            g_take_arm_at_start = 0;
+            take_arm(&g_take, engine_sample_now());       /* the next bar */
+        } else {
+            g_take_arm_at_start = 1;                      /* wait for PLAY: bar 0 */
+        }
     }
 }
 
@@ -486,25 +540,111 @@ void live_bridge_take_stop(void)
         take_stop(&g_take, engine_sample_now());
 }
 
+/* B2: leaving LIVE closes the take at once (the store write is queued by the UI's tick), so the
+ * recording is neither lost nor carried into STUDIO. */
+void live_bridge_take_finish(void)
+{
+    g_take_arm_at_start = 0;
+    if (take_recording(&g_take) || take_armed(&g_take))
+        take_finish(&g_take, engine_sample_now());
+}
+
 void live_bridge_take_play(void)
 {
+    uint32_t f;
     if (take_playing(&g_take)) {
         live_bridge_take_stop_play();
         return;
     }
     if (!take_has(&g_take))
         return;
+    /* S4: the reset, the PLAY publish and the transport start are one critical section, so the
+     * ISR never sees PLAY before the transport is at bar 0 (or a stale staged copy). */
+    f = engine_crit_enter();
     eng_reset_transport();                                /* bar 0 for the pass */
-    engine_all_off();
     take_play(&g_take, engine_sample_now());
     g_eng.playing = 1;
+    engine_crit_exit(f);
+    engine_all_off();
+    live_bridge_take_stage();                             /* stage the prelude's launches (offset 0) */
 }
 
 void live_bridge_take_stop_play(void)
 {
     take_stop_play(&g_take);
-    clip_engine_transport_stop(&g_eng);
+    clip_engine_transport_stop(&g_eng);                   /* main loop: the ring is fine here */
     engine_all_off();
+    clip_engine_mute_clear(&g_eng);                       /* S3: the take's mutes go ... */
+    engine_perform_reset();                               /* ... and its FX (after the stop) */
+}
+
+/* B1: the main loop stages each launch's clip copy into next[role] ahead of the boundary, so the
+ * take sink only ever swaps play[]/next[] and never reads song->clip[]. The UI calls this every
+ * frame while a take plays. It stages the ISR's queued target when one is pending, and otherwise the
+ * next launch event for each role the ISR has not replayed yet (so the offset-0 prelude launches
+ * are staged before the first block). */
+static uint8_t take_next_launch_clip(uint8_t role, uint16_t from)
+{
+    uint16_t i;
+    for (i = from; i < g_take.n; i++) {
+        uint32_t cmd = g_take.ev[i].cmd;
+        if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH) {
+            uint8_t how = (uint8_t)TAKE_CMD_B(cmd);
+            if (how != TAKE_LAUNCH_STOP && (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == role)
+                return (uint8_t)TAKE_CMD_A(cmd);
+        }
+    }
+    return CLIP_NONE;
+}
+
+void live_bridge_take_stage(void)
+{
+    int r;
+    if (!take_playing(&g_take))
+        return;
+    for (r = 0; r < NROLES; r++) {
+        uint8_t clip;
+        uint32_t f;
+        if (g_eng.que_set[r] && g_eng.que[r] != CLIP_NONE)
+            clip = g_eng.que[r];                          /* a launch already seen by the ISR */
+        else
+            clip = take_next_launch_clip((uint8_t)r, g_take.play_i);   /* the next one to fire */
+        if (clip == CLIP_NONE || clip >= NCLIPS)
+            continue;
+        if (g_eng.next_set[r] && g_eng.next_clip[r] == clip)
+            continue;                                     /* already staged for the queued clip */
+        f = engine_crit_enter();
+        if (!(g_eng.que_set[r] && g_eng.que[r] != CLIP_NONE && g_eng.que[r] != clip)) {
+            g_eng.next[r] = g_song.clip[clip];            /* the ISR did not move: stage it */
+            g_eng.next_clip[r] = clip;
+            g_eng.next_set[r] = 1;
+        }
+        engine_crit_exit(f);
+    }
+}
+
+/* B2: the take subsystem is LIVE-scoped. Entering LIVE arms it; leaving it finalizes/stops every
+ * take action and stops the feed, so nothing records or plays outside LIVE. */
+void live_bridge_take_live(int on)
+{
+    if (on) {
+        g_take_live = 1;
+        return;
+    }
+    if (take_recording(&g_take) || take_armed(&g_take))
+        live_bridge_take_finish();
+    if (take_playing(&g_take))
+        live_bridge_take_stop_play();
+    g_take_live = 0;
+    g_take_arm_at_start = 0;
+}
+
+/* B1: the ISR's natural take end signals here; the main loop polls and clears it. */
+int live_bridge_take_end_pending(void)
+{
+    int r = g_take_end_req != 0;
+    g_take_end_req = 0;
+    return r;
 }
 
 void live_bridge_take_clear_ram(void)
@@ -674,6 +814,7 @@ int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
         engine_all_off();                              /* stop X0X's sequencer and release its voices */
     }
     sync_seq_tempo();
+    g_take_live = 1;                                   /* T9i: LIVE owns the take again */
     return 0;
 }
 
@@ -682,13 +823,7 @@ void live_bridge_exit(void)
     int i;
     if (!g_active)
         return;
-    if (take_recording(&g_take) || take_armed(&g_take)) {   /* T9i: close the take as we leave */
-        take_stop(&g_take, engine_sample_now());
-        take_tick(&g_take, engine_sample_now() + 1u);
-    }
-    if (take_playing(&g_take))
-        take_stop_play(&g_take);
-    g_take_arm_at_start = 0;
+    live_bridge_take_live(0);                          /* T9i/B2: finalize the take at once, stop playback */
     clip_engine_transport_stop(&g_eng);
     clip_engine_mute_clear(&g_eng);                    /* T10i: leaving LIVE clears every mute */
     engine_bass_off(0);                                /* release any held 303 A/B note (and log it) */
@@ -742,28 +877,40 @@ static void take_arm_if_pending(void)
 }
 void live_bridge_transport_start(void)
 {
+    /* S4: arm and start in one critical section, so the ISR never sees PLAY before the take is
+     * armed (and bar 0's prelude is built) — the arm's start and the transport's start are atomic. */
+    uint32_t f = engine_crit_enter();
     take_arm_if_pending();
     clip_engine_start(&g_eng);
+    engine_crit_exit(f);
 }
 void live_bridge_transport_restart(void)                 /* T11i: MIDI Start */
 {
     uint32_t f;
-    take_arm_if_pending();
+    if (take_recording(&g_take))
+        live_bridge_take_finish();                       /* S2: a Start during a recording ends it cleanly */
+    take_arm_if_pending();                               /* S2: honour a take armed while stopped */
     f = engine_crit_enter();
     clip_engine_restart(&g_eng);                         /* stages next[] under the mask */
     engine_crit_exit(f);
 }
 void live_bridge_transport_continue(void)                /* T11i: MIDI Continue resumes */
 {
-    uint32_t f = engine_crit_enter();
+    uint32_t f;
+    if (take_recording(&g_take))
+        live_bridge_take_finish();                       /* S2: a Continue during a recording ends it cleanly */
+    take_arm_if_pending();                               /* S2: honour a take armed while stopped */
+    f = engine_crit_enter();
     clip_engine_continue(&g_eng);
     engine_crit_exit(f);
 }
 void live_bridge_transport_stop(void)
 {
     clip_engine_transport_stop(&g_eng);
-    if (take_recording(&g_take) || take_armed(&g_take))
-        take_stop(&g_take, engine_sample_now());      /* a hard stop ends the take at the next bar */
+    if (take_playing(&g_take))
+        live_bridge_take_stop_play();                    /* S7: MIDI Stop stops take playback too */
+    else if (take_recording(&g_take) || take_armed(&g_take))
+        take_stop(&g_take, engine_sample_now());         /* a hard stop ends the take at the next bar */
 }
 int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 
@@ -784,11 +931,13 @@ void live_bridge_launch_quant(uint8_t clip, uint8_t quant)
     uint32_t f;
     if (clip >= NCLIPS)
         return;
+    if (take_playing(&g_take))
+        return;                                       /* S7: a Program Change does not fight a take */
     f = engine_crit_enter();
     g_stop_q[clip_role(clip) % NROLES] = 0;
     clip_engine_launch_quant(&g_eng, clip, quant);
     engine_crit_exit(f);
-    tp_post(TP_LAUNCH, clip, (uint8_t)clip_role(clip));
+    tp_post(TP_LAUNCH_Q, clip, (uint8_t)(quant & 3u));    /* S1: remember the quantize for replay */
 }
 void live_bridge_launch_now(uint8_t clip)
 {
@@ -842,8 +991,16 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
     }
 }
 
-void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
-void live_bridge_set_bpm_soft(uint16_t bpm_x10) { clip_engine_queue_bpm_soft(&g_eng, bpm_x10); }   /* T11i: the clock */
+void live_bridge_set_bpm(uint16_t bpm_x10)
+{
+    clip_engine_queue_bpm(&g_eng, bpm_x10);
+    tp_post(TP_BPM, (uint8_t)(bpm_x10 >> 8), (uint8_t)bpm_x10);   /* S2: record the tempo change */
+}
+void live_bridge_set_bpm_soft(uint16_t bpm_x10)   /* T11i: the clock */
+{
+    clip_engine_queue_bpm_soft(&g_eng, bpm_x10);
+    tp_post(TP_BPM, (uint8_t)(bpm_x10 >> 8), (uint8_t)bpm_x10);   /* S2: and the followed clock's */
+}
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
 
 /* T7b: the main loop owns the snapshot. Every edit writes the clip into the engine's copies with
