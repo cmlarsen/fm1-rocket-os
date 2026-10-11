@@ -48,3 +48,6 @@ These questions are still unresolved. When one is answered, record the answer in
 
 ## Core-1 data integrity with FM6 offloaded (2026-10-11, T5perf review)
 X0X's core-1 check word covers the job hand-off, not the data core 1 reads while it renders FM6. On a unit with a bad core 1, FM6 could click or hold a stuck-loud voice before the hand-off check trips the single-core fallback. Memory isn't corrupted: no pointers are loaded from that data. The 808 has the same exposure. Only a healthy unit has been measured. If owners report FM6 glitches, offer a GLOBAL option to keep FM6 on core 0.
+
+## The layer-toggle button's printed label (2026-10-11, T11h)
+X0X's code calls the panel button we use for the LIVE layer toggle `B_SEL`, and the T11h worker reports that the panel prints **SEL**. Our hardware notes and the interaction model call it **SCL**. Please read the label on the device. The help cards use SEL for now. Whichever it is, the docs will be made to match.
