@@ -593,15 +593,45 @@ void live_bridge_take_finish(void)
 #endif
 }
 
+#ifdef X0X_HOST
+void (*live_bridge_test_scan_hook)(void); /* observe scan work and its interrupt mask */
+#endif
+/* Immutable take-log search: main loop only, with interrupts enabled. */
+static uint16_t take_next_launch(uint8_t role, uint16_t from)
+{
+    uint16_t i;
+    for (i = from; i < g_take.n; i++) {
+        uint32_t cmd = g_take.ev[i].cmd;
+#ifdef X0X_HOST
+        if (live_bridge_test_scan_hook)
+            live_bridge_test_scan_hook();
+#endif
+        if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH &&
+            TAKE_CMD_B(cmd) != TAKE_LAUNCH_STOP &&
+            (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == role && TAKE_CMD_A(cmd) < NCLIPS)
+            break;
+    }
+    return i;
+}
+
 void live_bridge_take_play(void)
 {
     uint32_t f;
+    uint16_t first[NROLES][2];
+    int r, slot;
     if (take_playing(&g_take)) {
         live_bridge_take_stop_play();
         return;
     }
     if (!take_has(&g_take))
         return;
+    /* Find the initial FIFO events before masking interrupts. PLAY and the copies must still
+     * publish atomically so an offset-0 launch can never replay before its copy is staged. */
+    for (r = 0; r < NROLES; r++) {
+        first[r][0] = take_next_launch((uint8_t)r, 0u);
+        first[r][1] = first[r][0] < g_take.n ?
+            take_next_launch((uint8_t)r, (uint16_t)(first[r][0] + 1u)) : g_take.n;
+    }
     /* S4/B1: the reset, the PLAY publish and the offset-0 staging are ONE critical section. The
      * prelude writes a TAKE_LAUNCH(now) for every role that is playing, and the first ISR block
      * would fire them with next_set[role] still 0; staging them here, before playing=1, is what
@@ -610,7 +640,19 @@ void live_bridge_take_play(void)
     eng_reset_transport();                                /* bar 0 for the pass */
     take_play(&g_take, engine_sample_now());
     clip_engine_take_bpm_hold(&g_eng);                    /* B2: the take owns the tempo from here */
-    live_bridge_take_stage();                             /* stage the prelude (offset-0) launches */
+    for (r = 0; r < NROLES; r++) {
+        for (slot = 0; slot < 2; slot++) {
+            uint16_t i = first[r][slot];
+            g_take_stage_i[r] = i;
+            if (i == g_take.n)
+                break;
+            {
+                uint8_t clip = (uint8_t)TAKE_CMD_A(g_take.ev[i].cmd);
+                clip_engine_take_stage(&g_eng, (uint8_t)r, clip, &g_song.clip[clip], i);
+            }
+            g_take_stage_i[r] = (uint16_t)(i + 1u);
+        }
+    }
     g_eng.playing = 1;
     engine_crit_exit(f);
 #ifdef X0X_HOST
@@ -658,22 +700,11 @@ void live_bridge_take_stage(void)
                 i = play_i;
             /* The immutable take log is scanned with interrupts enabled. Cache exhaustion so
              * a role with no later launch does not rescan the tail on every UI frame. */
-            for (; i < g_take.n; i++) {
-                uint32_t cmd = g_take.ev[i].cmd;
-                if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH &&
-                    TAKE_CMD_B(cmd) != TAKE_LAUNCH_STOP &&
-                    (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == (uint8_t)r) {
-                    clip = (uint8_t)TAKE_CMD_A(cmd);
-                    break;
-                }
-            }
+            i = take_next_launch((uint8_t)r, i);
             g_take_stage_i[r] = i;
             if (i == g_take.n)
                 break;
-            if (clip >= NCLIPS) {
-                g_take_stage_i[r] = (uint16_t)(i + 1u);
-                continue;
-            }
+            clip = (uint8_t)TAKE_CMD_A(g_take.ev[i].cmd);
             f = engine_crit_enter();
             /* Playback may have advanced during the scan: never publish an already-replayed
              * event. Recheck the play cursor and state while publishing the copy. */

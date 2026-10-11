@@ -26,6 +26,7 @@ extern volatile int live_bridge_isr;
  * the invariant probe (live_bridge.c). */
 extern void (*live_bridge_test_hook)(void);
 extern void (*take_test_hook)(void);
+extern void (*live_bridge_test_scan_hook)(void);
 extern int live_bridge_test_consistent(void);
 /* T9i r1: a mutable sample clock, so the race tests can arm at one sample and record at another. */
 static uint32_t g_now;
@@ -515,6 +516,41 @@ static void r4_relay_test(void)
     live_bridge_exit();
 }
 
+static unsigned r5_scan_steps;
+static void r5_scan_hook(void)
+{
+    CHECK(!plat_crit_active());
+    r5_scan_steps++;
+}
+
+/* T9i r5: scans run unmasked, including initial PLAY, and exhausted roles cache the tail. */
+static void r5_scan_test(void)
+{
+    uint32_t *ev;
+    unsigned i, before;
+    live_bridge_take_init();
+    live_bridge_enter();
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    for (i = 0; i < 100u; i++) {
+        ev[2u * i] = i * 1000u;
+        ev[2u * i + 1u] = TAKE_MARK_TEMPO(1200u);
+    }
+    ev[200] = 400000u; ev[201] = TAKE_MARK_END;
+    live_bridge_take_loaded(101, 800000u, 1200u);
+    r5_scan_steps = 0;
+    live_bridge_test_scan_hook = r5_scan_hook;
+    live_bridge_take_play();
+    before = r5_scan_steps;
+    CHECK(before > 0);
+    for (i = 0; i < 10u; i++)
+        live_bridge_take_stage();
+    CHECK(r5_scan_steps == before);
+    live_bridge_test_scan_hook = 0;
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+}
+
 /* T9i r5: a song edit during playback returns at end only when no clock was followed.
  * Edit just before stopping, without a render, to pin the source on the following render too. */
 static void r5_tempo_restore_test(void)
@@ -756,6 +792,7 @@ int main(void)
     r4_relay_test();
     r5_drop_recovery_test();
     r5_tempo_restore_test();
+    r5_scan_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);
