@@ -133,6 +133,24 @@ uint32_t live_bridge_rebuild(const pattern_t *pats)
 void live_bridge_song_baseline(uint32_t h) { g_baselines++; g_song_hash = h; }
 int live_bridge_transport_playing(void) { return 0; }   /* T8i: the test is never playing */
 
+/* ---- T9i: the take buffer song_io reads/writes (a plain in-RAM stub) ---- */
+static take_hdr_t g_take_hdr;
+static take_event_t g_take_ev[TAKE_MAX_EVENTS];
+static int g_take_n;
+const void *live_bridge_take_hdr(void) { return &g_take_hdr; }
+const void *live_bridge_take_events(void) { return g_take_ev; }
+void *live_bridge_take_hdr_mut(void) { return &g_take_hdr; }
+void *live_bridge_take_events_mut(void) { return g_take_ev; }
+int live_bridge_take_nevents(void) { return g_take_n; }
+void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_x10)
+{
+    g_take_n = nevents;
+    g_take_hdr.nevents = (uint16_t)nevents;
+    g_take_hdr.length_samples = length_samples;
+    g_take_hdr.bpm_x10 = bpm_x10;
+}
+void live_bridge_take_clear_ram(void) { g_take_n = 0; g_take_hdr.nevents = 0; g_take_hdr.length_samples = 0; }
+
 static void reset_flash(void)
 {
     memset(nor, 0xFF, sizeof nor);

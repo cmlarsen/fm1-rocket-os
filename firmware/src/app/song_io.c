@@ -39,6 +39,10 @@ static undo_stack_t undo SONG_POOL;
 static uint8_t ready, dirty, loaded, failed;
 static int cur_slot = -1;                /* T8i: the slot the current song lives in, -1 = none yet */
 static uint32_t saves;
+/* T9i: the take's deferred store state (see the take block below) */
+enum { TAKE_NONE, TAKE_SAVE, TAKE_CLEAR };
+static uint8_t take_pending;
+static uint8_t take_ram_ok;
 
 static song_t *song(void) { return (song_t *)live_bridge_song(); }
 
@@ -89,6 +93,8 @@ void song_io_boot(const pattern_t *pats, uint16_t bpm_x10, int preferred)
     }
     ready = 1;
     live_bridge_song_reload();                          /* the clip engine follows the new song */
+    take_pending = TAKE_NONE;                           /* T9i: the take is the song's own */
+    song_io_take_load_ram();
 }
 
 int song_io_loaded(void) { return loaded != 0; }
@@ -125,9 +131,12 @@ int song_io_save(void)
 
 int song_io_flush(void)
 {
-    if (!dirty || failed)
-        return 0;
-    return song_io_save();
+    int rc = 0;
+    if (dirty && !failed)
+        rc = song_io_save();
+    if (rc == 0)
+        rc = song_io_take_flush();          /* T9i: the take rides the same stopped-and-idle window */
+    return rc;
 }
 
 void song_io_set_key_clip(int key, int clip)
@@ -291,8 +300,18 @@ void song_io_push_copy(int dst, int src, const void *old_dst)
 
 static int undo_run(int redo)
 {
-    int rc = redo ? undo_stack_redo(&undo, song(), &store, 0) : undo_stack_undo(&undo, song(), &store, 0);
+    int type = redo ? song_io_redo_type() : song_io_undo_type();
+    undo_take_scratch_t ts;
+    int rc;
+    ts.hdr = (take_hdr_t *)live_bridge_take_hdr_mut();   /* the in-RAM take backs the take undo (T6c) */
+    ts.ev = (take_event_t *)live_bridge_take_events_mut();
+    ts.max_events = TAKE_MAX_EVENTS;
+    rc = redo ? undo_stack_redo(&undo, song(), &store, &ts) : undo_stack_undo(&undo, song(), &store, &ts);
     if (rc == UNDO_DONE) {
+        if (type == (int)UNDO_REPLACE_TAKE) {           /* keep has_take in step with the restored take */
+            song()->has_take = (uint8_t)(ts.hdr->nevents > 0 ? 1 : 0);
+            live_bridge_take_loaded((int)ts.hdr->nevents, ts.hdr->length_samples, ts.hdr->bpm_x10);
+        }
         dirty = 1;                                      /* the song changed: write it back on the next save */
         failed = 0;
         live_bridge_song_reload();
@@ -300,7 +319,19 @@ static int undo_run(int redo)
     return rc;
 }
 
-int song_io_undo(void) { return undo_run(0); }
+int song_io_undo(void)
+{
+    if (take_pending != TAKE_NONE) {
+        /* T9i: a record/clear not yet flushed. The store still holds the previous take, so undo is
+         * just "cancel the pending write and reload it" (no second 16 KiB buffer). */
+        take_pending = TAKE_NONE;
+        song_io_take_load_ram();
+        dirty = 1;
+        failed = 0;
+        return UNDO_DONE;
+    }
+    return undo_run(0);
+}
 int song_io_redo(void) { return undo_run(1); }
 int song_io_undo_type(void) { return (int)undo_stack_undo_type(&undo); }
 int song_io_redo_type(void) { return (int)undo_stack_redo_type(&undo); }
@@ -314,6 +345,89 @@ int song_io_take_save(int slot, const void *hdr, const void *ev)
 int song_io_take_load(int slot, void *hdr, void *ev, uint32_t max_events)
 {
     return song_store_take_load(&store, slot, (take_hdr_t *)hdr, (take_event_t *)ev, max_events);
+}
+
+/* T9i: the take's deferred store write. A clear is stored as an empty take (0 events), which
+ * supersedes the old record at boot and keeps the old one recoverable for one undo (prev_take). */
+static void take_store_empty(int slot)
+{
+    take_hdr_t h;
+    h.nevents = 0;
+    h.bpm_x10 = (uint16_t)(song()->bpm_x10 ? song()->bpm_x10 : 1200u);
+    h.length_samples = 0;
+    song_store_take_save(&store, slot, &h, 0);
+}
+
+void song_io_take_request_save(void)
+{
+    take_pending = TAKE_SAVE;
+    take_ram_ok = 1;
+    song()->has_take = (uint8_t)(live_bridge_take_nevents() > 0 ? 1 : 0);
+    dirty = 1;
+    failed = 0;
+}
+void song_io_take_request_clear(void)
+{
+    live_bridge_take_clear_ram();
+    take_pending = TAKE_CLEAR;
+    take_ram_ok = 1;
+    song()->has_take = 0;
+    dirty = 1;
+    failed = 0;
+}
+int song_io_take_pending(void) { return take_pending != TAKE_NONE; }
+int song_io_take_loaded_ram(void) { return take_ram_ok; }
+
+int song_io_take_flush(void)
+{
+    int slot, rc = 0;
+    if (!ready || take_pending == TAKE_NONE)
+        return 0;
+    slot = cur_slot;
+    if (slot < 0)
+        slot = first_free_slot();
+    if (slot < 0) {
+        failed = 1;
+        return -1;
+    }
+    if (take_pending == TAKE_CLEAR || live_bridge_take_nevents() == 0) {
+        take_store_empty(slot);
+    } else {
+        rc = song_store_take_save(&store, slot, (const take_hdr_t *)live_bridge_take_hdr(),
+                                  (const take_event_t *)live_bridge_take_events());
+        if (rc != 0) {
+            failed = 1;
+            return -1;
+        }
+    }
+    undo_stack_push_take(&undo, &store, (uint8_t)slot);   /* durable take undo (T6c) */
+    take_pending = TAKE_NONE;
+    return 0;
+}
+
+/* Load the song's stored take into live_bridge's buffer (or clear it when there is none). */
+int song_io_take_load_ram(void)
+{
+    take_hdr_t *hdr;
+    take_event_t *ev;
+    int slot = cur_slot;
+    if (!ready)
+        return -1;
+    hdr = (take_hdr_t *)live_bridge_take_hdr_mut();
+    ev = (take_event_t *)live_bridge_take_events_mut();
+    take_ram_ok = 0;
+    if (!song()->has_take || slot < 0) {
+        live_bridge_take_clear_ram();
+        return -1;
+    }
+    if (song_store_take_load(&store, slot, hdr, ev, TAKE_MAX_EVENTS) != 0 || hdr->nevents == 0) {
+        live_bridge_take_clear_ram();
+        song()->has_take = 0;
+        return -1;
+    }
+    live_bridge_take_loaded((int)hdr->nevents, hdr->length_samples, hdr->bpm_x10);
+    take_ram_ok = 1;
+    return 0;
 }
 
 /* ==================================================================== T8i === */
@@ -375,6 +489,8 @@ int song_io_songs_open(void *ctx, int slot)
     clip_undo_clear();
     live_bridge_song_reload();
     live_bridge_song_baseline(song_store_tag(&store, slot));
+    take_pending = TAKE_NONE;                            /* T9i: the new song's own take */
+    song_io_take_load_ram();
     return 0;
 }
 
