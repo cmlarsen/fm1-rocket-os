@@ -153,10 +153,25 @@ static uint8_t hn_mode_now(void)
 {
     return (uint8_t)(ui.view | (ui.classic ? 0x40u : 0u) | (live_bridge_active() ? 0x80u : 0u));
 }
+/* T2c r2: the 303 A/B parts are monophonic. Releasing one key must not cut the note while another
+ * key on the same part is still held; the note-off goes out only on the last release, whichever
+ * key that is. (v1 does not retrigger to the other key, so the part keeps sounding the note it
+ * already has.) Polyphonic roles (drums, FM6, NOISE) release their own note as before. */
+static int hn_mono(uint8_t role) { return role == LIVE_BASS || role == LIVE_LEAD; }
 static void note_key_up(int k)
 {
+    int j;
     if (k < 0 || k >= NKEYS || !hn_on[k])
         return;
+    if (hn_mono(hn_role[k])) {
+        for (j = 0; j < NKEYS; j++)                  /* another key on the same part still held? */
+            if (j != k && hn_on[j] && hn_role[j] == hn_role[k])
+                break;
+        if (j < NKEYS) {
+            hn_on[k] = 0;                            /* keep sounding: no note-off yet */
+            return;
+        }
+    }
     live_bridge_play_key(hn_role[k], hn_note[k], 0, 0);
     hn_on[k] = 0;
 }

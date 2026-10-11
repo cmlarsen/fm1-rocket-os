@@ -85,10 +85,32 @@ catches (b) as the release-on-change violation it is.)
 - **`tests/fuzz/run_fuzz.sh 20 500`** (the `make check` budget): all pass.
 - **`make check` takes ~15 s wall** end to end (the `fw` build on `deltron.local`, the lint checks,
   and the 20 × 500 fuzz); the fuzz part is ~6 s.
-- **Regression:** `make unit`, `make scenarios` (goldens unchanged) and `make fw` pass.
-- **Device build** (`make fw`, JieLi clang 4.0.1, pi32v2): image **514,560 B** (+128 B for the
-  held-note mode byte); RAM `.data+.bss` **95,824 B** of 98,304; POOL **292,132 B** of 344,064;
-  package 609,680 B (identity FM-1_900).
+- **Regression (full ladder):** `make unit`, `make scenarios` (goldens unchanged),
+  `make screens-lint` (0 findings), `make parity` (WASM matches native), `make check` and `make fw`
+  all pass.
+- **Device build** (`make fw`, JieLi clang 4.0.1, pi32v2): image **514,624 B** (the held-note mode
+  byte and the mono-part release rule); RAM `.data+.bss` **95,824 B** of 98,304; POOL **292,132 B**
+  of 344,064; package 609,680 B (identity FM-1_900).
+
+## Round 2: the mono-part release rule
+
+The review's round-2 regression: the first fix moved the 303 keyboard note-off into the table but
+dropped `bass_kbd`'s per-part guard, so releasing one of two keys held on the same 303 part closed
+the gate and cut the legato note. `note_key_up` now applies the rule once, for every table path
+(LIVE's PLAY layer, the sound pages, the X0X keyboard and the 303 step preview): a monophonic part
+(`LIVE_BASS` / `LIVE_LEAD`) sends its note-off only when the last key on that part is released;
+while another key on the same part is held the part keeps sounding. v1 does not retrigger to the
+other key; polyphonic roles (drums, FM6, NOISE) release per note as before. MIDI in already had the
+equivalent guard (`bass_held[b] == note` in engine.c), so it was never affected.
+
+Scenarios: `legato_cut.x0x` (the reviewer's classic-keyboard reproduction) and `legato_live.x0x`
+(the BASS PLAY layer in LIVE); both assert `voices 1` after the first key is released and
+`voices 0` after the last, and both fail without the rule.
+
+**Scope of the mid-run checks.** `staleheldK` / `heldnotes` only see notes that a key put in the
+held-note table. Anything else — a sequencer gate, a clip, a MIDI note, a drum one-shot — is not in
+the table, so those checks would not notice it; the end-of-run `voices 0` check (every engine's
+voices) is what covers the rest.
 
 ## Limits
 

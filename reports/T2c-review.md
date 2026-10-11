@@ -13,3 +13,13 @@ The reviewer's files are in `/private/tmp/claude-502/-Users-caleb-CalebApps-fm1-
 6. After the fixes, the unmutated build passes 200×2000. Report how long `make check` takes.
 
 Commit, update reports/T2c.md with the mutation table, and send worker_done.
+
+## Re-review: one regression to fix
+- **A held legato 303 note is cut** (`ui.c:2100/2113` `bass_kbd`, `ui.c:2137/2147` `bass_step_key`). The `kbd_held_note[b] == n` guard was dropped, so `note_key_up` → `engine_bass_off(part)` closes the gate whatever is sounding. The reviewer's repro is `/private/tmp/claude-502/-Users-caleb-CalebApps-fm1-rocket-os/10296272-f272-4eb6-9e65-5ca02d389a5d/scratchpad/legato_cut.x0x`.
+- **Coordinator rule for every monophonic part (303 A/B, and any mono role path in the held-note table):** releasing a key sends the part's note-off only if that key's note is the one the part is sounding. If another key on the same part is still held, keep sounding. Don't retrigger in v1.
+  - Apply it once, in `note_key_up` / the held-note table, so LIVE PLAY, the sound pages, the X0X keyboard and MIDI all get it.
+  - Polyphonic engines (FM6, NOISE, drums) release per note as now.
+- Add `legato_cut.x0x` as a scenario, plus a LIVE PLAY-layer variant on BASS.
+- Document in `reports/T2c.md` that `staleheld`/`heldnotes` only see notes in the held-note table; the end-of-run `voices 0` check covers the rest.
+
+Run the full ladder plus `make fuzz-ui`, commit, and send worker_done.
