@@ -30,6 +30,12 @@ Takes record X0X's 32-bit engine command word, `type:4 | a:8 | b:8 | c:12` (`eng
 
 FM6 and NOISE (T5i) use the existing parameter-target and note-on/off types with new part numbers; they don't add command types.
 
+**T5i: the FM6 and NOISE parts (T5i's scheme).** Two engine-only parts are added *after* X0X's four: `PART_FM6 = 4` and `PART_NOISE = 5` (`ENG_NPARTS = 6`), for the mixer, the dispatch and the render only. `NPARTS` stays 4, so no X0X part table, no sequencer (`NTRACKS = 4`) and no stored format changes.
+- **Notes.** `C_BON`, `a = 4 | 5`, `b = the MIDI note`; the `c` field carries **velocity 0..127** (for `a < 4` it keeps X0X's `accent | slide`). `C_BOFF`, `a = 4 | 5`, `b = the note`. No new command type. `engine_note_on/off` queue them.
+- **Parameters.** Target `T_RSV` (3, the removed BREAK part's target): **voice 0 = FM6, voice 1 = NOISE**; the index is the adapter's own 0..7. FM6: `0 ALG, 1 FB, 2 MLVL, 3 MRAT, 4 MEG, 5 VMOD, 6 DTUN, 7 SLOT` (SLOT is `engine_fm6_preset`, falling back to a ROM voice when a bank voice is not there). NOISE: `0 MODE, 1 COLR, 2 FREQ, 3 RES, 4 TRK, 5 DENS, 6 DRFT, 7 CRSH`. FM6's signed macros are stored as a pot offset (`pot = macro − lo`, so `0..hi−lo`); the rest are the adapter values.
+- **Mix.** `T_MIX` voices 4 and 5 are FM6's and NOISE's strips (Level, Rev send, Dly send, Pan), like the others.
+- **FM6 presets.** `engine_fm6_preset(n)` (SLOT numbering: 0..7 a ROM factory voice, 8 the own patch, 9..40 a bank voice). The bank is the 32-voice flash sector at `0x9F000` (`plat_fm6_vbank`), validated on read; an erased or corrupt sector falls back to the ROM voices. T5i never writes it.
+
 ## Undo limits (v1)
 - **Take replace:** one level per song. Undo brings back the previous take; a second undo says "can't undo".
 - **Delete song:** undo works until another save reuses that storage. After that it says "can't undo" rather than restoring something wrong.

@@ -1,0 +1,33 @@
+# T5i: FM6 and NOISE as engine-only parts (PART_FM6 = 4, PART_NOISE = 5), played through the
+# C_BON / C_BOFF command path. A 4-note FM6 chord, then a NOISE hit; the events golden fixes the
+# command stream and audio.json fixes the level (not silent, no clipping).
+wait 300
+# the mix strips: FM6 and NOISE at unity (T_MIX voices 4 and 5)
+param 5 4 0 100
+param 5 5 0 100
+# FM6: the TINE EP factory voice (SLOT=0), its level macro up a little
+param 3 0 7 0
+param 3 0 2 70
+# NOISE: ANLG, bright and resonant
+param 3 1 0 0
+param 3 1 2 90
+param 3 1 4 0
+events ev.txt
+wav t5i.wav
+note 4 60 110
+note 4 64 110
+note 4 67 110
+note 4 72 110
+wait 500
+note 5 45 120
+wait 500
+note 4 60 0
+note 4 64 0
+note 4 67 0
+note 4 72 0
+note 5 45 0
+wait 1500
+eventsstop
+wavstop
+expect peak_db_min -40
+expect peak_db_max -0.2
