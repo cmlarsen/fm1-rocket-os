@@ -22,3 +22,15 @@ Stress 1 profile shares: 909 33%, 303A 22%, 303B 21%, FX 15%, MASTER 8.5%, SEQ 1
 ## Owner checklist (RC1 on hardware)
 - [ ] Play LIVE by hand with CHORDS: does it sound right at 4 voices, and is a guard-shed to 2 voices noticeable?
 - [ ] Decide whether a voice count below 4 is acceptable if T5perf can't win back headroom.
+
+## Re-measured after T5perf candidate 2 (FM6 on core 1, guard releases at 75%)
+
+| Stress | Core 1 | Mean | Max | Peak | Xruns | Guard |
+|---|---|---|---|---|---|---|
+| 2 (full LIVE, 4 FM6 voices) | on | 66.4% | 69% | 78% | 0 | never: **passes RC1** |
+| 5 (stress 2 with core 1 forced off) | off | 67.4% | 80% | 92% | 0 | engaged once |
+| 1 (X0X baseline) | on | 65.3% | 67% | 76% | 0 | never |
+
+Candidate 1 had a bug: FM6 was silently skipped when core 1 was off. The coordinator caught it because FM6 showed 0% in the profile on the single-core run. A host test now proves the FM6 audio is the same with core 1 on or off.
+
+**Verdict:** units with a healthy core 1 pass RC1. Single-core units stay dropout-free, with the guard shedding FM6 to 2 voices at full stress. That meets the "never require core 1" rule.
