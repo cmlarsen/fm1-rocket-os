@@ -107,3 +107,6 @@ Reviews found hung notes in T3, T7a and T7a's re-review, each through a differen
 - **On monophonic parts (the 303s),** releasing a key silences the part only if that key's note is the one sounding (legato). Polyphonic engines release per note.
 
 Task **T2c (UI fuzz)** enforces this. The host runner plays random sequences of key, button and encoder events across every view and mode, then releases all inputs and stops the transport. After the release tail, the engine must report zero active voices on every engine. It runs in `make check`.
+
+## Invariant: interrupts never wait (2026-10-11)
+No code in an interrupt may spin or block on state another interrupt or the main loop is writing. The T11i review found that the USB timer interrupt could spin on a time base the audio interrupt was halfway through publishing, which deadlocks until the watchdog resets the unit. Shared state is published wait-free: a sequence counter with a bounded retry that falls back to the last snapshot, or a single aligned word. The main loop may mask interrupts briefly for a copy (`engine_crit`, a few µs) and must restore the previous mask state.
