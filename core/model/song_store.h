@@ -8,14 +8,19 @@
  * abstract interface is `song_flash_t` below.
  *
  * Records are power-safe. A record is a header written last (magic, version,
- * slot, kind, sequence number, raw and stored lengths, CRC-32 of the payload)
- * followed by the payload. Two records never share a flash extent, and the
- * store keeps one spare extent of each kind, so a save writes into a free
+ * slot, kind, flags, sequence number, raw and stored lengths, CRC-32 of the
+ * payload) followed by the payload. Two records never share a flash extent, and
+ * the store keeps one spare extent of each kind, so a save writes into a free
  * extent and only then drops the old one: a power cut at any byte leaves the
  * previous record intact. At init every extent header is scanned and the
  * newest valid record per slot wins, which replaces A/B without needing a
- * directory on flash. The previous take of a slot is kept until its extent is
- * reused, so a replace-take is undoable once.
+ * directory on flash.
+ *
+ * Two edits re-commit a new record instead of touching flash in place, so they
+ * survive a reboot: delete sets a `deleted` flag in a new song record (the data
+ * stays, and undelete clears the flag the same way), and a replace-take undo
+ * loads the previous take into the caller's buffer and commits it as a new take
+ * record. The previous take is kept until its extent is reused.
  *
  * Extents (sectors of 4096 B), all inside the region:
  *   song: SONG_STORE_SONG_EXTENTS x SONG_STORE_SONG_SECTORS (4)   first
@@ -23,6 +28,8 @@
  * A song extent holds any song: the worst case (a song_t of incompressible
  * bytes) compresses to 14,465 B and the record header is 40 B, both inside
  * 4 sectors. A take extent holds one take (header + events), 16,392 B raw.
+ * Only the sectors a record needs are erased, and the free extent with the
+ * oldest last record is chosen, so erases move around the pool.
  *
  * Flavour: integer only, no allocation, bounded time per call. `song_store_save`
  * and `song_store_take_save` erase and program; the save policy (stopped and
@@ -73,7 +80,7 @@ typedef struct {
     uint32_t take_seq;
     uint32_t prev_take_seq;
     uint8_t has_song;
-    uint8_t deleted;             /* RAM-only: keeps the data until the slot is reused */
+    uint8_t deleted;             /* the newest record carries the deleted flag (persists) */
 } song_store_slot_t;
 
 typedef struct {
@@ -83,11 +90,12 @@ typedef struct {
     uint8_t ready;
 } song_store_t;
 
-/* what song_store_list reports: enough for the songs screen */
+/* what song_store_list reports: enough for the songs screen. A deleted slot is
+ * reported free (used 0, empty name, no take) until it is undeleted. */
 typedef struct {
     char name[SONG_NAME_LEN];
-    uint8_t used;                /* a song record exists */
-    uint8_t deleted;             /* marked deleted, data still there */
+    uint8_t used;                /* a live song record exists */
+    uint8_t deleted;             /* marked deleted; the bytes stay for undelete */
     uint8_t has_take;
 } song_slot_t;
 
@@ -96,16 +104,18 @@ typedef struct {
 int song_store_init(song_store_t *st, const song_flash_t *fb);
 
 int song_store_save(song_store_t *st, int slot, const song_t *song);
-int song_store_load(song_store_t *st, int slot, song_t *out);      /* 0 = loaded */
-int song_store_delete(song_store_t *st, int slot);                 /* recoverable */
-int song_store_undelete(song_store_t *st, int slot);
+int song_store_load(song_store_t *st, int slot, song_t *out);      /* 0 = loaded; a deleted slot reads as free */
+int song_store_delete(song_store_t *st, int slot);                 /* re-commits with the deleted flag; survives reboot */
+int song_store_undelete(song_store_t *st, int slot);               /* re-commits with the flag cleared */
 int song_store_is_deleted(const song_store_t *st, int slot);
 int song_store_list(const song_store_t *st, int slot, song_slot_t *out);
 
 /* One take per song. `hdr->nevents` events are stored raw (no compression). */
 int song_store_take_save(song_store_t *st, int slot, const take_hdr_t *hdr, const take_event_t *ev);
 int song_store_take_load(song_store_t *st, int slot, take_hdr_t *hdr, take_event_t *ev, uint32_t max_events);
-int song_store_take_swap(song_store_t *st, int slot);              /* undo/redo of a replace */
+/* Undo/redo of a replace-take: load the previous take into the caller's buffer and
+ * re-commit it (a new sequence number), so the undo survives a reboot. 0 = done. */
+int song_store_take_restore(song_store_t *st, int slot, take_hdr_t *hdr, take_event_t *ev, uint32_t max_events);
 
 /* A valid empty song, for the load fallback and New > Empty. */
 void song_store_empty(song_t *out);

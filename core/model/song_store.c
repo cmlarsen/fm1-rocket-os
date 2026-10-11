@@ -61,6 +61,16 @@ static uint32_t sst_crc_of(const void *p, uint32_t n)
     return ~sst_crc(0xFFFFFFFFu, (const uint8_t *)p, n);
 }
 
+/* a sink that only measures (the first pass of a song write, to size the erase) */
+typedef struct { uint32_t n; } sst_count_t;
+
+static int sst_count_put(void *ctx, const uint8_t *p, uint32_t n)
+{
+    (void)p;
+    ((sst_count_t *)ctx)->n += n;
+    return 0;
+}
+
 /* ---- flash: region checks and byte access ------------------------------ */
 
 static int sst_in_region(uint32_t off, uint32_t n)
@@ -108,15 +118,19 @@ static uint32_t sst_take_ext_off(uint32_t j)
 
 /* ---- header ------------------------------------------------------------- */
 
-static uint32_t sst_put_hdr(sst_hdr_t *h, uint16_t kind, uint8_t slot, uint32_t seq, uint32_t rawlen,
-                            uint32_t len, uint32_t crc, const char *name)
+/* header flags: bit 0 says the slot is deleted (the record is still valid data,
+ * so undelete can re-commit it with the flag cleared). */
+#define SST_FLAG_DELETED 1u
+
+static uint32_t sst_put_hdr(sst_hdr_t *h, uint16_t kind, uint8_t slot, uint8_t flags, uint32_t seq,
+                            uint32_t rawlen, uint32_t len, uint32_t crc, const char *name)
 {
     int i;
     h->magic = SST_MAGIC;
     h->version = SONG_STORE_VERSION;
     h->kind = kind;
     h->slot = slot;
-    h->flags = 0;
+    h->flags = flags;
     h->rawlen = (uint16_t)rawlen;
     h->seq = seq;
     h->len = len;
@@ -141,11 +155,11 @@ static int sst_hdr_ok(const sst_hdr_t *h, uint32_t cap)
     if (h->hcrc != sst_crc_of(h, (uint32_t)((const uint8_t *)&h->hcrc - (const uint8_t *)h)))
         return 0;
     if (h->kind == SST_KIND_SONG) {
-        if (h->rawlen != sizeof(song_t))
+        if (h->rawlen != sizeof(song_t) || (h->flags & (uint8_t)~SST_FLAG_DELETED) != 0u)
             return 0;
     } else {
-        if (h->rawlen != h->len || h->rawlen < 8u || h->rawlen > 8u + TAKE_MAX_EVENTS * 8u ||
-            ((h->rawlen - 8u) % 8u) != 0u)
+        if (h->flags != 0u || h->rawlen != h->len || h->rawlen < 8u ||
+            h->rawlen > 8u + TAKE_MAX_EVENTS * 8u || ((h->rawlen - 8u) % 8u) != 0u)
             return 0;
     }
     return 1;
@@ -256,30 +270,61 @@ static int sst_commit(const song_store_t *st, uint32_t off, const sst_hdr_t *h)
     sst_hdr_t chk;
     uint8_t buf[256];
     uint32_t left = h->len, c = 0xFFFFFFFFu, at = off + SST_HDR;
+    int bad = 0;
     if (sst_program(st, off, h, SST_HDR))       /* the commit record, last */
+        bad = 1;
+    else if (sst_read_hdr(st, off, &chk) || chk.magic != SST_MAGIC || chk.seq != h->seq ||
+             chk.crc != h->crc || chk.hcrc != h->hcrc)
+        bad = 1;
+    if (!bad)
+        while (left) {
+            uint32_t k = left > (uint32_t)sizeof buf ? (uint32_t)sizeof buf : left;
+            if (sst_read(st, at, buf, k)) {
+                bad = 1;
+                break;
+            }
+            c = sst_crc(c, buf, k);
+            at += k;
+            left -= k;
+        }
+    if (!bad && ~c != h->crc)
+        bad = 1;
+    if (bad) {
+        /* the record must not win a later scan: drop its header sector. Best
+         * effort: a power cut that caused this may make the erase fail too. */
+        sst_erase(st, off);
         return -1;
-    if (sst_read_hdr(st, off, &chk) || chk.magic != SST_MAGIC || chk.seq != h->seq || chk.crc != h->crc ||
-        chk.hcrc != h->hcrc)
-        return -1;
-    while (left) {
-        uint32_t k = left > (uint32_t)sizeof buf ? (uint32_t)sizeof buf : left;
-        if (sst_read(st, at, buf, k))
-            return -1;
-        c = sst_crc(c, buf, k);
-        at += k;
-        left -= k;
     }
-    return ~c == h->crc ? 0 : -1;
+    return 0;
 }
 
-static int sst_write_song(song_store_t *st, uint32_t off, uint8_t slot, uint32_t seq, const song_t *song)
+static uint32_t sst_sectors_for(uint32_t payload, uint32_t max_sectors)
+{
+    uint32_t n = (SST_HDR + payload + SONG_STORE_SECTOR - 1u) / SONG_STORE_SECTOR;
+    if (n == 0u)
+        n = 1u;
+    if (n > max_sectors)
+        n = max_sectors;
+    return n;
+}
+
+static int sst_write_song(song_store_t *st, uint32_t off, uint8_t slot, uint8_t flags, uint32_t seq,
+                          const song_t *song)
 {
     sst_wr_t w;
     lz_sink_t sink;
+    sst_count_t c;
     sst_hdr_t h;
     uint32_t crc;
-    if (sst_erase_extent(st, off, SONG_STORE_SONG_SECTORS))
+    /* first pass: measure, so only the sectors the record needs are erased */
+    c.n = 0u;
+    sink.put = sst_count_put;
+    sink.ctx = &c;
+    if (lz_compress((const uint8_t *)song, sizeof(song_t), &sink) || c.n > SST_SONG_EXT_BYTES - SST_HDR)
         return -1;
+    if (sst_erase_extent(st, off, sst_sectors_for(c.n, SONG_STORE_SONG_SECTORS)))
+        return -1;
+    /* second pass: stream it to flash */
     w.st = st;
     w.abs = off + SST_HDR;
     w.page_abs = w.abs;
@@ -293,7 +338,7 @@ static int sst_write_song(song_store_t *st, uint32_t off, uint8_t slot, uint32_t
     if (lz_compress((const uint8_t *)song, sizeof(song_t), &sink) || sst_wr_flush(&w) || w.err)
         return -1;
     crc = ~w.crc;
-    sst_put_hdr(&h, SST_KIND_SONG, slot, seq, sizeof(song_t), w.len, crc, song->name);
+    sst_put_hdr(&h, SST_KIND_SONG, slot, flags, seq, sizeof(song_t), w.len, crc, song->name);
     return sst_commit(st, off, &h);
 }
 
@@ -302,8 +347,8 @@ static int sst_write_take(song_store_t *st, uint32_t off, uint8_t slot, uint32_t
 {
     uint8_t tmp[8];
     sst_hdr_t h;
-    uint32_t c = 0xFFFFFFFFu, i;
-    if (sst_erase_extent(st, off, SONG_STORE_TAKE_SECTORS))
+    uint32_t c = 0xFFFFFFFFu, i, payload = 8u + hdr->nevents * 8u;
+    if (sst_erase_extent(st, off, sst_sectors_for(payload, SONG_STORE_TAKE_SECTORS)))
         return -1;
     for (i = 0; i < 8u; i++)
         tmp[i] = ((const uint8_t *)hdr)[i];
@@ -312,7 +357,7 @@ static int sst_write_take(song_store_t *st, uint32_t off, uint8_t slot, uint32_t
     if (hdr->nevents)
         if (sst_write_raw(st, off + SST_HDR + 8u, (const uint8_t *)ev, hdr->nevents * 8u, &c))
             return -1;
-    sst_put_hdr(&h, SST_KIND_TAKE, slot, seq, 8u + hdr->nevents * 8u, 8u + hdr->nevents * 8u, ~c, 0);
+    sst_put_hdr(&h, SST_KIND_TAKE, slot, 0u, seq, payload, payload, ~c, 0);
     return sst_commit(st, off, &h);
 }
 
@@ -344,36 +389,63 @@ static int sst_take_ext_used(const song_store_t *st, int ext)
     return 0;
 }
 
-/* the first extent of the kind no slot keeps; there is always one (one spare) */
-static int sst_pick_song_ext(const song_store_t *st)
+/* the sequence number of whatever record an extent still holds (0 = erased or invalid) */
+static uint32_t sst_ext_seq(const song_store_t *st, int ext, int is_take, uint32_t cap)
 {
-    int i;
-    for (i = 0; i < (int)SONG_STORE_SONG_EXTENTS; i++)
-        if (!sst_song_ext_used(st, i))
-            return i;
-    return -1;
+    sst_hdr_t h;
+    uint32_t off = is_take ? sst_take_ext_off((uint32_t)ext) : sst_song_ext_off((uint32_t)ext);
+    if (sst_read_hdr(st, off, &h) || !sst_hdr_ok(&h, cap) || h.kind != (is_take ? SST_KIND_TAKE : SST_KIND_SONG))
+        return 0u;
+    return h.seq;
 }
 
+/* Among the free extents of a kind, take the one whose last record is oldest, so
+ * erases move around the pool (wear-levelling). There is always one free (one
+ * spare), so the caller's save never runs out. */
+static int sst_pick_free_ext(const song_store_t *st, int is_take)
+{
+    int n = is_take ? (int)SONG_STORE_TAKE_EXTENTS : (int)SONG_STORE_SONG_EXTENTS;
+    uint32_t cap = is_take ? SST_TAKE_EXT_BYTES : SST_SONG_EXT_BYTES;
+    int i, best = -1;
+    uint32_t best_seq = 0;
+    for (i = 0; i < n; i++) {
+        int used = is_take ? sst_take_ext_used(st, i) : sst_song_ext_used(st, i);
+        if (used)
+            continue;
+        if (best < 0) {
+            best = i;
+            best_seq = sst_ext_seq(st, i, is_take, cap);
+        } else {
+            uint32_t q = sst_ext_seq(st, i, is_take, cap);
+            if (q < best_seq) {
+                best = i;
+                best_seq = q;
+            }
+        }
+    }
+    return best;
+}
+
+/* A take save may have no free extent when a previous take is held for undo; reusing
+ * the oldest kept previous take is the safe choice, its extent is what "reused" means. */
 static int sst_pick_take_ext(song_store_t *st)
 {
-    int i, s, best = -1;
+    int ext = sst_pick_free_ext(st, 1);
+    int s, best = -1;
     uint32_t best_seq = 0;
-    for (i = 0; i < (int)SONG_STORE_TAKE_EXTENTS; i++)
-        if (!sst_take_ext_used(st, i))
-            return i;
-    for (s = 0; s < (int)SONG_STORE_SLOTS; s++) {   /* full: reuse the oldest kept previous take */
-        if (st->slot[s].prev_take_ext >= 0 &&
-            (best < 0 || st->slot[s].prev_take_seq < best_seq)) {
+    if (ext >= 0)
+        return ext;
+    for (s = 0; s < (int)SONG_STORE_SLOTS; s++)
+        if (st->slot[s].prev_take_ext >= 0 && (best < 0 || st->slot[s].prev_take_seq < best_seq)) {
             best = s;
             best_seq = st->slot[s].prev_take_seq;
         }
-    }
     if (best < 0)
         return -1;
-    i = st->slot[best].prev_take_ext;
+    ext = st->slot[best].prev_take_ext;
     st->slot[best].prev_take_ext = -1;
     st->slot[best].prev_take_seq = 0u;
-    return i;
+    return ext;
 }
 
 /* ---- fill a valid empty song ------------------------------------------- */
@@ -408,16 +480,22 @@ int song_validate(const song_t *s)
 {
     static const uint8_t FIRST[NROLES] = {0u, 7u, 12u, 19u, 24u};
     static const uint8_t NC[NROLES] = {ROLE_CLIPS_DRUMS, ROLE_CLIPS_BASS, ROLE_CLIPS_LEAD, ROLE_CLIPS_CHORDS, ROLE_CLIPS_FX};
-    int i, k;
+    int i, k, j, nul;
     if (!s || s->magic != SONG_MAGIC)
         return -1;
     if (s->version != MODEL_VERSION)
         return -1;
-    if (s->bpm_x10 == 0)
-        return -1;
+    if (s->bpm_x10 < 200 || s->bpm_x10 > 3000)
+        return -1;                            /* 20.0 .. 300.0 BPM */
     if (s->swing > 100 || s->quant_default >= NQUANT || s->live_channel > 16)
         return -1;
     if (s->pc_launch > 1 || s->stage_lock > 1 || s->has_take > 1)
+        return -1;
+    nul = 0;                                  /* the name must be terminated inside SONG_NAME_LEN */
+    for (i = 0; i < (int)SONG_NAME_LEN; i++)
+        if (s->name[i] == 0)
+            nul = 1;
+    if (!nul)
         return -1;
     for (i = 0; i < NROLES; i++) {
         if (s->role[i].engine >= NENGINES || s->role[i].muted > 1 || s->role[i].volume > 127)
@@ -439,11 +517,20 @@ int song_validate(const song_t *s)
         if (clip_role((uint8_t)i) != ROLE_DRUMS) {
             for (k = 0; k < (int)c->nnotes; k++) {
                 const note_t *n = &c->d.notes[k];
-                if (n->step >= (int)CLIP_MAX_STEPS || n->len < 1u || n->len > (int)CLIP_MAX_STEPS)
+                if (n->step >= c->len || n->step >= (int)CLIP_MAX_STEPS)
                     return -1;
-                if (n->note > 127 || n->vel > 127)
+                if (n->len < 1u || n->len > (int)CLIP_MAX_STEPS)
+                    return -1;
+                if (n->note > 127 || n->vel < 1u || n->vel > 127)
                     return -1;
             }
+        }
+        for (j = 0; j < (int)CLIP_MOTION_LANES; j++) {
+            if (c->motion[j].param != PARAM_NONE && c->motion[j].param >= 0x0800u)
+                return -1;                    /* a T5i range check tightens this later */
+            for (k = 0; k < (int)CLIP_MAX_STEPS; k++)
+                if (c->motion[j].v[k] != MOTION_NONE && c->motion[j].v[k] > 127)
+                    return -1;
         }
     }
     return 0;
@@ -497,6 +584,7 @@ int song_store_init(song_store_t *st, const song_flash_t *fb)
             st->slot[h.slot].song_ext = (int8_t)i;
             st->slot[h.slot].song_seq = h.seq;
             st->slot[h.slot].has_song = 1u;
+            st->slot[h.slot].deleted = (h.flags & SST_FLAG_DELETED) ? 1u : 0u;
         }
     }
     for (i = 0; i < (int)SONG_STORE_TAKE_EXTENTS; i++) {
@@ -571,16 +659,11 @@ static int sst_try_song(const song_store_t *st, int ext, uint8_t slot, song_t *o
     return song_validate(out);
 }
 
-int song_store_load(song_store_t *st, int slot, song_t *out)
+static int sst_load_song(song_store_t *st, int slot, song_t *out)
 {
     int order[SONG_STORE_SONG_EXTENTS], n = 0, i, j, excl = -1;
     uint32_t seq[SONG_STORE_SONG_EXTENTS];
-    if (!st || !st->ready || !out || slot < 0 || slot >= (int)SONG_STORE_SLOTS) {
-        if (out)
-            song_store_empty(out);
-        return -1;
-    }
-    /* the directory's copy first (after a take swap the directory is the truth) */
+    /* the directory's copy first (the newest valid record wins otherwise) */
     if (st->slot[slot].song_ext >= 0 && sst_try_song(st, st->slot[slot].song_ext, (uint8_t)slot, out) == 0)
         return 0;
     excl = st->slot[slot].song_ext;
@@ -613,6 +696,20 @@ int song_store_load(song_store_t *st, int slot, song_t *out)
     return -1;
 }
 
+int song_store_load(song_store_t *st, int slot, song_t *out)
+{
+    if (!st || !st->ready || !out || slot < 0 || slot >= (int)SONG_STORE_SLOTS) {
+        if (out)
+            song_store_empty(out);
+        return -1;
+    }
+    if (st->slot[slot].deleted) {             /* a deleted slot reads as free; its bytes stay for undelete */
+        song_store_empty(out);
+        return -1;
+    }
+    return sst_load_song(st, slot, out);
+}
+
 /* ---- save / delete / list ---------------------------------------------- */
 
 int song_store_save(song_store_t *st, int slot, const song_t *song)
@@ -623,12 +720,12 @@ int song_store_save(song_store_t *st, int slot, const song_t *song)
         return -1;
     if (song_validate(song))
         return -2;
-    ext = sst_pick_song_ext(st);
+    ext = sst_pick_free_ext(st, 0);
     if (ext < 0)
         return -3;
     seq = st->next_seq;
     off = sst_song_ext_off((uint32_t)ext);
-    if (sst_write_song(st, off, (uint8_t)slot, seq, song))
+    if (sst_write_song(st, off, (uint8_t)slot, 0u, seq, song))
         return -4;
     st->next_seq = seq + 1u;
     st->slot[slot].song_ext = (int8_t)ext;    /* the old extent is now unowned, its bytes kept */
@@ -638,20 +735,47 @@ int song_store_save(song_store_t *st, int slot, const song_t *song)
     return 0;
 }
 
+/* Re-commit a slot's song with a new header flag and sequence number. The write
+ * goes into a free extent, so the record it supersedes stays valid until erased:
+ * a power cut leaves the previous version, and delete/undelete survive reboot. */
+static int sst_recommit_song(song_store_t *st, int slot, uint8_t flags)
+{
+    int ext;
+    uint32_t seq, off;
+    song_t s;
+    if (sst_load_song(st, slot, &s))          /* the current record's data (ignores the flag) */
+        return -1;
+    ext = sst_pick_free_ext(st, 0);
+    if (ext < 0)
+        return -2;
+    seq = st->next_seq;
+    off = sst_song_ext_off((uint32_t)ext);
+    if (sst_write_song(st, off, (uint8_t)slot, flags, seq, &s))
+        return -3;
+    st->next_seq = seq + 1u;
+    st->slot[slot].song_ext = (int8_t)ext;
+    st->slot[slot].song_seq = seq;
+    st->slot[slot].has_song = 1u;
+    st->slot[slot].deleted = (flags & SST_FLAG_DELETED) ? 1u : 0u;
+    return 0;
+}
+
 int song_store_delete(song_store_t *st, int slot)
 {
-    if (!st || slot < 0 || slot >= (int)SONG_STORE_SLOTS || !st->slot[slot].has_song)
+    if (!st || !st->ready || slot < 0 || slot >= (int)SONG_STORE_SLOTS || !st->slot[slot].has_song)
         return -1;
-    st->slot[slot].deleted = 1u;               /* data stays until the slot is reused */
-    return 0;
+    if (st->slot[slot].deleted)
+        return 0;                             /* already deleted */
+    return sst_recommit_song(st, slot, SST_FLAG_DELETED);
 }
 
 int song_store_undelete(song_store_t *st, int slot)
 {
-    if (!st || slot < 0 || slot >= (int)SONG_STORE_SLOTS || !st->slot[slot].has_song)
+    if (!st || !st->ready || slot < 0 || slot >= (int)SONG_STORE_SLOTS || !st->slot[slot].has_song)
         return -1;
-    st->slot[slot].deleted = 0u;
-    return 0;
+    if (!st->slot[slot].deleted)
+        return 0;                             /* not deleted */
+    return sst_recommit_song(st, slot, 0u);
 }
 
 int song_store_is_deleted(const song_store_t *st, int slot)
@@ -676,6 +800,13 @@ int song_store_list(const song_store_t *st, int slot, song_slot_t *out)
     out->used = st->slot[slot].has_song;
     out->deleted = st->slot[slot].deleted;
     out->has_take = st->slot[slot].take_ext >= 0 ? 1u : 0u;
+    if (out->deleted) {                       /* a deleted slot is free to the songs screen */
+        out->used = 0u;
+        out->has_take = 0u;
+        for (i = 0; i < (int)SONG_NAME_LEN; i++)
+            out->name[i] = 0;
+        return 0;
+    }
     if (st->slot[slot].has_song && st->slot[slot].song_ext >= 0) {
         sst_hdr_t h;
         if (sst_read_hdr(st, sst_song_ext_off((uint32_t)st->slot[slot].song_ext), &h) == 0 &&
@@ -723,9 +854,8 @@ int song_store_take_load(song_store_t *st, int slot, take_hdr_t *hdr, take_event
     uint32_t seq[SONG_STORE_TAKE_EXTENTS];
     if (!st || !st->ready || !hdr || slot < 0 || slot >= (int)SONG_STORE_SLOTS)
         return -1;
-    /* the directory's copy first: after song_store_take_swap (undo) the swap is
-     * the truth, and the extent with the newest sequence number is the "other"
-     * one, not what the caller wants. */
+    /* the directory's copy first: after a take restore (undo) it names the record
+     * the caller wants, which is not the newest one on flash. */
     if (st->slot[slot].take_ext >= 0 &&
         sst_try_take(st, st->slot[slot].take_ext, (uint8_t)slot, hdr, ev, max_events) == 0)
         return 0;
@@ -782,31 +912,37 @@ int song_store_take_save(song_store_t *st, int slot, const take_hdr_t *hdr, cons
     return 0;
 }
 
-int song_store_take_swap(song_store_t *st, int slot)
+/* Undo/redo of a replace-take: load the previous take into the caller's buffer and
+ * commit it as a new current record (a new sequence number), reusing the previous
+ * take's own extent. The data is in RAM now, and the take being replaced lives in a
+ * different extent that stays valid until the commit lands, so a power cut during
+ * this leaves the newer take in charge and only loses the undo. The replaced take
+ * becomes the new previous, so the same call redoes it. */
+int song_store_take_restore(song_store_t *st, int slot, take_hdr_t *hdr, take_event_t *ev, uint32_t max_events)
 {
-    int8_t t;
-    uint32_t q;
-    if (!st || slot < 0 || slot >= (int)SONG_STORE_SLOTS || st->slot[slot].prev_take_ext < 0)
-        return 0;
-    t = st->slot[slot].take_ext;
-    st->slot[slot].take_ext = st->slot[slot].prev_take_ext;
-    st->slot[slot].prev_take_ext = t;
-    q = st->slot[slot].take_seq;
-    st->slot[slot].take_seq = st->slot[slot].prev_take_seq;
-    st->slot[slot].prev_take_seq = q;
-    return 1;
+    int pe, old;
+    uint32_t seq, old_seq;
+    if (!st || !st->ready || !hdr || slot < 0 || slot >= (int)SONG_STORE_SLOTS)
+        return -1;
+    pe = st->slot[slot].prev_take_ext;
+    if (pe < 0)
+        return -2;                            /* nothing to restore */
+    if (sst_try_take(st, pe, (uint8_t)slot, hdr, ev, max_events) != 0)
+        return -3;                            /* the previous take is gone or too big for the buffer */
+    old = st->slot[slot].take_ext;
+    old_seq = st->slot[slot].take_seq;
+    seq = st->next_seq;
+    if (sst_write_take(st, sst_take_ext_off((uint32_t)pe), (uint8_t)slot, seq, hdr, ev))
+        return -4;
+    st->next_seq = seq + 1u;
+    st->slot[slot].prev_take_ext = (int8_t)old;
+    st->slot[slot].prev_take_seq = old_seq;
+    st->slot[slot].take_ext = (int8_t)pe;
+    st->slot[slot].take_seq = seq;
+    return 0;
 }
 
 /* ---- measurement -------------------------------------------------------- */
-
-typedef struct { uint32_t n; } sst_count_t;
-
-static int sst_count_put(void *ctx, const uint8_t *p, uint32_t n)
-{
-    (void)p;
-    ((sst_count_t *)ctx)->n += n;
-    return 0;
-}
 
 int song_store_measure(const song_t *song)
 {
