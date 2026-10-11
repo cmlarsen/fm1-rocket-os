@@ -1,13 +1,7 @@
 # T10i audio: each punch FX engaged and released on live audio. Tape stop ends in silence and the
 # audio returns on release; the echo throw drives X0X's fxbus delay (the engine command events).
 wait 300
-tap GLO
-tap SEL
-tapkey w0
-turn ALGO 2
-tapkey w0
-turn ALGO -3
-songseed
+# TCLS: the boot song is the Starter template, so DRUMS and BASS have clips.
 press PLAY
 wait 700
 release PLAY

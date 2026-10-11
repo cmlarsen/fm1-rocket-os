@@ -25,7 +25,7 @@ wait 60
 press REC
 wait 60
 expect card 12                    # REC is button 11, +1 like the help card
-expect help 0                     # the Classic 1 s help is off outside Classic
+expect help 0                     # TCLS: X0X's 1 s help is gone
 shot help_card_rec_studio.png
 release REC
 wait 60

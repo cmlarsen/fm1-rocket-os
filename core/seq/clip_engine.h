@@ -167,10 +167,10 @@ uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role);
 void clip_engine_mute(clip_engine_t *e, uint8_t role, int on);
 int  clip_engine_muted(const clip_engine_t *e, uint8_t role);
 
-/* Clear every role mute. It zeroes the bits immediately (an engine that stops rendering, e.g. when
- * LIVE hands the audio to the classic pages, has no later drain) AND queues CLIP_CMD_MUTE_CLEAR,
- * which drains after any mute command already in the ring, so a pending CLIP_CMD_MUTE cannot
- * re-apply. The mute is performance state, never song state; live_enter also clears. */
+/* Clear every role mute. It zeroes the bits immediately (a caller that stops the engine, e.g.
+ * leaving LIVE, has no later drain) AND queues CLIP_CMD_MUTE_CLEAR, which drains after any mute
+ * command already in the ring, so a pending CLIP_CMD_MUTE cannot re-apply. The mute is performance
+ * state, never song state; live_enter also clears. */
 void clip_engine_mute_clear(clip_engine_t *e);
 
 /* Add nframes of transport and call the sink for every event in that window, with its
