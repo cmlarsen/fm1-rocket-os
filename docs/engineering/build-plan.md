@@ -140,7 +140,8 @@ orca orchestration check --wait --types "worker_done,escalation,question" --time
 
 ## Overnight run (2026-10-10)
 Owner decisions for unattended work:
-- **RC0 is deferred.** T2 uses Felucca's 12 px as a provisional minimum text size. The RC0 and RC1 `.fwsc` files are left in `build/rc/` for the owner to flash. The run **stops at RC1**, because RC1's CPU numbers gate the UI-heavy tasks after it.
+- **Unattended flashing (owner, 2026-10-10).** The FM-1 is on the Mac's USB. The coordinator may install a build with `tools/fm1_install.py` **only if its loader is byte-identical to X0X 1.0.5's** and it has passed the full ladder. Builds with the T5 loader change wait for the owner. Recovery: SAFE MODE over USB, then `tools/fm1_rescue.sh`. Screen, sound and feel checks go on the owner's morning checklist. With this, the run may continue past RC1.
+- **RC0 is deferred.** T2 uses Felucca's 12 px as a provisional minimum text size. The RC0 and RC1 `.fwsc` files are left in `build/rc/` for the owner to flash. The run stops at RC1 unless the device is attached (see above), because RC1's CPU numbers gate the UI-heavy tasks after it.
 - **The repo is public** on GitHub (cmlarsen/fm1-rocket-os, GPL-3.0). The coordinator merges reviewed work into `integration` and fast-forwards `main` at the end of each task; there is no owner-approved PR step tonight.
 - **Review:** every worker result gets an Opus 5.5 review subagent plus the test ladder before merge.
 

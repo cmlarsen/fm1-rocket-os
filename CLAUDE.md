@@ -31,7 +31,7 @@ Read [docs/README.md](docs/README.md) first. It indexes everything. Keep the doc
 - **Flash safety.**
   - Never write flash regions `0x0000–0x3FFF`, `0xE8000`, `0xFF000`, or BTIF.
   - Keep USB rescue and "return to stock" working.
-  - Agents never flash hardware; flashing is a human release step.
+  - Agents never flash hardware, except under the owner's unattended-flashing rule in [build-plan.md](docs/engineering/build-plan.md#overnight-run-2026-10-10): the X0X 1.0.5 loader only, over USB with `tools/fm1_install.py`.
   - Flash writes stall XIP and glitch audio, so save only while stopped and idle.
 - **Determinism.** The audio sample counter is the only clock, and there are no wall-clock reads in `core/`. Host and WASM output must be bit-identical. The device is checked by its event stream.
 - **Build host.** `deltron.local` (x86-64 Ubuntu, ssh as `caleb`) runs `make fw`, `make check` and `make emu-binary` through `FW_HOST`. The Mac runs the host and WASM tiers.
