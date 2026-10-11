@@ -14,6 +14,7 @@ mkdir -p build/gen build/host
 U="firmware/src/dsp/drum909.c firmware/src/dsp/drum808.c firmware/src/dsp/bass303.c
    firmware/src/dsp/fxbus.c firmware/src/dsp/master.c firmware/src/dsp/fm6_core.c
    firmware/src/dsp/fm6_vbank.c firmware/src/dsp/eng_fm6.c firmware/src/dsp/eng_noise.c
+   firmware/src/dsp/perform.c
    firmware/src/seq/sequencer.c firmware/src/seq/tb3po.c firmware/src/seq/pattern.c
    firmware/src/seq/motion.c firmware/src/app/engine.c
    core/seq/clip_engine.c firmware/src/app/live_bridge.c
