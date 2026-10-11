@@ -48,6 +48,10 @@ enum { PR_909, PR_808, PR_303A, PR_303B, PR_FX, PR_MST, PR_SEQ, PR_FM6, PR_NOISE
 extern volatile uint32_t eng_prof[ENG_PROF_N], eng_prof_frames;
 void engine_motion_enable(int on);                          /* off: lanes do not play (the PERF test) */
 void engine_motion_reset(void);                             /* lanes replaced (undo): knobs to their own values */
+/* All-notes-off (T3 + T5i): stop X0X's transport and release every gate/voice (the 303s, FM6 and
+ * NOISE; the one-shot drums need nothing) at the start of the next block. Main loop: LIVE taking the
+ * transport, a transport stop, the panic path and T3's live_bridge_exit. */
+void engine_all_off(void);
 /* overload guard (engine.c): the platform reports each block's load after rendering it */
 void engine_load(uint32_t pct, uint32_t frames);           /* ISR, after engine_render */
 void engine_guard_enable(int on);                           /* off: full quality always (the PERF test) */
@@ -87,9 +91,6 @@ void engine_bass_off(int part);
  * part is PART_FM6 or PART_NOISE; on C_BON the command's c field carries velocity 0..127. */
 void engine_note_on(int part, int note, int vel);
 void engine_note_off(int part, int note);
-/* T5i: release every sounding note (the 303s, FM6, NOISE; the one-shot drums need nothing). Queued to
- * the audio context; call from the main loop on transport stop and as the panic all-notes-off. */
-void engine_all_off(void);
 /* T5i: queue an FM6 preset (SLOT) load: 0..7 a ROM factory voice, 8 the own patch, 9..40 a bank voice.
  * A bank voice that is not there (no bank, or an erased / corrupt sector) falls back to a ROM voice. */
 void engine_fm6_preset(int n);

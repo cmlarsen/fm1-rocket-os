@@ -87,7 +87,7 @@ tapkey w12
 tapkey w14
 tap REC
 tap PLAY
-wait 60
+wait 100
 spin K1 -40
 wait 124
 spin K1 10
@@ -131,7 +131,7 @@ tap PLAY
 # a touch, saved: the song and the lane survive a reboot
 tap REC
 tap PLAY
-wait 60
+wait 100
 spin K1 -20
 wait 300
 tap REC

@@ -300,24 +300,50 @@ static void host_engine_tap(uint32_t sample, uint32_t cmd)
     }
 }
 
-/* the 909's wrap is the bar boundary (sequencer.h); track it from outside the engine */
+/* the 909's wrap is the bar boundary (sequencer.h); track it from outside the engine. T3: in
+ * LIVE the clip engine's bar is the boundary instead. */
+static uint8_t live_prev_bar;
+static int live_was_playing;
 static void host_count_bar(void)
 {
-    uint8_t p = seq.t[TRK_DRUM].pos;
-    if (seq.playing && !was_playing) {           /* the transport started: bar 0, no boundary yet */
-        bar_count = 0;
-        tr_prev_pos = p;
-        was_playing = 1;
+    if (live_bridge_active()) {
+        uint8_t bar = 0, beat = 0, step = 0;
+        int playing = live_bridge_transport_playing();
+        live_bridge_pos(&bar, &beat, &step);
+        if (playing && !live_was_playing) {          /* transport started: bar 0, no boundary yet */
+            bar_count = 0;
+            live_prev_bar = bar;
+            live_was_playing = 1;
+            return;
+        }
+        if (!playing) {
+            live_was_playing = 0;
+            live_prev_bar = bar;
+            return;
+        }
+        if (bar != live_prev_bar)                    /* a new bar began */
+            bar_count++;
+        live_prev_bar = bar;
         return;
     }
-    if (!seq.playing) {
-        was_playing = 0;
+    live_was_playing = 0;
+    {
+        uint8_t p = seq.t[TRK_DRUM].pos;
+        if (seq.playing && !was_playing) {           /* the transport started: bar 0, no boundary yet */
+            bar_count = 0;
+            tr_prev_pos = p;
+            was_playing = 1;
+            return;
+        }
+        if (!seq.playing) {
+            was_playing = 0;
+            tr_prev_pos = p;
+            return;
+        }
+        if (p < tr_prev_pos)                         /* wrapped: a bar passed */
+            bar_count++;
         tr_prev_pos = p;
-        return;
     }
-    if (p < tr_prev_pos)                         /* wrapped: a bar passed */
-        bar_count++;
-    tr_prev_pos = p;
 }
 
 /* cues and mutes the app sets (ui.c writes seq.pcue / seq.mute directly); the host sees them
@@ -706,18 +732,51 @@ static int load_slot(int k, int z, const char *path)
 }
 
 static bpart_t line_snap[NBASS];                  /* "snapline" */
+
+/* T3: bar / beat / step read from the clip engine while LIVE owns the transport */
+static int live_beat(void)
+{
+    uint8_t b = 0, t = 0, s = 0;
+    live_bridge_pos(&b, &t, &s);
+    return (int)t;
+}
+static int live_step(void)
+{
+    uint8_t b = 0, t = 0, s = 0;
+    live_bridge_pos(&b, &t, &s);
+    return (int)s;
+}
+
 static int expect(const char *what, const char *val)
 {
     int got;
     if (!strcmp(what, "playing"))
-        got = seq.playing;
+        got = live_bridge_active() ? live_bridge_transport_playing() : seq.playing;
     else if (!strcmp(what, "bar"))                 /* the 909's wraps since the transport started */
         got = (int)bar_count;
     else if (!strcmp(what, "beat"))                /* the 909 playhead: beat (0-3), step */
-        got = seq.t[TRK_DRUM].pos / 4;
+        got = live_bridge_active() ? live_beat() : seq.t[TRK_DRUM].pos / 4;
     else if (!strcmp(what, "step"))
-        got = seq.t[TRK_DRUM].pos;
-    else if (!strcmp(what, "sample"))              /* frames rendered since boot */
+        got = live_bridge_active() ? live_step() : seq.t[TRK_DRUM].pos;
+    else if (!strcmp(what, "mode"))
+        got = live_bridge_active() ? 1 : 0;
+    else if (!strcmp(what, "layer"))
+        got = live_layer();
+    else if (!strcmp(what, "focus"))
+        got = live_focus();
+    else if (!strcmp(what, "liveactive"))
+        got = live_bridge_active();
+    else if (!strncmp(what, "liveclip", 8)) {      /* liveclipR: the playing clip on role R, -1 none */
+        uint8_t c = live_bridge_playing_clip((uint8_t)(atoi(what + 8) % LIVE_NROLES));
+        got = c == LIVE_CLIP_NONE ? -1 : (int)c;
+    } else if (!strncmp(what, "liveque", 7)) {      /* livequeR: the queued clip (or stop) on role R */
+        uint8_t c = live_bridge_queued_clip((uint8_t)(atoi(what + 7) % LIVE_NROLES));
+        got = c == LIVE_CLIP_NONE ? -1 : (int)c;
+    } else if (!strncmp(what, "livestop", 8)) {    /* livestopR: a stop is queued on role R */
+        got = live_bridge_stop_queued(atoi(what + 8) % LIVE_NROLES);
+    } else if (!strncmp(what, "liveused", 8)) {     /* liveusedC: the clip slot C holds a clip */
+        got = live_bridge_clip_used(atoi(what + 8) % (int)LIVE_NCLIPS);
+    } else if (!strcmp(what, "sample"))            /* frames rendered since boot */
         got = (int)host_sample;
     else if (!strcmp(what, "pattern"))
         got = seq.ppat[PART_909] + 1;
@@ -893,18 +952,41 @@ static int expect_button(const char *b, const char *l)
 static void dump_json(const char *path)
 {
     FILE *f = fopen(path, "w");
-    int p, i, n;
+    int p, i, n, lv = live_bridge_active();
     if (!f) {
         printf("cannot write %s\n", path);
         return;
     }
-    fprintf(f, "{\n  \"transport\": {\"playing\": %d, \"bpm\": %.1f, \"bar\": %u, \"beat\": %u, \"step\": %u, \"sample\": %u},\n",
-            seq.playing ? 1 : 0, (double)seq.bpm, bar_count, seq.t[TRK_DRUM].pos / 4u, seq.t[TRK_DRUM].pos, host_sample);
+    if (lv) {
+        uint8_t b = 0, t = 0, s = 0;
+        live_bridge_pos(&b, &t, &s);
+        fprintf(f, "{\n  \"transport\": {\"playing\": %d, \"bpm\": %.1f, \"bar\": %u, \"beat\": %u, \"step\": %u, \"sample\": %u},\n",
+                live_bridge_transport_playing(), (double)live_bridge_bpm_x10() / 10.0, bar_count, t, s, host_sample);
+    } else {
+        fprintf(f, "{\n  \"transport\": {\"playing\": %d, \"bpm\": %.1f, \"bar\": %u, \"beat\": %u, \"step\": %u, \"sample\": %u},\n",
+                seq.playing ? 1 : 0, (double)seq.bpm, bar_count, seq.t[TRK_DRUM].pos / 4u, seq.t[TRK_DRUM].pos, host_sample);
+    }
     fprintf(f, "  \"parts\": [");
     for (p = 0; p < NPARTS; p++)
         fprintf(f, "%s\n    {\"part\": %d, \"ppat\": %u, \"pcue\": %d, \"mute\": %d}", p ? "," : "", p, seq.ppat[p],
                 seq.pcue[p] < NPAT ? (int)seq.pcue[p] : -1, seq_part_muted(&seq, p));
-    fprintf(f, "\n  ],\n  \"view\": %d,\n  \"leds\": {\n    \"keys\": [", ui.view);
+    fprintf(f, "\n  ],\n  \"view\": %d,\n", ui.view);
+    if (lv) {                                          /* T3: the LIVE state */
+        fprintf(f, "  \"live\": {\"active\": %d, \"layer\": %d, \"focus\": %d, \"transport\": %d, \"roles\": [",
+                lv, live_layer(), live_focus(), live_bridge_transport_playing());
+        for (p = 0; p < LIVE_NROLES; p++) {
+            uint8_t pl = live_bridge_playing_clip((uint8_t)p), qq = live_bridge_queued_clip((uint8_t)p);
+            fprintf(f, "%s\n    {\"role\": %d, \"clip\": %d, \"queued\": %d, \"stop\": %d, \"progress\": %d}", p ? "," : "", p,
+                    pl == LIVE_CLIP_NONE ? -1 : (int)pl, qq == LIVE_CLIP_NONE ? -1 : (int)qq,
+                    live_bridge_stop_queued(p), live_bridge_progress((uint8_t)p));
+        }
+        fprintf(f, "\n  ],\n  \"key_clip\": [");
+        for (i = 0; i < NKEYS; i++)
+            fprintf(f, "%s%d", i ? ", " : "", live_bridge_key_clip(i));
+        fprintf(f, "]},\n  \"leds\": {\n    \"keys\": [");
+    } else {
+        fprintf(f, "  \"leds\": {\n    \"keys\": [");
+    }
     for (i = 0; i < NKEYS; i++)
         fprintf(f, "%s%d", i ? ", " : "", (lit_keys >> i & 1u) ? 2 : (dim_keys >> i & 1u) ? 1 : 0);
     fprintf(f, "],\n    \"buttons\": {");
@@ -1068,7 +1150,19 @@ int main(int argc, char **argv)
             load_force = atoi(a);
         else if (!strcmp(cmd, "peakreset"))
             peak_out = 0.0f;
-        else if (!strcmp(cmd, "wavstop"))
+        else if (!strcmp(cmd, "silence")) {              /* silence MS [DB]: the next MS ms stay quiet */
+            uint32_t ms = (uint32_t)atoi(a);
+            double lim = b[0] ? atof(b) : -40.0;
+            double db;
+            peak_out = 0.0f;
+            run_ms(ms);
+            db = 20.0 * log10(peak_out > 1e-9f ? peak_out : 1e-9f);
+            if (db > lim) {
+                printf("FAIL silence %s: %.1f dBFS > %.1f\n", a, db, lim);
+                fails++;
+            } else
+                printf("  ok silence %s (%.1f dBFS)\n", a, db);
+        } else if (!strcmp(cmd, "wavstop"))
             wav_close();
         else if (!strcmp(cmd, "shot")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
@@ -1089,6 +1183,26 @@ int main(int argc, char **argv)
         } else if (!strcmp(cmd, "dump")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);
             dump_json(out);
+        } else if (!strcmp(cmd, "keyblink")) {        /* T3: key K is blinking (bright and not-bright) */
+            int n = key_of(a), guard = 0, on = 0, off = 0;
+            uint32_t limit = !strcmp(b, "slow") ? 1400u : 400u;
+            while ((uint32_t)guard < limit) {
+                int lvl = (lit_keys >> n & 1u) ? 2 : (dim_keys >> n & 1u) ? 1 : 0;
+                if (lvl == 2)
+                    on = 1;
+                else
+                    off = 1;
+                if (on && off)
+                    break;
+                run_ms(1);
+                guard++;
+            }
+            if (on && off)
+                printf("  ok keyblink %s (bright and dim seen)\n", a);
+            else {
+                printf("FAIL keyblink %s: not blinking (on=%d off=%d)\n", a, on, off);
+                fails++;
+            }
         } else if (!strcmp(cmd, "wait-bar")) {           /* run until N bar boundaries have passed */
             uint32_t target = bar_count + (uint32_t)atoi(a), guard = 0;
             while (bar_count < target && guard++ < 120000u)

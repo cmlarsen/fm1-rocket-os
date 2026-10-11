@@ -7,7 +7,7 @@
 - **Clips** (`clip_t`, 528 B) are indexed in key-zone order: drums 0–6, bass 7–11, lead 12–18, chords 19–23, FX 24–26 (`clip_role()`). A clip has a length in 16th steps (1–64), Loop or Once, and a launch quantize (Bar, Beat, End of clip). Its payload is a union:
   - drum clips use 11 lanes of step bits plus an accent row (the same packing as X0X's `dpart_t`);
   - melodic clips use up to 96 notes `{step, note, vel, len}`, so a step can hold a chord.
-  Each clip also has 2 motion lanes: a parameter id plus one value per step, with `MOTION_NONE` meaning no value.
+  Each clip also has 2 motion lanes: a parameter id plus one value per step, with `MOTION_NONE` meaning no value. T3 pins the id's encoding (the field was left free): `target << 12 | voice << 8 | index`, which `live_bridge.c` unpacks back into `engine_set(target, voice, index, value)`.
 - **`key_clip[27]`** maps each key (pitch order F3–G5) to a clip. The default is identity. LIVE SETUP's "Assign keys" edits it.
 - **Takes** are separate from the song: `take_hdr_t` plus up to 2,048 `take_event_t {sample, cmd}`, where `cmd` is X0X's 32-bit engine command word or a launch, mute or FX command from the same encoding space. A take is 16 KiB at most. `song_t.has_take` says whether one exists.
 - **Storage:** `SONG_SLOTS` is 5. Songs and takes live in 0xA0000–0xDBFFF (60 sectors, 240 KiB; the user-sample area BREAK freed). It is a shared pool of extents: 4 sectors per song and 5 per take, plus one spare extent of each kind. The record header is written last and carries slot, kind, sequence number and CRC. At boot the newest valid record per slot wins, so a power cut leaves the previous version. This guarantees 5 slots for worst-case data. 0x9F000 stays reserved for FM6 patches.

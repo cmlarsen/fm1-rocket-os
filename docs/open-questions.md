@@ -19,6 +19,7 @@ These questions are still unresolved. When one is answered, record the answer in
 2. **Default pad map.** The proposal is keyboard zones (see [screens](product/screens.md#design-decisions-made-while-drawing)). It is waiting for the owner's review on the design canvas.
 3. **Committing LIVE tweaks.** Should LIVE offer "commit tweaks to song", or should LIVE changes always revert? The v1 default is revert.
 5. **Name.** Is "rocket-os" the working name?
+6. **LIVE → STUDIO transport (T3).** In this build, leaving LIVE stops the clip engine and hands the transport back to X0X's sequencer, so playing clips do **not** carry on across the mode change (the [interaction model](product/interaction-model.md#modes) still says they do). T6i/T7 revisit this; the owner decides whether the current behaviour is acceptable until then.
 
 ## Hardware facts to verify
 1. **Key velocity.** The GrooveOS manual says yes; Felucca's HAL says the keys are switches only ([grooveos](research/grooveos.md#conflicting-facts-to-resolve)).

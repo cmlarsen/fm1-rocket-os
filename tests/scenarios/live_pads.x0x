@@ -1,0 +1,76 @@
+# T3 LIVE, the PADS layer: build two 909 patterns and a 303 line in STUDIO, enter LIVE on a
+# long PLAY press, launch and switch clips on the bar, stop a role, and read the key LEDs.
+wait 300
+# pattern 1 of the 909 gets a kick on step 3 (so LIVE has two drum clips)
+tapkey w0
+tapkey w4
+turn PRESET 1
+expect ppat0 2
+tapkey w2
+turn PRESET -1
+expect ppat0 1
+# 303 A and 303 B, pattern 1: a note on step 1 each
+turn ALGO 2
+tapkey w0
+turn ALGO 1
+tapkey w0
+turn ALGO -3
+expect part 0
+
+# --- enter LIVE: a long press on PLAY, the ring fills ---
+press PLAY
+wait 300
+shot live_enter.png
+wait 400
+release PLAY
+wait 50
+expect mode 1
+expect view 9
+expect layer 0
+echo live: clips built
+expect liveused0 1
+expect liveused1 1
+expect liveused7 1
+expect liveused12 1
+expect liveused2 0
+shot live_pads_stopped.png
+
+# --- launch drum A and bass A while stopped; they start with the transport ---
+events live_pads_events.txt
+tapkey 0
+expect liveque0 0
+tapkey 7
+expect liveque1 7
+tap PLAY
+expect playing 1
+wait-bar 1
+expect liveclip0 0
+expect liveclip1 7
+shot live_pads_playing.png
+
+# --- queued: launch drum B on the next bar; the key blinks ---
+tapkey 1
+expect liveque0 1
+wait-bar 1
+expect liveclip0 1
+# --- HOME + key: launch drum A now (the next step, not the next bar) ---
+press HOME
+tapkey 0
+release HOME
+wait 250
+expect liveclip0 0
+# --- queued to stop: tap the playing bass clip ---
+tapkey 7
+expect livestop1 1
+wait-bar 1
+expect liveclip1 -1
+eventsstop
+dump live_pads.json
+
+# --- leave LIVE: a long press on PLAY again ---
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 0
+expect view 1

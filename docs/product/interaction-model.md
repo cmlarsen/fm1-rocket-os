@@ -49,7 +49,7 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 | **STUDIO** (after boot) | — | — | Build the song: roles, clips (SEQ), sounds (EDIT, ENV, LFO), songs (SAVE held) |
 | **LIVE** | **Long-press PLAY** (~600 ms ring) | **Long-press PLAY** again | Perform: launch, play, FX, knobs, record the take |
 
-- **PLAY tap** always starts or stops the transport.
+- **PLAY tap** always starts or stops the transport. **A short press acts on release** (released before the ~600 ms long-press threshold); holding past the threshold enters or leaves LIVE and starts or stops neither transport.
 - **HOME never exits LIVE.** A HOME tap closes overlays. A HOME hold shows the cheat sheet.
 - Playing clips carry on across mode changes.
 

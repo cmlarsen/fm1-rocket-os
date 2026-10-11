@@ -69,9 +69,13 @@ static void fx_retime(fxbus_t *f)
     if (i > 12) i = 12;
     const float bpm = f->bpm > 20.0f ? f->bpm : 120.0f;
     float ms = fx_beats[i] * 60000.0f / bpm;
-    const float max_ms = (float)(f->dlen - 256) / D9_SR * 1000.0f;
+    float max_ms = (float)(f->dlen - 256) / D9_SR * 1000.0f;
+    if (!(max_ms > 0.0f))
+        max_ms = 1.0f;                  /* a defensive floor: never loop forever on a tiny line */
     while (ms > max_ms)                 /* longer than the line (1/2. under 90 BPM): half of it, */
         ms *= 0.5f;                     /* which is still on the beat; cutting it short is not */
+    if (ms > max_ms)                    /* T3: every delay-time path is clamped to the buffer */
+        ms = max_ms;
     f->dl_time_ms = ms;
 }
 
