@@ -107,3 +107,13 @@ unit-clip:
 unit-engines:
 	@sh tests/host/run_fm6.sh
 	@sh tests/host/run_noise.sh
+
+.PHONY: unit-fx
+unit-fx:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Wno-double-promotion -Werror -I. -Ifirmware/src/dsp \
+	    -o build/host/perform_test tests/host/perform_test.c firmware/src/dsp/perform.c
+	build/host/perform_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src/dsp \
+	    -o build/host/perform_test_san tests/host/perform_test.c firmware/src/dsp/perform.c
+	build/host/perform_test_san

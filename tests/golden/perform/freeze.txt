@@ -1,0 +1,3 @@
+# freeze @ 120 bpm
+grain=5292 periodic=1
+rms_a=0.344304 rms_b=0.344304

@@ -1,0 +1,2 @@
+# engagement: tape replaced by repeat 1/8 at 77175
+period=11025 max_step_in=0.6312 max_step_out=0.0314

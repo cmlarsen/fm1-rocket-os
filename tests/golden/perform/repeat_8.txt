@@ -1,0 +1,3 @@
+# repeat 1/8 @ 1200 bpm
+period=11025 grid=44100 aligned=1
+max_step_in=0.6312 max_step_out=0.6312

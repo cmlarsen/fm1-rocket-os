@@ -1,0 +1,2 @@
+# engagement: repeat 1/8 engaged while stopped (no grid)
+period=11025 periodic=1
