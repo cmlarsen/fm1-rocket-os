@@ -32,3 +32,6 @@ These questions are still unresolved. When one is answered, record the answer in
 ## Tooling
 1. **QEMU binary gate.** Does fm1-emulator run well enough on deltron.local to serve as the binary-level gate? T1 will show.
 2. **CI.** Deferred to RC3.
+
+## RC1 CPU headroom (2026-10-11)
+- Full LIVE stress with 4 FM6 voices runs at about 77% CPU and trips the overload guard, which then holds FM6 to 2 voices. Is a lower FM6 voice count acceptable if optimisation can't win headroom back? See [RC1 results](reviews/2026-10-11-rc1-device-results.md).

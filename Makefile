@@ -32,13 +32,15 @@ REMOTE_DIR   := $(REMOTE_ROOT)/$(DIRNAME)-$(DIRHASH)
 SSH          := ssh $(FW_HOST)
 RSYNC_EXCL   := --exclude=/.git --exclude=/.venv --exclude=/build --exclude=/__pycache__
 
-.PHONY: all help fw release test test-local check push pull clean-remote unit scenarios screens parity host screens-lint
+.PHONY: all help fw release fw-debug fw-debug-check test test-local check push pull clean-remote unit scenarios screens parity host screens-lint
 
 all: help
 
 help:
 	@echo "fm1-rocket-os make targets:"
 	@echo "  fw           build firmware on $(FW_HOST) (build/x0x.fwsc, x0x.bin, loader/ota.bin)"
+	@echo "  fw-debug     build X0X_DEBUG=1 on $(FW_HOST) into build/debug/ (RC1p: the probe)"
+	@echo "  fw-debug-check  fw-debug + forbidden-symbol and loader checks on it"
 	@echo "  release      fw with ./build.sh --release \$$VERSION (e.g. make release VERSION=1.0.5)"
 	@echo "  test         run tests/run_tests.sh on $(FW_HOST) (brings back build/scenarios/)"
 	@echo "  test-local   run tests/run_tests.sh here (the subset that works on this machine)"
@@ -71,6 +73,25 @@ fw: push
 	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.bin ./build/x0x.bin
 	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/loader/ota.bin ./build/loader/ota.bin
 	@echo "fw: brought back build/x0x.fwsc, build/x0x.bin, build/loader/ota.bin"
+
+# RC1p: the development build the CPU probe talks to (X0X_DEBUG=1: ED_STRESS / ED_STATS over USB).
+# tools/build.py adds -DENG_FM6_VOICES=8 so the stress can raise the FM6 voice cap; a release build
+# keeps eng_fm6.h's 4. The loader is unchanged, so tools/check_loader.sh must still pass.
+fw-debug: push
+	@$(SSH) 'cd $(REMOTE_DIR) && X0X_DEBUG=1 ./build.sh'
+	@mkdir -p build/debug
+	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.fwsc ./build/debug/x0x.fwsc
+	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.bin ./build/debug/x0x.bin
+	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.elf ./build/debug/x0x.elf
+	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.dis ./build/debug/x0x.dis
+	@echo "fw-debug: brought back build/debug/x0x.fwsc (X0X_DEBUG=1, ENG_FM6_VOICES=8)"
+
+# the debug package must pass the same limits a release does, and keep the X0X 1.0.5 loader
+fw-debug-check: fw-debug
+	@echo "fw-debug-check: forbidden symbols (heap, 64-bit division, soft-double)"
+	@sh tools/check_symbols.sh build/debug
+	@echo "fw-debug-check: the loader is X0X 1.0.5's"
+	@sh tools/check_loader.sh build/debug/x0x.fwsc
 
 # reproduce an X0X release recipe: the identity and version string are the only difference
 # from `make fw` (X0X 1.0.5 builds byte-for-byte from `./build.sh --release 1.0.5`)
