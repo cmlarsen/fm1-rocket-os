@@ -68,6 +68,8 @@ typedef struct {
     uint8_t swing;                    /* 0..100: 0 = straight (50 %), 100 = 75 % shuffle */
     uint8_t rsv[3];
 } pattern_t;
+/* the stored pattern's size is part of the project format (project.c's RAW_LEN): pin it */
+typedef char pattern_size_fixed[(sizeof(pattern_t) == 528) ? 1 : -1];
 
 static inline int bstep_gate(const bstep_t *s) { return s->flags & BS_GATE_MASK; }
 

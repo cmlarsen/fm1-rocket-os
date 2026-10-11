@@ -37,6 +37,8 @@ typedef struct {
     uint8_t out_loud;                    /* 1: the output 6 dB hotter (the codec's full scale) */
     uint8_t rsv[2];                      /* room to grow: an older, shorter object loads (zeros here) */
 } settings_t;
+/* stored as OBJ_SET: pin the settings' size (a shorter object still loads, but a save must fit) */
+typedef char settings_size_fixed[(sizeof(settings_t) == 28) ? 1 : -1];
 
 /* the song and the motion lanes: one blob, split across OBJ_SONG and OBJ_MOTION */
 typedef struct {

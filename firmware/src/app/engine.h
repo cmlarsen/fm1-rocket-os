@@ -33,6 +33,8 @@ enum { MX_LEVEL, MX_REV, MX_DLY, MX_PAN, MX_NPARAMS };
 typedef struct {
     uint8_t v[NTARGETS][NVOICES_MAX][NPARAMS_MAX];
 } sound_t;
+/* stored as OBJ_SOUND, so its size is part of the format: pin it */
+typedef char sound_size_fixed[(sizeof(sound_t) == 1344) ? 1 : -1];
 
 extern seq_t seq;                      /* the sequencer (its pattern pointer is the project's) */
 /* render stages (the PERF screen): 909, 808, 303 A, 303 B, FX, MASTER, SEQ */

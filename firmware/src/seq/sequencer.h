@@ -70,6 +70,8 @@ typedef struct {
     uint8_t rsv;                      /* was the removed part's pattern (0): the mute byte stays at 5 */
     uint8_t mute;                     /* bit p = part p muted */
 } song_bar_t;
+/* the song is stored with the patterns: pin the bar's size (pat + rsv + mute) */
+typedef char song_bar_size_fixed[(sizeof(song_bar_t) == 6) ? 1 : -1];
 typedef struct {
     uint16_t len;                     /* bars; 0 = empty */
     uint8_t rsv[2];
