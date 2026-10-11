@@ -37,10 +37,11 @@ static master_t mst;
 /* T10i: the punch FX state (~32.3 KiB) lives in the shared pool. perform_process() runs on the
  * master stereo signal after the mix and before the output stage. */
 static perform_t perf POOL;
-/* T3: the delay line is 1.0 s (was 2.0 s, 88,200) — the RAM plan in architecture.md frees
- * 88,200 B for the LIVE song and clip engine. fxbus's delay time halves itself to fit dlen,
- * so the longest synced delay is now 1.0 s (check the POOL numbers in reports/T3.md). */
-#define DLY_LEN 44100
+/* TCLS: the delay line is 0.75 s (was 1.0 s, 44,100) — owner decision ADR-0004 shrinks it to
+ * give the RAM pool ~22 KB back. fxbus's delay time halves itself to fit dlen, so no synced
+ * delay can read or write past the shorter line (see tests/host/delay_clamp_test.c and the
+ * POOL numbers in reports/TCLS.md). */
+#define DLY_LEN 33075
 static int16_t dly_buf[DLY_LEN] POOL;
 static motion_t mot;
 /* T5i: the FM6 patch sector, read once at boot into the RAM bank the SLOT loader reads; and the
