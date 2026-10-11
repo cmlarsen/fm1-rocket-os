@@ -106,12 +106,12 @@ static void ota_show(uint32_t step, int32_t code)
 {
     static const char *const STEP[] = {"", "PACKAGE", "CHECK HEAD", "LOADER", "CONFIRM", "RESTART"};
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 92, 240, &FONT_S, "UPDATE", C_WHITE, 1);
+    draw_text_box(0, 92, 240, &AF_S, "UPDATE", C_WHITE, 1);
     if (step < 9u) {
-        draw_text_box(0, 124, 240, &FONT_S, STEP[step < 6u ? step : 0], C_HI, 1);
+        draw_text_box(0, 124, 240, &AF_S, STEP[step < 6u ? step : 0], C_HI, 1);
         return;
     }
-    draw_text_box(0, 124, 240, &FONT_S, code == 1 ? "DRY RUN OK" : "FAILED", C_HI, 1);
+    draw_text_box(0, 124, 240, &AF_S, code == 1 ? "DRY RUN OK" : "FAILED", C_HI, 1);
     fm1_delay_ms(1500);
 }
 static void ota_commit(const uint8_t *parm)

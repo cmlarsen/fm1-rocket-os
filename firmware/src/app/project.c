@@ -37,7 +37,7 @@ void project_defaults(void)
     int i;
     proj.set.magic = PROJ_MAGIC;
     proj.set.format = PROJ_FORMAT;
-    proj.set.palette = 1;                /* amber */
+    proj.set.palette = 0;                /* T2b: GREY is the default theme (design/project/fm1.css) */
     proj.set.keyled = 1;
     proj.set.keysound = 0;
     proj.set.autosave_off = 0;

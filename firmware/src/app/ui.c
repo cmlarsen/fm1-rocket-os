@@ -23,7 +23,7 @@ static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
 enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, NVIEWS };
 static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ"};
-static const uint16_t PART_COL[NPARTS] = {RGB(255, 150, 40), RGB(255, 72, 64), RGB(130, 240, 90), RGB(70, 205, 255)};
+static const uint16_t PART_COL[NPARTS] = {TOK_DRUM, TOK_FX, TOK_BASS, TOK_LEAD};   /* T2b: the design's role colours */
 static const char *const PART_N[NPARTS] = {"909", "808", "303A", "303B"};
 static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4 chars: lane labels */
 
@@ -180,7 +180,7 @@ static const char *const RATE_N[] = {"1/16", "1/16T", "1/32", "1/8T"};
 static const char *const DIR_N[] = {"FWD", "REV", "PING", "RND"};
 static const char *const ONOFF_N[] = {"OFF", "ON"};
 static const char *const ROOT_N[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-static const char *const THEME_N[] = {"GREEN", "AMBER", "CYAN", "RED", "MONO"};
+static const char *const THEME_N[] = {"GREY", "AMBER", "CYAN", "RED", "MONO"};
 enum { G_DENS, G_ACC, G_SLIDE, G_OCTS, G_ROOT, G_SCALE, G_BASE, G_MUT, NGEN };
 static const x0x_param_t GEN_P[NGEN] = {
     {"DENS", 100, 70, 0}, {"ACCENT", 100, 40, 0}, {"SLIDE", 100, 25, 0}, {"OCTS", 2, 1, 0},
@@ -194,7 +194,7 @@ static const char *const LIGHTS_N[] = {"OFF", "ON", "KEYS"};   /* ON: the keys, 
 static const x0x_param_t SEQ_P[NSQ] = {
     {"SWING", 100, 0, 0}, {"LENGTH", NSTEPS - 1, 15, 0}, {"RATE", 3, 0, RATE_N}, {"LENGTH", NSTEPS - 1, 15, 0},
     {"RATE", 3, 0, RATE_N}, {"DIR", 3, 0, DIR_N}, {"TRANSP", 48, 24, 0}, {"TEMPO", 255, 105, 0},
-    {"ACCENT", 127, 88, 0}, {"CLOCK OUT", 1, 1, ONOFF_N}, {"NOTES OUT", 1, 0, ONOFF_N}, {"THEME", 4, 1, THEME_N},
+    {"ACCENT", 127, 88, 0}, {"CLOCK OUT", 1, 1, ONOFF_N}, {"NOTES OUT", 1, 0, ONOFF_N}, {"THEME", 4, 0, THEME_N},
     {"LIGHTS", 2, 1, LIGHTS_N}, {"KEY SOUND", 1, 0, KEYSOUND_N},
     {"AUTOSAVE", 1, 1, ONOFF_N},
 };
@@ -2495,14 +2495,14 @@ static uint16_t blend(uint16_t a, uint16_t b, int t)  /* a..b, t of 16 */
 static uint16_t part_col(void) { return PART_COL[ui.part]; }
 static uint16_t dim(uint16_t c, int t) { return blend(C_BLACK, c, t); }
 
-static int32_t tw(const felucca_font_t *f, const char *s) { return text_w(f, s); }
+static int32_t tw(const aafont_t *f, const char *s) { return text_w(f, s); }
 
-/* a font's capital line: the first and last rows of 'H' (rounded half coverage), measured
- * once from the glyph bitmap, so text is centred on what the eye sees rather than on the
- * font's cell (which differs per face and size) */
-typedef struct { const felucca_font_t *f; int8_t top, bot; } capm_t;
+/* a font's capital line: the first and last rows of 'H' (the generated face carries them as
+ * AF_<N>_CAP_Y / _CAP_B), so text is centred on what the eye sees rather than on the font's
+ * cell. T2b: the AA faces give these directly, so nothing is measured from a bitmap. */
+typedef struct { const aafont_t *f; int8_t top, bot; } capm_t;
 static capm_t capm[6];
-static const capm_t *caps(const felucca_font_t *f)
+static const capm_t *caps(const aafont_t *f)
 {
     int i;
     for (i = 0; i < 6 && capm[i].f; i++)
@@ -2510,29 +2510,22 @@ static const capm_t *caps(const felucca_font_t *f)
             return &capm[i];
     if (i == 6)
         i = 5;
-    {
-        uint32_t gi = ((uint32_t)'H' <= f->last ? 'H' : '0') - f->first, w = f->bw[gi], bpr = (w + 1u) / 2u, x, y;
-        const uint8_t *gd = f->data + f->off[gi];
-        int top = -1, bot = 0;
-        for (y = 0; y < f->h; y++)
-            for (x = 0; x < w; x++) {
-                uint32_t a = gd[y * bpr + x / 2u];
-                a = (x & 1u) ? (a & 15u) : (a >> 4);
-                if (a >= 8u) {
-                    if (top < 0)
-                        top = (int)y;
-                    bot = (int)y;
-                }
-            }
-        capm[i].f = f;
-        capm[i].top = (int8_t)(top < 0 ? 0 : top);
-        capm[i].bot = (int8_t)bot;
+    capm[i].f = f;
+    if (f == &AF_L) {
+        capm[i].top = AF_L_CAP_Y;
+        capm[i].bot = AF_L_CAP_B;
+    } else if (f == &AF_M) {
+        capm[i].top = AF_M_CAP_Y;
+        capm[i].bot = AF_M_CAP_B;
+    } else {
+        capm[i].top = AF_S_CAP_Y;
+        capm[i].bot = AF_S_CAP_B;
     }
     return &capm[i];
 }
 /* parts of a line ("A 909 GR", "B 909 FL") with a real gap between them: a proportional face's
  * space is too narrow to separate them. A NULL ends the list. */
-static int32_t segs(int32_t x, int32_t y, const felucca_font_t *f, uint16_t c, int32_t gap, const char *a,
+static int32_t segs(int32_t x, int32_t y, const aafont_t *f, uint16_t c, int32_t gap, const char *a,
                     const char *b, const char *d, const char *e)
 {
     const char *p[4] = {a, b, d, e};
@@ -2543,22 +2536,22 @@ static int32_t segs(int32_t x, int32_t y, const felucca_font_t *f, uint16_t c, i
 }
 
 /* the y to draw f at so its capitals sit centred in [y0, y0 + h) */
-static int32_t vc(const felucca_font_t *f, int32_t y0, int32_t h)
+static int32_t vc(const aafont_t *f, int32_t y0, int32_t h)
 {
     const capm_t *m = caps(f);
     int32_t ch = m->bot - m->top + 1;
     return y0 + (h - ch + 1) / 2 - m->top;
 }
 /* the y to draw g at so its baseline matches f drawn at y */
-static int32_t base_y(const felucca_font_t *f, int32_t y, const felucca_font_t *g)
+static int32_t base_y(const aafont_t *f, int32_t y, const aafont_t *g)
 {
     return y + caps(f)->bot - caps(g)->bot;
 }
-static void text_c(int32_t cx, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
+static void text_c(int32_t cx, int32_t y, const aafont_t *f, const char *s, uint16_t c)
 {
     cv_text(cx - tw(f, s) / 2, y, f, s, c);
 }
-static void text_r(int32_t rx, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
+static void text_r(int32_t rx, int32_t y, const aafont_t *f, const char *s, uint16_t c)
 {
     cv_text(rx - tw(f, s), y, f, s, c);
 }
@@ -2763,26 +2756,26 @@ static void draw_header(void)
     cv_rect(0, HDR_H - 1, 240, 1, C_LINE);
     if (ui.msg_until && (int32_t)(ui.msg_until - plat_ms()) > 0) {   /* what a button just did */
         box(0, 0, 240, HDR_H - 1, part_col());
-        text_c(120, vc(&FONT_B, 0, HDR_H - 1), &FONT_B, ui.msg, C_BLACK);
+        text_c(120, vc(&AF_M, 0, HDR_H - 1), &AF_M, ui.msg, C_BLACK);
         cv_commit(0, 0, 0);
         return;
     }
     ui.msg_until = 0;
     if (part_view()) {                                /* the part chip, then where we are */
-        int32_t w = tw(&FONT_B, PART_N[ui.part]) + 12;
+        int32_t w = tw(&AF_M, PART_N[ui.part]) + 12;
         box(0, 1, w, 17, part_col());
-        cv_text(6, vc(&FONT_B, 1, 17), &FONT_B, PART_N[ui.part], C_BLACK);
+        cv_text(6, vc(&AF_M, 1, 17), &AF_M, PART_N[ui.part], C_BLACK);
         x = w + 6;
         if (ui.view == V_GEN)
-            x = cv_text(x, vc(&FONT_S, 1, 17), &FONT_S, "TB-3PO", C_HI) + 6;
+            x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, "TB-3PO", C_HI) + 6;
         else if (ui.view == V_SEQ)
-            x = cv_text(x, vc(&FONT_S, 1, 17), &FONT_S, is_303() && ui.rec ? "SEQ KEYS" : "SEQ", is_303() && ui.rec ? C_AMB : C_HI) + 6;
+            x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, is_303() && ui.rec ? "SEQ KEYS" : "SEQ", is_303() && ui.rec ? C_AMB : C_HI) + 6;
         else if (is_303() && ui.rec)
-            x = cv_text(x, vc(&FONT_S, 1, 17), &FONT_S, "KEYS", C_AMB) + 6;
+            x = cv_text(x, vc(&AF_S, 1, 17), &AF_S, "KEYS", C_AMB) + 6;
     } else {
-        x = cv_text(4, vc(&FONT_B, 1, 17), &FONT_B, VIEW_N[ui.view], C_HI) + 6;
+        x = cv_text(4, vc(&AF_M, 1, 17), &AF_M, VIEW_N[ui.view], C_HI) + 6;
         if (drum_mix_page() >= 0)                     /* MIX: 909 / MIX: 808 (whose tracks these are) */
-            x = cv_text(x - 6, vc(&FONT_B, 1, 17), &FONT_B, drum_mix_page() ? ": 808" : ": 909",
+            x = cv_text(x - 6, vc(&AF_M, 1, 17), &AF_M, drum_mix_page() ? ": 808" : ": 909",
                         PART_COL[drum_mix_page()]) + 6;
     }
     {   /* the pattern of the part on screen (else the 909's), its cue; in SONG mode the bar */
@@ -2790,21 +2783,21 @@ static void draw_header(void)
         if (seq.song_on) {
             b[0] = 'S';
             put_i(b + 1, (seq.playing ? seq.song_pos : ui.song_sel) + 1);
-            x = cv_text(132, vc(&FONT_B, 1, 17), &FONT_B, b, seq.song_rec ? RGB(255, 90, 80) : C_AMB);
+            x = cv_text(132, vc(&AF_M, 1, 17), &AF_M, b, seq.song_rec ? RGB(255, 90, 80) : C_AMB);
         } else {
             b[0] = 'P';
             put_i(b + 1, seq.ppat[part] + 1);
-            x = cv_text(132, vc(&FONT_B, 1, 17), &FONT_B, b, C_WHITE);
+            x = cv_text(132, vc(&AF_M, 1, 17), &AF_M, b, C_WHITE);
         }
         if (cue >= 0 && cue != seq.ppat[part] && !seq.song_on) {
             b[0] = '>';
             put_i(b + 1, cue + 1);
-            cv_text(x + 2, vc(&FONT_S, 1, 17), &FONT_S, b, (ui.frame & 16u) ? C_WHITE : C_GRAY);
+            cv_text(x + 2, vc(&AF_S, 1, 17), &AF_S, b, (ui.frame & 16u) ? C_WHITE : C_GRAY);
         } else if (seq.chain_a != seq.chain_b && !seq.song_on) {
-            cv_text(x + 3, vc(&FONT_XS, 1, 17), &FONT_XS, "CHN", C_AMB);
+            cv_text(x + 3, vc(&AF_S, 1, 17), &AF_S, "CHN", C_AMB);
         } else if (steps_view() && steps_len() > 16) {   /* the 16 steps the keys show */
             put_i(put_s(put_i(b, ui.spage * 16 + 1), "-"), ui.spage * 16 + 16);
-            cv_text(x + 4, vc(&FONT_XS, 1, 17), &FONT_XS, b, C_GRAY);
+            cv_text(x + 4, vc(&AF_S, 1, 17), &AF_S, b, C_GRAY);
         }
     }
     {   /* following an external clock, the measured tempo wanders a little from clock to clock: the
@@ -2819,7 +2812,7 @@ static void draw_header(void)
             shown = (int)(avg + 0.5f);
         put_i(b, shown);
     }
-    text_r(212, vc(&FONT_S, 1, 17), &FONT_S, b, seq.ext ? C_AMB : C_HI);
+    text_r(212, vc(&AF_S, 1, 17), &AF_S, b, seq.ext ? C_AMB : C_HI);
     if (seq.playing)
         play_icon(217, 4, (eng_step[TRK_DRUM] & 3) == 0 ? C_WHITE : C_HI);
     if (ui.rec)
@@ -2852,7 +2845,7 @@ static void draw_drum(int band)
             continue;
         if (sel)
             box(0, y - 1, 24, DROW, col);
-        cv_text(5, vc(&FONT_XS, y - 1, DROW - 1), &FONT_XS, nm, sel ? C_BLACK : muted ? C_LINE : v < NDRUM ? C_GRAY : C_WHITE);
+        cv_text(5, vc(&AF_S, y - 1, DROW - 1), &AF_S, nm, sel ? C_BLACK : muted ? C_LINE : v < NDRUM ? C_GRAY : C_WHITE);
         for (c = 0; c < 16; c++) {
             int s = step_of(c), x = col_x(c), hit = s < NSTEPS && sm_get(bits, s);
             if (s >= len) {
@@ -2915,7 +2908,7 @@ static void draw_303(int band, int gen)
             int y = note_y(n, lo, hi) - o;
             put_note(t, n);
             cv_rect(GX, y + 2, 213, 1, C_LINE);
-            cv_text(1, y - 4, &FONT_XS, t, C_DIM);
+            cv_text(1, y - 4, &AF_S, t, C_DIM);
         }
     for (c = 0; c < 16; c++) {
         int s = step_of(c), x = col_x(c), g;
@@ -2943,8 +2936,8 @@ static void draw_303(int band, int gen)
         rbox(x + 1, 101 - o, 10, 4, 2, g && (st->flags & BS_ACCENT) ? C_WHITE : C_LINE);   /* its accent, its slide */
         rbox(x + 1, 113 - o, 10, 4, 2, g && (st->flags & BS_SLIDE) ? col : C_LINE);
     }
-    cv_text(3, vc(&FONT_XS, 99, 8) - o, &FONT_XS, "AC", C_GRAY);
-    cv_text(3, vc(&FONT_XS, 111, 8) - o, &FONT_XS, "SL", C_GRAY);
+    cv_text(3, vc(&AF_S, 99, 8) - o, &AF_S, "AC", C_GRAY);
+    cv_text(3, vc(&AF_S, 111, 8) - o, &AF_S, "SL", C_GRAY);
     if (ui.held_step >= 0 || ui.rec) {   /* the step held (or being written) */
         int s = ui.held_step >= 0 ? ui.held_step : ui.wpos[b];
         const bstep_t *st = &bp->step[s];
@@ -2958,14 +2951,14 @@ static void draw_303(int band, int gen)
             q = put_s(q, " ACC");
         if (st->flags & BS_SLIDE)
             put_s(q, " SLIDE");
-        cv_text(4, vc(&FONT_B, 122, 16) - o, &FONT_B, t, C_WHITE);
+        cv_text(4, vc(&AF_M, 122, 16) - o, &AF_M, t, C_WHITE);
     } else {                                           /* else the line's scale and seed */
         char t2[16];
         q = put_s(q, ROOT_N[bp->gen.root % 12]);
         q = put_s(q, " ");
         put_s(q, TB3PO_SCALE_NAMES[bp->gen.scale % TB3PO_NSCALES]);
         put_hex(put_s(t2, "SEED "), bp->gen.seed & 0xFFFFu, 4);
-        segs(4, vc(&FONT_S, 122, 16) - o, &FONT_S, C_GRAY, 18, t, t2, 0, 0);
+        segs(4, vc(&AF_S, 122, 16) - o, &AF_S, C_GRAY, 18, t, t2, 0, 0);
     }
 }
 
@@ -2973,7 +2966,7 @@ static void draw_303(int band, int gen)
 static void lane(int y, int p, uint32_t bits, int ph, int len, int base)
 {
     int c, muted = part_muted(p);
-    cv_text(3, y, &FONT_XS, PART_S[p], muted ? C_DIM : PART_COL[p]);
+    cv_text(3, y, &AF_S, PART_S[p], muted ? C_DIM : PART_COL[p]);
     for (c = 0; c < 16 && base + c < len; c++) {
         uint16_t fc = (bits >> c & 1u) ? (muted ? C_DIM : PART_COL[p]) : C_LINE;
         box(col_x(c), y + 2, 12, 9, fc);
@@ -3006,7 +2999,7 @@ static void draw_home(int band)
             if ((c & 3) == 0) {                         /* every fourth: its number (and so the bank) */
                 char t[4];
                 put_i(t, c + 1);
-                cv_text(x + 1, 21, &FONT_XS, t, ui.pbank ? C_AMB : C_GRAY);
+                cv_text(x + 1, 21, &AF_S, t, ui.pbank ? C_AMB : C_GRAY);
             }
         }
         for (p = 0; p < 2; p++) {
@@ -3039,9 +3032,9 @@ static void draw_song(int band)
         int row = band * 6 + r, y = r * 11, k = top + row - 1;
         char t[8];
         if (row == 0) {                                /* the heading */
-            cv_text(4, vc(&FONT_XS, y, 11), &FONT_XS, "BAR", C_GRAY);
+            cv_text(4, vc(&AF_S, y, 11), &AF_S, "BAR", C_GRAY);
             for (p = 0; p < NPARTS; p++)
-                text_c(58 + p * 36, vc(&FONT_XS, y, 11), &FONT_XS, PART_S[p], PART_COL[p]);
+                text_c(58 + p * 36, vc(&AF_S, y, 11), &AF_S, PART_S[p], PART_COL[p]);
             continue;
         }
         if (k > sg->len || k >= NSONG)
@@ -3049,23 +3042,23 @@ static void draw_song(int band)
         if (k == ui.song_sel)
             box(0, y, 236, 11, C_LINE);
         put_i(t, k + 1);
-        cv_text(4, vc(&FONT_XS, y, 11), &FONT_XS, t, k == ui.song_sel ? C_WHITE : C_GRAY);
+        cv_text(4, vc(&AF_S, y, 11), &AF_S, t, k == ui.song_sel ? C_WHITE : C_GRAY);
         if (seq.song_on && seq.playing && k == seq.song_pos)
             play_icon(26, y + 1, seq.song_rec ? RGB(255, 80, 70) : C_WHITE);
         if (k == sg->len) {                            /* one past the end: where the song grows */
-            cv_text(50, vc(&FONT_XS, y, 11), &FONT_XS, k ? "END" : "EMPTY: WHITE KEYS ADD BARS", C_DIM);
+            cv_text(50, vc(&AF_S, y, 11), &AF_S, k ? "END" : "EMPTY: WHITE KEYS ADD BARS", C_DIM);
             continue;
         }
         for (p = 0; p < NPARTS; p++) {
             int muted = sg->bar[k].mute >> p & 1u;
             t[0] = 'P';
             put_i(t + 1, sg->bar[k].pat[p] + 1);
-            text_c(58 + p * 36, vc(&FONT_XS, y, 11), &FONT_XS, muted ? "-" : t, muted ? C_DIM : PART_COL[p]);
+            text_c(58 + p * 36, vc(&AF_S, y, 11), &AF_S, muted ? "-" : t, muted ? C_DIM : PART_COL[p]);
         }
         if (SONG_REP(&sg->bar[k]) > 1) {               /* a bar played more than once: x2 .. x8 */
             t[0] = 'x';
             put_i(t + 1, SONG_REP(&sg->bar[k]));
-            text_r(238, vc(&FONT_XS, y, 11), &FONT_XS, t, C_WHITE);
+            text_r(238, vc(&AF_S, y, 11), &AF_S, t, C_WHITE);
         }
     }
 }
@@ -3074,11 +3067,11 @@ static void draw_fx(int band)
 {
     int p;
     if (band == 0) {                                   /* four parts x reverb / delay */
-        cv_text(52, 0, &FONT_XS, "REVERB", C_GRAY);
-        cv_text(148, 0, &FONT_XS, "DELAY", C_GRAY);
+        cv_text(52, 0, &AF_S, "REVERB", C_GRAY);
+        cv_text(148, 0, &AF_S, "DELAY", C_GRAY);
         for (p = 0; p < NPARTS; p++) {
             int y = 14 + p * 11, rv = proj.sound.v[T_MIX][p][1], dl = proj.sound.v[T_MIX][p][2];
-            cv_text(3, y - 2, &FONT_XS, PART_S[p], PART_COL[p]);
+            cv_text(3, y - 2, &AF_S, PART_S[p], PART_COL[p]);
             rbox(52, y + 2, 88, 6, 3, C_LINE);
             if (rv)
                 rbox(52, y + 2, 6 + rv * 82 / 127, 6, 3, PART_COL[p]);
@@ -3092,12 +3085,12 @@ static void draw_fx(int band)
         q = put_s(put_s(t, "DELAY "), a);
         pref_value(PR(R_ENG, T_FX, 0, FX_DL_TYPE), a, u);
         put_s(put_s(q, "  "), a);
-        cv_text(4, 4, &FONT_B, t, C_HI);
+        cv_text(4, 4, &AF_M, t, C_HI);
         {
             char t2[20];
             put_s(put_i(put_s(t, "FEEDBACK "), proj.sound.v[T_FX][0][FX_DL_FDBK] * 100 / 127), "%");
             put_i(put_s(t2, "REVERB "), proj.sound.v[T_FX][0][FX_RV_DECAY] * 100 / 127);
-            segs(4, 24, &FONT_S, C_GRAY, 18, t, t2, 0, 0);
+            segs(4, 24, &AF_S, C_GRAY, 18, t, t2, 0, 0);
             (void)q;
         }
     }
@@ -3123,7 +3116,7 @@ static void draw_drum_mix(int band, int k)
             if (hf > 1 && !muted)
                 rbox(x + 7, 4 + fh - hf - o, 5, hf, 2, sel ? C_WHITE : col);
         }
-        text_c(x + 10, vc(&FONT_XS, 104, 12) - o, &FONT_XS, engine_voice_name(t, v), sel ? C_WHITE : muted ? C_LINE : C_GRAY);
+        text_c(x + 10, vc(&AF_S, 104, 12) - o, &AF_S, engine_voice_name(t, v), sel ? C_WHITE : muted ? C_LINE : C_GRAY);
         rbox(x + 3, 123 - o, 13, 3, 1, C_LINE);          /* the pan, a mark from the middle */
         rbox(x + 3 + (pa * 10) / 127, 121 - o, 3, 7, 1, sel ? C_WHITE : C_GRAY);
     }
@@ -3166,26 +3159,26 @@ static void draw_mix(int band)
             rbox(206, 4, 8, 64, 4, C_LINE);
             if (gr > 1)
                 rbox(206, 4, 8, gr, 4, RGB(255, 80, 60));
-            cv_text(218, 2, &FONT_XS, "GR", C_GRAY);
+            cv_text(218, 2, &AF_S, "GR", C_GRAY);
         }
     } else {
         char t[24], a[12], u[8], *q;
         for (p = 0; p < NPARTS && cur_page() != pg.n - 1; p++)   /* the strips' names (not on MASTER) */
-            text_c(6 + p * 38 + 13, 0, &FONT_XS, PART_N[p], part_muted(p) ? C_LINE : PART_COL[p]);
+            text_c(6 + p * 38 + 13, 0, &AF_S, PART_N[p], part_muted(p) ? C_LINE : PART_COL[p]);
         if ((int)(engine_gr_db() + 0.5f))
             put_s(put_i(put_s(t, "COMP -"), (int)(engine_gr_db() + 0.5f)), "dB");
         else
             put_s(t, "COMP 0dB");
-        cv_text(4, 20, &FONT_B, t, engine_gr_db() > 0.5f ? RGB(255, 110, 90) : C_GRAY);
+        cv_text(4, 20, &AF_M, t, engine_gr_db() > 0.5f ? RGB(255, 110, 90) : C_GRAY);
         pref_value(PR(R_ENG, T_MST, 0, MST_PUMP), a, u);
         q = put_s(put_s(t, "PUMP "), a);
         put_s(q, u);
-        cv_text(124, 20, &FONT_B, t, proj.sound.v[T_MST][0][MST_PUMP] ? C_HI : C_GRAY);
+        cv_text(124, 20, &AF_M, t, proj.sound.v[T_MST][0][MST_PUMP] ? C_HI : C_GRAY);
         put_s(put_i(a, (int)plat_cpu_pct()), "%");
-        cv_text(4, 50, &FONT_XS, "AUDIO LOAD", C_DIM);
-        cv_text(70, 50, &FONT_XS, a, plat_cpu_pct() > 85u ? RGB(255, 60, 60) : C_GRAY);
+        cv_text(4, 50, &AF_S, "AUDIO LOAD", C_DIM);
+        cv_text(76, 50, &AF_S, a, plat_cpu_pct() > 85u ? RGB(255, 60, 60) : C_GRAY);
         if (engine_guard_active())                    /* the overload guard is saving the CPU */
-            cv_text(100, 50, &FONT_XS, "GUARD", C_AMB);
+            cv_text(100, 50, &AF_S, "GUARD", C_AMB);
     }
 }
 
@@ -3208,17 +3201,17 @@ static void draw_perf(int band)
             q = put_i(q, perf.mhz10 / 10);
             put_s(q, " MHz");
         } else
-            put_s(q, plat_cycles_cpu() ? "..." : "? (NO CYCLE COUNTER)");
-        cv_text(4, 2, &FONT_B, t, C_WHITE);
+            put_s(q, plat_cycles_cpu() ? "..." : "? (NO COUNTER)");
+        cv_text(4, 2, &AF_M, t, C_WHITE);
         if (plat_cpu2_on())                           /* the cores: one after the second gave up (fm1-x0x#10) */
-            text_r(236, 6, &FONT_XS, "2 CORES", C_GRAY);
+            text_r(236, 6, &AF_S, "2 CORES", C_GRAY);
         else {
             q = put_s(t, "1 CORE");
             if (plat_cpu2_gave_up() == 1)
                 put_i(put_s(q, ": BAD READS "), (int)plat_cpu2_bad());
             else if (plat_cpu2_gave_up() == 2)
                 put_s(q, ": 2ND TIMED OUT");
-            text_r(236, 6, &FONT_XS, t, plat_cpu2_gave_up() ? RGB(255, 80, 60) : C_GRAY);
+            text_r(236, 6, &AF_S, t, plat_cpu2_gave_up() ? RGB(255, 80, 60) : C_GRAY);
         }
         if (perf.test >= 0) {
             int done = perf.phase == 4;
@@ -3228,11 +3221,11 @@ static void draw_perf(int band)
                 q = put_s(q, "/3  ");
                 put_s(q, PT_N[perf.test < 3 ? perf.test : 2]);
             }
-            cv_text(4, 24, &FONT_S, t, done ? C_HI : C_AMB);
+            cv_text(4, 24, &AF_S, t, done ? C_HI : C_AMB);
             if (!done)
-                cv_text(4, 46, &FONT_XS, "HOME OR PLAY: STOP", C_DIM);
+                cv_text(4, 46, &AF_S, "HOME OR PLAY: STOP", C_DIM);
             else
-                cv_text(4, 46, &FONT_XS, "SHARE OF THE CPU (PEAK)  CYCLES / SAMPLE", C_DIM);
+                cv_text(4, 46, &AF_S, "SHARE OF THE CPU (PEAK)  CYCLES / SAMPLE", C_DIM);
             return;
         }
         q = put_s(t, "LOAD ");
@@ -3241,7 +3234,7 @@ static void draw_perf(int band)
         q = put_i(q, perf.peak);
         q = put_s(q, "%  DROPOUTS ");
         put_i(q, (int)plat_xruns());
-        cv_text(4, 24, &FONT_S, t, C_HI);
+        cv_text(4, 24, &AF_S, t, C_HI);
         if (perf.stalls_on) {
             q = put_s(t, "STALLS  FETCH ");
             q = put_i(q, perf.stall[0]);
@@ -3251,59 +3244,59 @@ static void draw_perf(int band)
             put_s(put_i(q, perf.stall[2]), "%");
         } else
             put_s(t, "STALLS OFF (KNOB 1)");
-        cv_text(4, 46, &FONT_XS, t, perf.stalls_on ? C_GRAY : C_DIM);
+        cv_text(4, 46, &AF_S, t, perf.stalls_on ? C_GRAY : C_DIM);
         if (!perf.stalls_on && plat_irq_stack_size()) {   /* the interrupts' 8 KiB: the deepest so far */
             q = put_s(t, "IRQ STACK ");
             q = put_i(q, (int)plat_irq_stack_used());
             q = put_s(q, " / ");
             put_s(put_i(q, (int)plat_irq_stack_size()), " B");
-            text_r(236, 46, &FONT_XS, t, plat_irq_stack_used() * 4u > plat_irq_stack_size() * 3u ? RGB(255, 80, 60) : C_GRAY);
+            text_r(236, 46, &AF_S, t, plat_irq_stack_used() * 4u > plat_irq_stack_size() * 3u ? RGB(255, 80, 60) : C_GRAY);
         }
         return;
     }
     if (perf.test >= 0) {                             /* the table, so far */
         for (k = 0; k < 3; k++) {
             int y = k * 14 + 2;
-            cv_text(4, y, &FONT_S, PT_N[k], perf.test == k && perf.phase != 4 ? C_AMB : C_GRAY);
+            cv_text(4, y, &AF_S, PT_N[k], perf.test == k && perf.phase != 4 ? C_AMB : C_GRAY);
             if (!perf.res_load[k])
                 continue;
             q = put_pct10(t, perf.res_load[k]);
             q = put_s(q, " (");
             q = put_i(q, perf.res_peak[k]);
             put_s(q, "%)");
-            cv_text(112, y, &FONT_S, t, C_WHITE);
+            cv_text(112, y, &AF_S, t, C_WHITE);
             if (perf.res_cps[k]) {
                 put_i(t, perf.res_cps[k]);
-                text_r(236, y, &FONT_S, t, C_HI);
+                text_r(236, y, &AF_S, t, C_HI);
             }
         }
         if (perf.phase == 4)
-            cv_text(4, 50, &FONT_XS, "SEL: RUN IT AGAIN", C_DIM);
+            cv_text(4, 50, &AF_S, "SEL: RUN IT AGAIN", C_DIM);
         if (plat_irq_stack_size()) {                 /* the interrupts' stack, the deepest so far (after the test too) */
             q = put_s(t, "IRQ STACK ");
             q = put_i(q, (int)plat_irq_stack_used());
             q = put_s(q, " / ");
             put_s(put_i(q, (int)plat_irq_stack_size()), " B");
-            text_r(236, 50, &FONT_XS, t, plat_irq_stack_used() * 4u > plat_irq_stack_size() * 3u ? RGB(255, 80, 60) : C_GRAY);
+            text_r(236, 50, &AF_S, t, plat_irq_stack_used() * 4u > plat_irq_stack_size() * 3u ? RGB(255, 80, 60) : C_GRAY);
         }
         return;
     }
     for (k = 0; k < ENG_PROF_N; k++) {                /* each stage's share of the CPU */
         int x = (k & 1) * 118 + 4, y = (k >> 1) * 12;
-        cv_text(x, y, &FONT_XS, SN[k], C_GRAY);
+        cv_text(x, y, &AF_S, SN[k], C_GRAY);
         put_pct10(t, perf.stage[k]);
-        text_r(x + 108, y, &FONT_XS, t, C_WHITE);
+        text_r(x + 108, y, &AF_S, t, C_WHITE);
     }
     if (perf.cps) {
         q = put_s(t, "RENDER ");
         q = put_i(q, perf.cps);
         put_s(q, " CYCLES / SAMPLE");
-        cv_text(4, 44, &FONT_XS, t, C_GRAY);
+        cv_text(4, 44, &AF_S, t, C_GRAY);
     }
     q = put_s(t, engine_guard_active() ? "GUARD ON  " : "GUARD ");   /* the overload guard: engaged, times */
     put_s(put_i(q, (int)eng_guard_count), "x");
-    text_r(236, 55, &FONT_XS, t, engine_guard_active() ? C_AMB : C_DIM);
-    cv_text(4, 55, &FONT_XS, "SEL: RUN PERF TEST", C_DIM);
+    text_r(236, 55, &AF_S, t, engine_guard_active() ? C_AMB : C_DIM);
+    cv_text(4, 55, &AF_S, "SEL: RUN PERF TEST", C_DIM);
 }
 
 /* the readout: the knob being turned, large, across the bottom band */
@@ -3333,21 +3326,21 @@ static void draw_readout(void)
     pref_value(r, num, unit);
     {   /* one row: the name on the left, the value (+ unit) on the right, both on the box's middle */
         const int32_t bx = 8, by = 14, bw = 224, bh = 50;
-        const felucca_font_t *vf = &FONT_L;           /* the big face has numbers only: a name in the next size */
-        int32_t ly, uw = unit[0] ? tw(&FONT_S, unit) + 3 : 0;
+        const aafont_t *vf = &AF_L;           /* the big face has numbers only: a name in the next size */
+        int32_t ly, uw = unit[0] ? tw(&AF_S, unit) + 3 : 0;
         const char *q;
         for (q = num; *q; q++)
             if ((uint8_t)*q > '9')
-                vf = &FONT_M;
+                vf = &AF_M;
         ly = vc(vf, by, bh);
         box(bx, by, bw, bh, C_BLACK);
         frame(bx, by, bw, bh, part_col());
-        cv_text(bx + 12, vc(&FONT_B, by, bh), &FONT_B, nm, C_GRAY);
+        cv_text(bx + 12, vc(&AF_M, by, bh), &AF_M, nm, C_GRAY);
         w = tw(vf, num);
         x = bx + bw - 12 - uw - w;
         cv_text(x, ly, vf, num, C_WHITE);
         if (unit[0])
-            cv_text(bx + bw - 12 - uw + 3, base_y(vf, ly, &FONT_S), &FONT_S, unit, C_GRAY);
+            cv_text(bx + bw - 12 - uw + 3, base_y(vf, ly, &AF_S), &AF_S, unit, C_GRAY);
     }
 }
 
@@ -3366,14 +3359,14 @@ static void draw_list(int band)
         if (r.kind == R_HDR) {                         /* a section: whose values follow */
             char t[28];
             hdr_name(r.a, t);
-            cv_text(8, vc(&FONT_XS, y + 4, 16), &FONT_XS, t, C_AMB);
+            cv_text(8, vc(&AF_S, y + 4, 16), &AF_S, t, C_AMB);
             cv_rect(8, y + 19, 220, 1, C_LINE);
             continue;
         }
         d = pref_desc(r);
         if (sel)
             box(0, y + 1, 232, 21, dim(part_col(), 6));
-        cv_text(8, vc(sel ? &FONT_B : &FONT_S, y + 1, 18), sel ? &FONT_B : &FONT_S, caps_of(pref_name(r)), sel ? C_WHITE : C_GRAY);
+        cv_text(8, vc(sel ? &AF_M : &AF_S, y + 1, 18), sel ? &AF_M : &AF_S, caps_of(pref_name(r)), sel ? C_WHITE : C_GRAY);
         if (r.kind == R_ACT) {                         /* an action: the return arrow */
             uint16_t ac = sel ? C_WHITE : C_DIM;
             cv_rect(212, y + 12, 12, 2, ac);
@@ -3384,9 +3377,9 @@ static void draw_list(int band)
         }
         pref_value(r, num, unit);
         {
-            const felucca_font_t *nf = sel ? &FONT_B : &FONT_S;
-            int32_t ny = vc(nf, y + 1, 18), ux = 226 - tw(&FONT_XS, unit);
-            cv_text(ux, base_y(nf, ny, &FONT_XS), &FONT_XS, unit, C_GRAY);
+            const aafont_t *nf = sel ? &AF_M : &AF_S;
+            int32_t ny = vc(nf, y + 1, 18), ux = 226 - tw(&AF_S, unit);
+            cv_text(ux, base_y(nf, ny, &AF_S), &AF_S, unit, C_GRAY);
             text_r(unit[0] ? ux - 2 : 226, ny, nf, num, sel ? C_WHITE : C_HI);
         }
         if (d && !d->names && d->max >= 24) {          /* a continuous value: its bar */
@@ -3409,16 +3402,16 @@ static void draw_ask(int band)
     if (band == 0) {
         frame(6, 10, 228, 62, red);
         cv_rect(7, 71, 226, 1, C_BLACK);
-        text_c(120, 24, &FONT_B, ui.ask_q[0], C_WHITE);
-        text_c(120, 46, &FONT_S, ui.ask_q[1], C_GRAY);
+        text_c(120, 24, &AF_M, ui.ask_q[0], C_WHITE);
+        text_c(120, 46, &AF_S, ui.ask_q[1], C_GRAY);
     } else {
         cv_rect(6, 0, 1, 44, red);
         cv_rect(233, 0, 1, 44, red);
         cv_rect(7, 44, 226, 1, red);
         box(22, 10, 92, 24, red);
-        text_c(68, vc(&FONT_B, 10, 24), &FONT_B, "SEL  YES", C_BLACK);
+        text_c(68, vc(&AF_M, 10, 24), &AF_M, "SEL  YES", C_BLACK);
         frame(126, 10, 92, 24, C_GRAY);
-        text_c(172, vc(&FONT_B, 10, 24), &FONT_B, "HOME  NO", C_GRAY);
+        text_c(172, vc(&AF_M, 10, 24), &AF_M, "HOME  NO", C_GRAY);
     }
 }
 
@@ -3429,12 +3422,12 @@ static void draw_help(int band)
     uint16_t c = part_col();
     if (band == 0) {
         box(6, 4, 228, 24, c);
-        text_c(120, vc(&FONT_B, 4, 24), &FONT_B, BTN_LABEL[ui.help - 1], C_BLACK);
+        text_c(120, vc(&AF_M, 4, 24), &AF_M, BTN_LABEL[ui.help - 1], C_BLACK);
     }
     for (k = 0; k < n; k++) {                            /* evenly spaced; a line across the bands in both */
         int32_t y = 34 + k * 18 - band * BAND_H;
         if (y > -18 && y < BAND_H)
-            text_c(120, y, &FONT_XS, l[k], C_WHITE);
+            text_c(120, y, &AF_S, l[k], C_WHITE);
     }
 }
 
@@ -3462,7 +3455,7 @@ static int help_fits(void)
                         ui.rec = (uint8_t)(b & 2);
                         any_button = (uint8_t)(b != 0);
                         footer_text(&fa, &fb, &fc);
-                        w = 4 + tw(&FONT_T, fa) + (fb ? FOOT_GAP + tw(&FONT_T, fb) : 0) + (fc ? FOOT_GAP + tw(&FONT_T, fc) : 0);
+                        w = 4 + tw(&AF_S, fa) + (fb ? FOOT_GAP + tw(&AF_S, fb) : 0) + (fc ? FOOT_GAP + tw(&AF_S, fc) : 0);
                         if (w > 236) {
                             if (ok)
                                 printf("footer too wide: \"%s / %s / %s\" (%d px)\n", fa, fb ? fb : "", fc ? fc : "", (int)w);
@@ -3473,9 +3466,9 @@ static int help_fits(void)
                     if (n < 1 || n > HELP_LINES)
                         ok = 0;
                     for (k = 0; k < n; k++)
-                        if (tw(&FONT_XS, l[k]) > 224) {
+                        if (tw(&AF_S, l[k]) > 224) {
                             if (ok)
-                                printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&FONT_XS, l[k]));
+                                printf("help card too wide: %s: \"%s\" (%d px)\n", BTN_LABEL[b], l[k], (int)tw(&AF_S, l[k]));
                             ok = 0;
                         }
                 }
@@ -3498,16 +3491,16 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         *a = "SEL: YES";
         *b = "HOME: NO";
     } else if (ui.overlay == O_LIST) {
-        *a = "SELECT: MOVE";
+        *a = "SEL: MOVE";
         *b = "ALGO: CHANGE";
         *c = "HOME: BACK";
     } else if (ui.view == V_HOME) {
         *a = "WHITE: PATTERN";
         *b = "TWO: CHAIN";
-        *c = "BLACK: MUTE";
+        *c = "BLK: MUTE";
     } else if (ui.view == V_SONG) {
         *a = "WHITE: THE BAR'S PATTERN";
-        *b = "BLACK: MUTE";
+        *b = "BLK: MUTE";
     } else if (ui.view == V_MIX && cur_page() == 0) {
         *a = "BLACK 1-5: PART";
         *b = "HOME+BLK: MUTE";
@@ -3524,15 +3517,15 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
     } else if (is_drum()) {
         *a = "BLACK: TRACK";
         *b = "WHITE: STEP";
-        *c = "HOME+BLK: MUTE";
+        *c = "BLK: MUTE";
     } else if (is_303() && ui.rec) {
-        *a = "KEYS WRITE NOTES";
-        *b = "ENV+OCT: REST";
-        *c = "LFO+OCT: TIE";
+        *a = "KEYS: NOTES";
+        *b = "ENV+OCT: RST";
+        *c = "LFO: TIE";
     } else if (is_303()) {
         *a = "PRESS: ON";
         *b = "TAP: OFF";
-        *c = "HOLD + KNOBS: EDIT";
+        *c = "HOLD+KNOBS: EDIT";
     }
     return C_DIM;
 }
@@ -3541,7 +3534,7 @@ static void draw_footer(void)
 {
     const char *a, *b, *c;
     uint16_t col = footer_text(&a, &b, &c);
-    segs(4, vc(&FONT_T, FOOT_Y, 9), &FONT_T, col, FOOT_GAP, a, b, c, 0);
+    segs(4, vc(&AF_S, FOOT_Y, 9), &AF_S, col, FOOT_GAP, a, b, c, 0);
 }
 
 static void draw_main(void)
@@ -3582,10 +3575,10 @@ static void draw_main(void)
 /* -------------------------------------------------------------- knob strip --- */
 static void cell_value(int cx, int y, const char *num, const char *unit, uint16_t c)
 {
-    int32_t w = tw(&FONT_B, num) + (unit[0] ? tw(&FONT_XS, unit) + 1 : 0), x = cx - w / 2;
-    x = cv_text(x, y, &FONT_B, num, c);
+    int32_t w = tw(&AF_M, num) + (unit[0] ? tw(&AF_S, unit) + 1 : 0), x = cx - w / 2;
+    x = cv_text(x, y, &AF_M, num, c);
     if (unit[0])
-        cv_text(x + 1, base_y(&FONT_B, y, &FONT_XS), &FONT_XS, unit, C_GRAY);
+        cv_text(x + 1, base_y(&AF_M, y, &AF_S), &AF_S, unit, C_GRAY);
 }
 
 /* what the knob strip shows, hashed: it is only redrawn when this changes (the arcs cost a
@@ -3684,9 +3677,9 @@ static void draw_knobs(void)
         int dots = pg.n > 1 && ui.view != V_GLO;
         int32_t xd = 237 - (dots ? pg.n * 5 : 0), xt;
         knob_tag(t);
-        xt = xd - (dots ? 5 : 0) - tw(&FONT_XS, t);
+        xt = xd - (dots ? 5 : 0) - tw(&AF_S, t);
         cv_rect(0, 5, xt - 5, 1, C_LINE);
-        cv_text(xt, vc(&FONT_XS, 0, 11), &FONT_XS, t, C_HI);
+        cv_text(xt, vc(&AF_S, 0, 11), &AF_S, t, C_HI);
         if (dots) {
             int k;
             for (k = 0; k < pg.n; k++)
@@ -3710,8 +3703,8 @@ static void draw_knobs(void)
                 put_s(v, G[bstep_gate(st)]);
             else
                 put_s(v, (st->flags & (i == 2 ? BS_ACCENT : BS_SLIDE)) ? "ON" : "OFF");
-            text_c(cx, vc(&FONT_XS, 13, 10), &FONT_XS, SN[i], C_GRAY);
-            text_c(cx, vc(&FONT_M, 30, 34), &FONT_M, v, C_WHITE);
+            text_c(cx, vc(&AF_S, 13, 10), &AF_S, SN[i], C_GRAY);
+            text_c(cx, vc(&AF_M, 30, 34), &AF_M, v, C_WHITE);
         }
         cv_commit(3, 0, KNOB_Y);
         return;
@@ -3728,7 +3721,7 @@ static void draw_knobs(void)
             continue;
         if (touched)
             box(i * 60 + 2, 11, 56, 56, dim(col, 4));
-        text_c(cx, vc(&FONT_XS, 13, 10), &FONT_XS, caps_of(pref_name(r)), touched ? C_WHITE : C_GRAY);
+        text_c(cx, vc(&AF_S, 13, 10), &AF_S, caps_of(pref_name(r)), touched ? C_WHITE : C_GRAY);
         val = pref_get(r);
         if (lock_step() >= 0) {                        /* a held step: its own value (amber mark: locked) */
             int lv = lock_of(r, lock_step());
@@ -3751,7 +3744,7 @@ static void draw_knobs(void)
                 r.kind == R_BTRANS || is_pan(r) || (r.kind == R_ENG && r.a == T_MST && r.c == MST_DJF));   /* from the middle */
         }
         pref_value_of(r, val, num, unit);
-        cell_value(cx, vc(&FONT_B, 53, 13), num, unit, touched ? C_WHITE : C_HI);
+        cell_value(cx, vc(&AF_M, 53, 13), num, unit, touched ? C_WHITE : C_HI);
     }
     cv_commit(3, 0, KNOB_Y);
 }
