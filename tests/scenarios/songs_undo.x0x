@@ -1,0 +1,65 @@
+# T8i review 1: clip undo is per song. Clearing a clip in one song does not undo into
+# another: opening a song clears the clip undo, and outside SONGS HOME+REC only touches
+# the current song.
+wait 300
+# two songs: Starter (slot 0), then Empty (slot 1)
+press SAVE
+wait 700
+release SAVE
+wait 40
+tap SEL
+wait 40
+tap SEL
+wait 40
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+tap SEL
+wait 40
+turn SELECT -1
+tap SEL
+wait 40
+expect songused 2
+expect songcurrent 1
+# open the Starter (slot 0) and clear its drum clip A (HOME + hold the pad)
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT -9
+turn SELECT 1
+expect songrow 1
+tap SEL
+wait 40
+expect songcurrent 0
+expect clipused0 1
+press HOME
+key w0 down
+wait 1700
+key w0 up
+release HOME
+expect clipused0 0
+expect undodepth 1
+# open the Empty (slot 1): the clip undo belongs to the other song, so it clears
+press SAVE
+wait 700
+release SAVE
+wait 40
+turn SELECT 1
+expect songrow 2
+tap SEL
+wait 40
+expect songcurrent 1
+expect undodepth 0
+expect clipused0 0
+# HOME+REC in the song home must not restore song 0's clip into song 1
+press HOME
+tap REC
+release HOME
+wait 40
+expect clipused0 0
+expect undodepth 0
+shot songs_undo_after.png
+dump songs_undo.json

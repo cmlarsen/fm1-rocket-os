@@ -40,13 +40,13 @@ tap PLAY
 expect playing 1
 wait-bar 1
 expect liveclip0 0
-# open the Empty (slot 1) while it plays: the music stops, the new song loads
+# open the other song: entering SONGS stops the transport (SONGS is a stopped, quiet view)
 press SAVE
 wait 700
 release SAVE
 wait 40
 expect songson 1
-expect playing 1
+expect playing 0
 turn SELECT 1
 expect songrow 2
 tap SEL

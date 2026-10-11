@@ -1,0 +1,36 @@
+# T8i review 6: SAVE held in STUDIO shows no old X0X feedback (no "P1 COPIED", no help
+# card) before SONGS opens at ~600 ms; SAVE as a modifier does not open it, and a short
+# SAVE tap still saves.
+wait 300
+press SAVE
+wait 300
+expect songson 0
+expect msg 0
+expect help 0
+shot save_hold300.png
+wait 200
+expect songson 0
+expect msg 0
+expect help 0
+shot save_hold500.png
+wait 200
+expect songson 1
+release SAVE
+wait 40
+expect songson 1
+tap HOME
+wait 40
+expect songson 0
+# SAVE with HOME is a modifier: no SONGS, and no save banner from a copy either
+press HOME
+press SAVE
+wait 800
+expect songson 0
+release SAVE
+release HOME
+wait 40
+# a short SAVE tap still saves (no SONGS)
+tap SAVE
+wait 60
+expect songson 0
+shot save_tap.png
