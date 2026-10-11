@@ -1,0 +1,17 @@
+# T7a round 2: a note held on a sound page is released when SEQ hands off to the song home.
+wait 300
+# LEAD -> 303 B sound page
+cursor 2 0
+tap EDIT
+expect view 1
+expect part 3
+events snd_hang_seq_events.txt
+key 0 down
+wait 100
+tap SEQ
+expect view 10
+key 0 up
+wait 300
+expect bassheld 0
+eventsstop
+dump snd_hang_seq.json

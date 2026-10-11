@@ -131,3 +131,25 @@ image 514,576 B; RAM `.data+.bss` 95,824 / 98,304; POOL 292,132 / 344,064.
 - **Song home fixes** (card text, toast band, SEL hold, header clearance, copy targets):
   `studio_home/*`, `studio_empty/*`, `studio_settings/*`, `studio_clear/*`, `studio_copy/*`,
   `studio_live/*`, `studio_persist/*`.
+
+## Follow-up round 2: one held-note table
+
+The round-2 defect was a hung note from a sound page: hold a key (BASS page or the CHORDS card),
+press HOME, release — the release went to the song home's handler, so no note-off was sent.
+
+- **One held-note table in the key path** (`ui.c`): `hn_on/hn_role/hn_note[NKEYS]` with
+  `note_key_down` / `note_key_up` / `note_release_all`. Every "a key plays a note" path uses it:
+  LIVE's PLAY layer (its per-view `held_*` arrays and `live_clear_held`/`live_release_held` are
+  gone) and the sound pages. `key_event` releases what a key started on its release, whatever the
+  view; `set_view` calls `note_release_all`, so every view change, the STUDIO/LIVE/Classic
+  switches and the HOME/SEQ handoffs release everything still held (rc_debug's stress uses the same
+  call). A key is retriggered by first releasing the old note.
+- **Cosmetic:** the header's X0X `P1` pattern marker is hidden on sound pages outside Classic.
+
+Scenarios: `snd_hang` (EDIT→HOME from the BASS page and the FM6 card), `snd_hang_seq` (EDIT→SEQ),
+`snd_hang_live` (entering LIVE with a key held), `snd_hang_scl` (SCL across a held note in LIVE's
+PLAY layer); they assert `bassheld`/`fm6held` are 0 and log the note-offs.
+
+Golden: `studio_sound` re-seeded (the sound-page header lost its `P1`); the four `snd_*` dirs are
+new. Ladder: `make unit-core scenarios screens-lint parity check fw` and `tools/check_loader.sh`
+pass. Device: image 514,432 B; RAM `.data+.bss` 95,824 / 98,304; POOL 292,132 / 344,064.

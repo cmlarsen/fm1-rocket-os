@@ -24,3 +24,14 @@ Coordinator decisions are in **bold**. The reviewer's probe scenarios are in `/p
    - fix the report: HOME leaves Classic only if you implement it. **Do implement it:** HOME from any top-level X0X page inside Classic returns to the song home and leaves Classic.
 
 Then run `make unit-core scenarios screens-lint parity check fw` and `tools/check_loader.sh build/x0x.fwsc`, list the re-seeded goldens with the reason for each, commit, update reports/T7a.md, and send worker_done.
+
+## Re-review (round 2): one remaining defect
+- **A hung note from a sound page.** Hold a key on the BASS sound page (or the CHORDS card), press HOME, then release: the release goes to the song home's handler, so no note-off is sent. The reviewer's probe is `/private/tmp/claude-502/-Users-caleb-CalebApps-fm1-rocket-os/10296272-f272-4eb6-9e65-5ca02d389a5d/scratchpad/probe/r2/snd_hang.x0x`.
+- **Fix this class of bug once, with a coordinator decision:** add a single held-note table in the key path, mapping each key to what it started (engine and part, note). It is shared by LIVE PLAY, the sound pages and any future key-plays-a-note path.
+  - Releasing a key always releases what that key started, whatever the current view or layer.
+  - `set_view`, mode changes (STUDIO/LIVE/Classic) and HOME/SEQ handoffs release everything still held in the table.
+  - Remove the per-view held tracking that this replaces, where that is safe.
+- Add `snd_hang` as a scenario, plus a variant for each view change (SCL, EDIT→HOME, EDIT→SEQ, entering LIVE with a key held).
+- **Cosmetic:** hide X0X's "P1" pattern marker in sound-page headers outside Classic.
+
+Then run the full ladder and `tools/check_loader.sh`, commit, update reports/T7a.md, and send worker_done.
