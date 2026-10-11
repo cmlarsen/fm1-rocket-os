@@ -278,7 +278,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name
+unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name unit-songs
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens
@@ -327,5 +327,27 @@ unit-name:
 	$(HOST_CC) $(SAN_CFLAGS) -Wno-unused-function -Wno-unused-parameter -I. -Ifirmware/src -Ifirmware/src/app \
 	    -o build/host/ui_name_test_san tests/host/ui_name_test.c
 	build/host/ui_name_test_san
+
+# T8: the Empty/Starter song templates, and the SONGS view (STUDIO 7, 8, 11, 12 and 13)
+# against a RAM ops fake. Both link song_store.c for song_store_empty; -DX0X_HOST keeps
+# the store's buffers as plain statics on the host. ui_songs.c draws through gfx.c's
+# statics, so its test is one translation unit holding gfx.c + ui_name.c + ui_songs.c.
+.PHONY: unit-songs
+unit-songs:
+	@mkdir -p build/host/ui_songs
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -DX0X_HOST -o build/host/song_templates_test \
+	    tests/host/song_templates_test.c firmware/src/app/song_templates.c core/model/song_store.c
+	build/host/song_templates_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -DX0X_HOST -o build/host/song_templates_test_san \
+	    tests/host/song_templates_test.c firmware/src/app/song_templates.c core/model/song_store.c
+	build/host/song_templates_test_san
+	$(HOST_CC) $(CORE_CFLAGS) -Wno-unused-function -Wno-unused-parameter -Werror -I. -DX0X_HOST \
+	    -Ifirmware/src -Ifirmware/src/app -o build/host/ui_songs_test \
+	    tests/host/ui_songs_test.c firmware/src/app/song_templates.c core/model/song_store.c
+	build/host/ui_songs_test
+	$(HOST_CC) $(SAN_CFLAGS) -Wno-unused-function -Wno-unused-parameter -I. -DX0X_HOST \
+	    -Ifirmware/src -Ifirmware/src/app -o build/host/ui_songs_test_san \
+	    tests/host/ui_songs_test.c firmware/src/app/song_templates.c core/model/song_store.c
+	build/host/ui_songs_test_san
 
 

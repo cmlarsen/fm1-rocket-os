@@ -18,6 +18,7 @@ These questions are still unresolved. When one is answered, record the answer in
 1. **Confirm the fork target: X0X.** It is recommended, and FM6, NOISE and the newer gfx would be ported from Felucca. See [fork evaluation](research/fork-evaluation.md).
 2. **Default pad map.** The proposal is keyboard zones (see [screens](product/screens.md#design-decisions-made-while-drawing)). It is waiting for the owner's review on the design canvas.
 3. **Committing LIVE tweaks.** Should LIVE offer "commit tweaks to song", or should LIVE changes always revert? The v1 default is revert.
+4. **The song has no key or scale field (T8).** The New-song screen picks a key and the interaction model says a song has tempo, key and scale, but frozen `model.h`'s `song_t` has only `bpm_x10` — no key or scale. T8 shapes the Starter template with the chosen key and shows it while creating, but nothing stores it. Either v1 drops the key from the New-song screen, or `song_t` gains a key/scale field (a coordinator change to the frozen model).
 5. **Name.** Is "rocket-os" the working name?
 6. **LIVE → STUDIO transport (T3).** In this build, leaving LIVE stops the clip engine and hands the transport back to X0X's sequencer, so playing clips do **not** carry on across the mode change (the [interaction model](product/interaction-model.md#modes) still says they do). T6i/T7 revisit this; the owner decides whether the current behaviour is acceptable until then.
 

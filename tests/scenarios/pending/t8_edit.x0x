@@ -1,0 +1,41 @@
+# T8 (pending): the song menu, rename (T8c's editor) and copy.
+# See pending/README.md: not run until T8i wires the hook.
+wait 300
+press SAVE
+wait 700
+release SAVE
+wait 20
+expect songused 1
+
+# EDIT on the first song opens the menu
+tap EDIT
+wait 20
+expect songscreen MENU
+shot s06_menu.png
+
+# Rename: move the cursor and step a letter, then SEL saves
+turn SELECT 1
+tap SEL
+wait 20
+expect songscreen RENAME
+turn SELECT -1
+turn SELECT -1
+turn ALGO 1
+shot s07_rename.png
+tap SEL
+wait 20
+expect songscreen MENU
+expect songslot 0 "NEW SONF"
+shot s08_renamed.png
+
+# Copy into the next free slot
+turn SELECT -1
+tap SEL
+wait 20
+expect songscreen LIST
+expect songused 2
+expect songslot 1 "NEW SONF 2"
+shot s09_copied.png
+
+tap HOME
+wait 20
