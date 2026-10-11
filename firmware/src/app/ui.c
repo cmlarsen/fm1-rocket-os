@@ -21,8 +21,8 @@ static const int8_t KEY_WHITE[NKEYS] = {0, -1, 1, -1, 2, -1, 3, 4, -1, 5, -1, 6,
 static const int8_t KEY_BLACK[NKEYS] = {-1, 0, -1, 1, -1, 2, -1, -1, 3, -1, 4, -1, -1, 5, -1, 6, -1, 7, -1, -1, 8, -1, 9, -1, -1, 10, -1};
 static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
-enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, NVIEWS };
-static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ"};
+enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, NVIEWS };
+static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE"};
 static const uint16_t PART_COL[NPARTS] = {TOK_DRUM, TOK_FX, TOK_BASS, TOK_LEAD};   /* T2b: the design's role colours */
 static const char *const PART_N[NPARTS] = {"909", "808", "303A", "303B"};
 static const char *const PART_S[NPARTS] = {"909", "808", "303A", "303B"};   /* 4 chars: lane labels */
@@ -81,6 +81,25 @@ static uint16_t footer_text(const char **a, const char **b, const char **c);
 
 /* something the project keeps changed: SAVE (or the autosave) has work to do */
 static void mark_dirty(void) { ui.dirty = 1; }
+
+/* ============================================================== T3: LIVE === */
+/* ui_live.c is included near the bottom, after the drawing helpers. Everything ui.c needs from
+ * it is forward-declared here; the view enum has V_LIVE. LIVE is entered and left only by the
+ * long press on PLAY (live_play_tick below), and SCL (B_SEL) toggles the PADS / PLAY layers. */
+static int  live_mode(void);                 /* ui.view == V_LIVE */
+static void live_play_tick(uint32_t btn);    /* PLAY: short = transport, long = in/out of LIVE */
+static int  live_holding(void);              /* the enter/leave ring is filling */
+static void live_draw_ring(void);
+static int  live_handle_key(int k, int down);
+static int  live_handle_button(int b);       /* 1 = consumed (LIVE owns it) */
+static void live_input(void);                /* the encoders while in LIVE */
+static void live_draw(int band);
+static void live_draw_header(void);
+static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim);
+static uint16_t live_footer(const char **a, const char **b, const char **c);
+/* the runner (host/x0x_host.c) reads the layer and the focused role through these */
+int  live_layer(void);
+int  live_focus(void);
 
 /* the encoders, read for the UI: a turn counts as being touched (the autosave waits for quiet) */
 static int32_t enc(int role)
@@ -1972,6 +1991,10 @@ static void key_event(int k, int down)
     int w = KEY_WHITE[k], bl = KEY_BLACK[k], wp = w >= 0 ? ui.pbank * 16 + w : -1;   /* wp: a white key's pattern */
     if (ui.overlay == O_ASK || ui.view == V_PERF || perf_testing())
         return;
+    if (live_mode()) {                                     /* T3: LIVE owns the keys */
+        live_handle_key(k, down);
+        return;
+    }
     if (down && w >= 0 && (ui.btn & (1u << B_SAVE))) {     /* SAVE held + white key: paste the pattern here */
         ui.btn_used |= 1u << B_SAVE;
         if (all_on(wp))
@@ -2133,6 +2156,10 @@ static void button_tap(int b)
             ui.overlay = O_LIST;
         return;
     }
+    if (live_mode()) {                                /* T3: LIVE owns every button */
+        live_handle_button(b);
+        return;
+    }
     switch (b) {
     case B_PLAY:
         if (ui.btn & (1u << B_HOME)) {               /* HOME + PLAY: redo */
@@ -2280,6 +2307,7 @@ static void input(void)
 {
     uint32_t btn = plat_buttons(), keys = plat_keys(), ch, i;
     int e;
+    live_play_tick(btn);                                  /* T3: PLAY's short / long press */
     ch = btn ^ ui.btn;
     for (i = 0; i < NB; i++) {
         uint32_t m = 1u << i;
@@ -2289,7 +2317,7 @@ static void input(void)
             any_button = 1;
             ui.btn_used &= ~m;
             ui.down_t[i] = plat_ms();
-            if (i == B_REC || i == B_PLAY)             /* transport acts on the press: timing */
+            if (i == B_REC)                            /* transport acts on the press: timing */
                 button_tap((int)i);
         } else if (!(ui.btn_used & m) && i != B_REC && i != B_PLAY) {
             button_tap((int)i);
@@ -2315,6 +2343,10 @@ static void input(void)
     if (perf_testing()) {                              /* the test owns the knobs too */
         for (i = 0; i < NE; i++)
             enc((int)i);
+        return;
+    }
+    if (live_mode()) {                                 /* T3: SELECT and SEL are inert in LIVE */
+        live_input();
         return;
     }
     if ((e = enc(EN_SELECT)) != 0) {             /* SELECT: move; with HOME held: tempo */
@@ -2761,6 +2793,10 @@ static void draw_header(void)
         return;
     }
     ui.msg_until = 0;
+    if (live_mode()) {                                /* T3: LIVE has its own header */
+        live_draw_header();
+        return;
+    }
     if (part_view()) {                                /* the part chip, then where we are */
         int32_t w = tw(&AF_M, PART_N[ui.part]) + 12;
         box(0, 1, w, 17, part_col());
@@ -3435,7 +3471,7 @@ static void draw_help(int band)
 /* every card, on every kind of screen, fits the screen: 1 = yes (prints the first that does not) */
 static int help_fits(void)
 {
-    static const uint8_t views[] = {V_PART, V_SEQ, V_HOME, V_SONG, V_GEN, V_FX, V_MIX};
+    static const uint8_t views[] = {V_PART, V_SEQ, V_HOME, V_SONG, V_GEN, V_FX, V_MIX, V_LIVE};
     const char *l[HELP_LINES];
     ui_t keep = ui;
     uint8_t keep_any = any_button;
@@ -3494,6 +3530,8 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         *a = "SEL: MOVE";
         *b = "ALGO: CHANGE";
         *c = "HOME: BACK";
+    } else if (ui.view == V_LIVE) {
+        return live_footer(a, b, c);
     } else if (ui.view == V_HOME) {
         *a = "WHITE: PATTERN";
         *b = "TWO: CHAIN";
@@ -3561,6 +3599,8 @@ static void draw_main(void)
             draw_song(band);
         else if (ui.view == V_PERF)
             draw_perf(band);
+        else if (ui.view == V_LIVE)
+            live_draw(band);
         else if (is_drum())
             draw_drum(band);
         else
@@ -3568,7 +3608,9 @@ static void draw_main(void)
         if (band == 1 && readout)
             draw_readout();
     }
-    cv_band(0, 2 * BAND_H);
+    cv_band(0, 2 * BAND_H);                            /* the ring, if filling: over both bands */
+    if (live_holding())
+        live_draw_ring();
     cv_commit_rect(1, 0, MAIN_Y);
 }
 
@@ -3750,6 +3792,10 @@ static void draw_knobs(void)
 }
 
 /* ===================================================================== LEDs === */
+/* T3: the LIVE view lives in its own file, included here so it can use every helper above
+ * (its entry points are forward-declared at the top of ui.c). */
+#include "ui_live.c"
+
 static void leds(void)
 {
     uint32_t b = 0, k = 0, d = 0, i;
@@ -3779,7 +3825,9 @@ static void leds(void)
     if (ui.dirty && blink && ui.view == V_GLO)
         b |= 1u << B_SAVE;
     if (proj.set.keyled) {                           /* bright: on / chosen; dim: there, not chosen */
-        if (ui.view == V_HOME || ui.view == V_SONG) {
+        if (ui.view == V_LIVE) {
+            live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SCL shows the layer */
+        } else if (ui.view == V_HOME || ui.view == V_SONG) {
             const song_t *sg = song();
             int bar = ui.view == V_SONG && ui.song_sel < sg->len;
             int pp = (bar ? sg->bar[ui.song_sel].pat[PART_909] : seq.ppat[PART_909]) - ui.pbank * 16;
