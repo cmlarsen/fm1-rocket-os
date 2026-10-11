@@ -199,3 +199,6 @@ unit-take:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/take_test_san \
 	    tests/host/take_test.c core/seq/take.c core/seq/clip_engine.c
 	build/host/take_test_san
+
+.PHONY: unit-core
+unit-core: unit-clip unit-engines unit-store unit-take
