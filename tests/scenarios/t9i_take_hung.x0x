@@ -15,8 +15,8 @@ tap REC
 wait-bar 2
 tap PLAY
 wait 400
-expect takepend 0
-echo take saved
+expect takehas 1
+echo take recorded (the store write is pending, per B3)
 # the take ends with the FM6 note still held: the end must release it (the take is ~3 bars)
 takeplay
 wait 9000

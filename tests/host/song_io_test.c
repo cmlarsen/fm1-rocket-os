@@ -154,6 +154,9 @@ void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_
     g_take_hdr.bpm_x10 = bpm_x10;
 }
 void live_bridge_take_clear_ram(void) { g_take_n = 0; g_take_hdr.nevents = 0; g_take_hdr.length_samples = 0; }
+int live_bridge_take_recording(void) { return 0; }       /* T9i r1: never live in this test */
+int live_bridge_take_armed(void) { return 0; }
+int live_bridge_take_playing(void) { return 0; }
 
 static void reset_flash(void)
 {

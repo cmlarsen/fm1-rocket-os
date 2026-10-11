@@ -1,5 +1,5 @@
 {
-  "transport": {"playing": 0, "bpm": 125.0, "bar": 5, "beat": 0, "step": 0, "sample": 629760},
+  "transport": {"playing": 0, "bpm": 125.0, "bar": 5, "beat": 0, "step": 0, "sample": 879360},
   "parts": [
     {"part": 0, "ppat": 0, "pcue": -1, "mute": 0},
     {"part": 1, "ppat": 0, "pcue": -1, "mute": 0},
@@ -15,7 +15,7 @@
     {"slot": 3, "used": 0, "take": 0, "current": 0, "name": ""},
     {"slot": 4, "used": 0, "take": 0, "current": 0, "name": ""}
   ]},
-  "live": {"active": 1, "layer": 0, "focus": 0, "transport": 0, "roles": [
+  "live": {"active": 1, "layer": 0, "focus": 1, "transport": 0, "roles": [
     {"role": 0, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
     {"role": 1, "clip": -1, "queued": -1, "stop": 0, "progress": 0},
     {"role": 2, "clip": -1, "queued": -1, "stop": 0, "progress": 0},

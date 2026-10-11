@@ -17,6 +17,13 @@
 #undef song_t
 
 #include "firmware/src/app/live_bridge.h"
+#include "core/seq/take.h"                 /* T9i r1: the take command words, for the race tests */
+
+/* T9i r1: the ISR-side traps the tests arm (defined in clip_engine.c / live_bridge.c under X0X_HOST). */
+extern volatile int clip_engine_isr;
+extern volatile int live_bridge_isr;
+/* T9i r1: a mutable sample clock, so the race tests can arm at one sample and record at another. */
+static uint32_t g_now;
 
 /* ---- stubs the bridge links against ---- */
 seq_t seq;
@@ -30,10 +37,15 @@ void engine_all_off(void) {}
 /* T9i: the take hooks the bridge links against */
 void (*engine_tap)(uint32_t sample, uint32_t cmd);
 void engine_take_cmd(uint32_t cmd) { (void)cmd; }
-uint32_t engine_sample_now(void) { return 0; }
+uint32_t engine_sample_now(void) { return g_now; }
 const sound_t *engine_sound_mirror(void) { return 0; }
 void engine_perform_engage(int fx, int latch) { (void)fx; (void)latch; }
 void engine_perform_release(int fx) { (void)fx; }
+void engine_perform_reset(void) {}
+int engine_perform_latched(int fx) { (void)fx; return 0; }
+int engine_perform_active(int fx) { (void)fx; return 0; }
+void engine_take_perform(int fx, int how) { (void)fx; (void)how; }
+void engine_take_perform_reset(void) {}
 int engine_nvoices(int t) { (void)t; return 1; }
 int engine_nparams(int t, int v) { (void)t; (void)v; return 0; }
 uint32_t engine_crit_enter(void) { return 0; }        /* T7b: the test has no ISR */
@@ -62,6 +74,62 @@ static void cap_ev(void *ctx, const live_ev_t *e)
     (void)ctx;
     if (ncap < (int)(sizeof cap / sizeof cap[0]))
         cap[ncap++] = *e;
+}
+
+/* ---- T9i r1: the ISR-race tests ----------------------------------------- *
+ * B1: the take playback sink runs in the audio ISR. It must call no main-loop API: no clip
+ * command-ring push (a trap in clip_engine.c's push_cmd) and no take-intent post (a trap in
+ * live_bridge.c's tp_post). The test stages as the main loop does, then calls the ISR block.
+ * On the reviewed code the sink called live_bridge_launch_now, which pushed the ring and read
+ * song->clip[]; the trap aborts this test. */
+static void b1_isr_sink_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);                     /* LIVE is active */
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();     /* a stored take: a launch now, then end */
+    ev[0] = 0u;
+    ev[1] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[2] = 2000u;
+    ev[3] = TAKE_MARK_END;
+    live_bridge_take_loaded(2, 2000u, 1200u);
+    live_bridge_take_play();
+    live_bridge_take_stage();                           /* the main-loop half */
+    CHECK(live_bridge_take_playing());
+    clip_engine_isr = 1;                                /* now the preempting audio ISR */
+    live_bridge_isr = 1;
+    live_bridge_take_block(0u, 128u);                   /* the sink runs; any ring push traps */
+    clip_engine_isr = 0;
+    live_bridge_isr = 0;
+    CHECK(1);                                           /* no trap: the sink touched no main-loop ring */
+    CHECK(live_bridge_queued_clip(LIVE_DRUMS) == 0);    /* the launch landed ISR-side (clip 0) */
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+}
+
+/* B2: leaving LIVE during a recording finalizes the take at once (no bar wait) and stops the feed,
+ * so the recording is neither lost nor carried into STUDIO. On the reviewed code the exit only
+ * *requested* a stop at a bar that never came, so the take stayed in REC. */
+static void b2_leave_test(void)
+{
+    int n0;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    g_now = 0;
+    live_bridge_transport_start();                      /* playing = 1 */
+    live_bridge_take_arm();                             /* arm at the next bar */
+    CHECK(live_bridge_take_armed());
+    g_now = 200000u;                                    /* past the bar: now REC */
+    live_bridge_take_feed(g_now, TAKE_LAUNCH(0u, TAKE_LAUNCH_QUEUE, LIVE_DRUMS));
+    CHECK(live_bridge_take_recording());
+    live_bridge_exit();                                 /* leave LIVE */
+    CHECK(!live_bridge_take_recording());               /* finalized at once ... */
+    CHECK(!live_bridge_take_armed());
+    CHECK(live_bridge_take_has());                      /* ... with the recording kept */
+    n0 = live_bridge_take_nevents();
+    live_bridge_take_feed(engine_sample_now(), TAKE_LAUNCH(1u, TAKE_LAUNCH_QUEUE, LIVE_DRUMS));
+    CHECK(live_bridge_take_nevents() == n0);            /* outside LIVE: nothing records */
 }
 
 int main(void)
@@ -210,6 +278,12 @@ int main(void)
         CHECK(drum && non && noff);
     }
     live_bridge_exit();
+
+    /* T9i r1: the ISR-race tests (they re-enter LIVE themselves). b2 first, then b1 (which traps on
+     * the reviewed code, so it must run last to let b2's assertion be seen). */
+    live_bridge_enter(pats, 1200u);
+    b2_leave_test();
+    b1_isr_sink_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

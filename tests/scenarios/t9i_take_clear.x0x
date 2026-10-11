@@ -24,9 +24,18 @@ echo recorded
 tap PLAY
 wait 400
 expect takeplaying 0
-wait 300
+echo recorded; flush it (leave LIVE; the save rides autosave, B3)
+press PLAY
+wait 700
+release PLAY
+wait 4500
 expect songsaves 1
 expect takepend 0
+echo re-enter LIVE
+press PLAY
+wait 700
+release PLAY
+wait 50
 echo clear next
 press REC
 wait 1700
@@ -34,7 +43,7 @@ release REC
 wait 100
 expect takehas 0
 echo cleared
-expect takepend 0
+expect takepend 1
 echo undo next
 press HOME
 tap REC

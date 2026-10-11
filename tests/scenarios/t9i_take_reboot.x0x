@@ -27,6 +27,11 @@ tap REC
 wait-bar 2
 tap PLAY
 wait 400
+# T9i r1/B3: the take save rides autosave, so leave LIVE and wait for quiet before rebooting.
+press PLAY
+wait 700
+release PLAY
+wait 4500
 expect songsaves 1
 expect takepend 0
 echo flushed; rebooting
