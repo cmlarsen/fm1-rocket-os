@@ -105,6 +105,12 @@ static void live_draw(int band);
 static void live_draw_header(void);
 static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim);
 static uint16_t live_footer(const char **a, const char **b, const char **c);
+static void live_rec_tick(uint32_t btn);     /* T9i: REC's tap (arm/stop) and hold (clear) */
+static void live_take_tick(void);            /* T9i: a finished recording -> the store's take */
+static void live_draw_rec_border(void);      /* T9i: the red recording frame */
+static int  live_clear_holding(void);        /* T9i: the hold-to-clear ring is filling */
+static void live_draw_clear_ring(void);
+static int  live_take_knob_moved(int i);     /* T9i: K1-K4's recorded-move dots */
 /* the runner (host/x0x_host.c) reads the layer and the focused role through these */
 int  live_layer(void);
 int  live_focus(void);
@@ -2761,6 +2767,7 @@ static void input(void)
     int e;
     if (!songs_mode())
         live_play_tick(btn);                                  /* T3: PLAY's short / long press; inert in SONGS */
+    live_rec_tick(btn);                                   /* T9i: REC's tap / clear-hold edges (LIVE) */
     songs_save_tick(btn);                                 /* T8i: SAVE's long press opens SONGS */
     if (songs_mode()) {                                   /* T8i: the songs view owns the frame */
         song_event_t ev;
@@ -4139,7 +4146,11 @@ static void draw_main(void)
             draw_readout();
     }
     cv_band(0, 2 * BAND_H);                            /* the ring, if filling: over both bands */
-    if (live_holding())
+    if (live_bridge_take_recording())
+        live_draw_rec_border();                        /* T9i: the red recording frame */
+    else if (live_clear_holding())
+        live_draw_clear_ring();                        /* T9i: hold REC to clear the take */
+    else if (live_holding())
         live_draw_ring();
     else if (studio_holding())
         studio_draw_ring();
@@ -4315,6 +4326,8 @@ static void draw_knobs(void)
             if (mv >= 0)
                 val = mv;
         }
+        if (live_bridge_take_recording() && i < 4 && live_take_knob_moved(i))
+            dot(i * 60 + 52, 17, 2, TOK_REC);          /* T9i: the knob's moves are recorded */
         if (d->names && d->max < 12) {                 /* a switch: its positions as pips (more: a ring) */
             int n = d->max + 1, k, pw = n > 6 ? 3 : 6, gap = 2, w0 = n * (pw + gap) - gap;
             for (k = 0; k < n; k++)
@@ -4523,6 +4536,7 @@ void ui_frame(void)
     input();
     engine_perform_tick();                          /* T10i: the echo controller's targets */
     studio_tick();                                  /* T7a: the clear / copy hold timers */
+    live_take_tick();                               /* T9i: a finished recording becomes the song's take */
     undo_tick();
     autosave();
     perf_test_tick();
