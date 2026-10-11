@@ -165,6 +165,31 @@ unit-engines:
 	@sh tests/host/run_fm6.sh
 	@sh tests/host/run_noise.sh
 
+# T6c: the song/take store and the undo stack. The store includes X0X's lz.c, so
+# it is its own translation unit.
+.PHONY: unit-store
+unit-store:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/song_store_test \
+	    tests/host/song_store_test.c core/model/song_store.c
+	build/host/song_store_test
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/undo_stack_test \
+	    tests/host/undo_stack_test.c core/model/undo_stack.c core/model/song_store.c
+	build/host/undo_stack_test
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/song_fuzz \
+	    tests/host/song_fuzz.c core/model/song_store.c
+	build/host/song_fuzz
+	@echo "store: ASan/UBSan"
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/song_store_test_san \
+	    tests/host/song_store_test.c core/model/song_store.c
+	build/host/song_store_test_san
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/undo_stack_test_san \
+	    tests/host/undo_stack_test.c core/model/undo_stack.c core/model/song_store.c
+	build/host/undo_stack_test_san
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/song_fuzz_san \
+	    tests/host/song_fuzz.c core/model/song_store.c
+	build/host/song_fuzz_san
+
 .PHONY: unit-take
 unit-take:
 	@mkdir -p build/host
