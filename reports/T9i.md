@@ -307,6 +307,72 @@ rule.
 `make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass on the committed
 tree, and `tools/check_loader.sh` is ok on both packages (release and debug). Nothing was flashed.
 
+## r5: recover after a dropped launch and preserve the deferred redo tail
+
+Started at `515bc3a`, already merged with integration including TCLS. Implementation commits:
+`c754208` (event-indexed FIFO, deferred undo, tempo restoration) and `5f1ef14` (unmasked initial
+scan and scan-work test). The reviewer's untracked `repro_r5/lbt.c` and `repro_r5/ust.c` cases
+were folded into the existing host suites as assertions, then `repro_r5/` was deleted.
+
+### Fixes and proof
+
+- **A dropped launch no longer poisons the role.** Each FIFO slot carries its take event index
+  (`ts_event`), preserved whenever slots shift. The stager starts at the greater of its cursor
+  and `play_i`, and rechecks `play_i` under `engine_crit` before publishing. The ISR discards
+  obsolete candidate copies before matching both event index and clip. A previously queued
+  launch retains its own copy until application or supersession. Missing copies still drop and
+  increment the counter; the ISR never reads `song->clip[]` or pushes a main-loop ring.
+  `unit-live`'s `r5_drop_recovery_test` replays NOW launches of drums clips 0/1/2 at samples
+  200/300/400, then clips 0/1 at 50,000/100,000 with 4,352-sample UI frames. It requires exactly
+  **one drop**, checks both later playing clips, and checks `cur/play` consistency every block.
+  Against the original `515bc3a` sources it reports **three drops** and fails the later clip-0
+  and drop-count assertions; with the fix it passes, including ASan/UBSan.
+- **Deferred take flush at `pos == cur` keeps redo.** Only `undo_stack_push_take_at` supplies
+  `keep_tail`; ordinary edit pushes still discard a redo branch. A deferred insertion at or
+  behind the cursor shifts the cursor with the applied entries. `unit-store`'s new
+  `flush at cursor` case ends a take after E0, creates and undoes E1, then flushes the take entry.
+  It requires `redo_type == UNDO_CLEAR_CLIP` (not `UNDO_NONE`) and successfully redoes E1.
+  Both redo assertions fail against `515bc3a`; the fixed suite and sanitizer suite pass, as do
+  the existing ordinary-edit branch and r4 behind-cursor redo tests.
+- **Scans run outside `engine_crit` and cache exhaustion.** The shared immutable-log scanner
+  finds initial launch indices before the atomic reset/PLAY/copy publish. During playback only
+  the state recheck and slot write mask interrupts. An exhausted role stores `n` as its staging
+  cursor. `unit-live`'s `r5_scan_test` observes every scanned event, requires interrupts enabled
+  during the initial scan, and requires zero extra scan work over ten later staging calls for a
+  take with no launches. It passes normally and with sanitizers. With the same observational
+  hook added to the baseline scan (no behavior change), the baseline fails the interrupt-mask
+  checks and the exhaustion assertion.
+- **FIFO synchronization comment corrected.** `clip_engine.h` now states that snapshot copies
+  and staging writes are guarded by the caller's short `engine_crit` sections and the ISR never
+  waits. The scan-mask test and existing ISR/preemption tests remain passing.
+- **Tempo restoration accounts for edits made during the take.** With no pre-take external
+  clock, the song's current `bpm_x10` wins at end/stop. With a followed clock, the saved clock
+  returns even if the song was edited before the next render; clearing the hold also updates
+  `song_bpm` so that next render cannot mistake the take-time edit for a fresh edit and remove
+  the restored clock. Documented in `model.md`. `unit-live`'s `r5_tempo_restore_test` checks both
+  source cases immediately after stopping and after another render; the clock case's later
+  render fails on `515bc3a`. The existing r4 take-owned-tempo test still passes.
+
+### RAM
+
+| build | pool | spare | margin over 8,192 B | `.data+.bss` |
+|---|---|---|---|---|
+| release | 301,940 / 344,064 | **42,124** | **33,932** | 72,864 / 98,304 |
+| debug (`X0X_DEBUG=1`) | 301,940 / 344,064 | **42,124** | **33,932** | 73,476 / 98,304 |
+
+The ten 16-bit FIFO event indices add **20 B** of pool over r4. Both builds exceed the required
+8,192 B spare; no buffer was shrunk.
+
+### Ladder
+
+On the committed implementation tree (`5f1ef14`),
+`make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` exits successfully.
+All scenarios pass, screen lint reports **0 findings** across 1,351 frames / 2,750 canvases,
+the full UI fuzz passes **200 seeds × 2,000 events**, and check's short fuzz passes
+20 seeds × 500 events. Both `tools/check_loader.sh build/x0x.fwsc` and
+`tools/check_loader.sh build/debug/x0x.fwsc` pass: the packages retain the X0X 1.0.5 loader.
+Nothing was flashed. This report is the only change after that ladder.
+
 
 ## r3 (the third Opus review)
 
