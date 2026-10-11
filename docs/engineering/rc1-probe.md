@@ -39,14 +39,19 @@ a release build answers none of them (and the editor never replies to an unknown
 
 | # | Field | # | Field |
 |---|---|---|---|
-| 0 | `audio_cpu_pct` (mean block load, %) | 8–16 | every PROF bucket (909, 808, 303A, 303B, FX, MASTER, SEQ, FM6, NOISE) |
-| 1 | `audio_peak_pct` (highest block since reset) | 17 | `.data+.bss` in use, bytes |
-| 2 | `audio_xruns` (dropped halves since boot) | 18 | `.pool` in use, bytes |
-| 3 | guard engaged (1/0) | 19 | `.pool` region size (0x54000) |
-| 4 | guard engagements (count) | 20 | the interrupts' stack high-water, bytes |
+| 0 | `audio_cpu_pct` (mean block load, %) | 9–17 | every PROF bucket (909, 808, 303A, 303B, FX, MASTER, SEQ, FM6, NOISE) |
+| 1 | `audio_peak_pct` (highest block since reset) | 18 | `.data+.bss` in use, bytes |
+| 2 | `audio_xruns` (dropped halves since boot) | 19 | `.pool` in use, bytes |
+| 3 | guard engaged (1/0) | 20 | `.pool` region size (0x54000) |
+| 4 | guard engagements (count) | 21 | the interrupts' stack high-water, bytes |
 | 5 | core 1 running (1/0) | | |
 | 6 | core 1 gave up (0 no, 1/2 why) | | |
 | 7 | FM6 voices sounding now | | |
+| 8 | **core 1's mean busy %** of the block (T5perf) | | |
+
+Core 1 self-times its job with the shared 24 MHz timer (field 8), because core 0's `audio_cpu_pct`
+only sees core-1 work it actually waited for: FM6 on core 1 can be invisible in the load while it is
+still real work. Field 8 reads 0 when core 1 never ran the job (off, gave up, or a level 5/6 run).
 
 `.bss` and `.pool` have no runtime high-water on this firmware, so their **sizes** are reported;
 the interrupt stack is the one high-water that exists (`plat_irq_stack_used`).
@@ -66,16 +71,21 @@ project dirty, so it cannot autosave.
 | 2 | LIVE: a busy clip on DRUMS/BASS/LEAD/FX, **CHORDS a held 4-note FM6 chord**, FX on NOISE | **4** | on |
 | 3 | level 2 plus every wired punch FX (T10i has not wired any yet, so it equals 2 for now) | 4 | on |
 | 4 | level 2 with the FM6 cap raised to `cap` (default 6; `cap` 6 or 8) | `cap` | **off** (the guard would shed FM6 to two voices, which is not what "the cap" means) |
+| 5 | level 2 with **core 1 forced off** (T5perf: the single-core numbers) | 4 | on |
+| 6 | level 1 with **core 1 forced off** (T5perf) | – | on |
 
 Level 2 holds exactly **four** notes on purpose: a release build's `ENG_FM6_VOICES` is 4, so level 2
 measures what a release build would actually play, even though the debug array is 8. Level 4 is the
-headroom experiment.
+headroom experiment. Levels 5 and 6 (T5perf) are levels 2 and 1 with the core-1 job kept on core 0, so
+RC1 can report the single-core numbers a unit that cannot run core 1 would see; they do not stop
+core 1 (no ISR race), they just do not hand it work, and `ED_STATS`' `cpu2` field reads 0 for them.
 
 ## Running the probe
 
 ```sh
 .venv/bin/python tools/rc_probe.py --stress 2 --seconds 60 --json build/rc1-stress2.json
 .venv/bin/python tools/rc_probe.py --stress 4 --cap 6 --seconds 30
+.venv/bin/python tools/rc_probe.py --stress 5 --seconds 60 --json build/rc1-stress5-single.json   # T5perf: core 1 off
 .venv/bin/python tools/rc_probe.py --info          # the device identity (fm1_install.py --info)
 ```
 
@@ -84,14 +94,19 @@ stress, and prints a table plus a JSON summary. `--info` is a pass-through to
 `tools/fm1_install.py --info`; **nothing here ever installs.** It needs `mido` with
 `python-rtmidi` (the repo's `.venv`).
 
-The table is one row per sample (`cpu`, `peak`, `xruns`, `guard`, FM6 voices). The JSON summary is
-what RC1 records:
+RC1 saw commands 60 and 61 occasionally miss a reply in LIVE (once at 21.7 s, once at the final
+stop), so `Probe.ask` (T5perf) retries a timed-out command up to three times. Every command it sends
+is idempotent (a duplicate `ED_STRESS n` restarts the same level; `ED_STATS` and `ED_STRESS 0` are
+reads / no-ops), so a retry cannot double-start a run.
+
+The table is one row per sample (`cpu`, `core1`, `peak`, `xruns`, `guard`, FM6 voices). The JSON
+summary is what RC1 records:
 
 ```json
 { "stress": 2, "cap": 0, "seconds": 60.0, "samples": 121,
   "cpu_pct_mean": 41.2, "cpu_pct_max": 58, "peak_pct": 71,
   "xruns": 0, "guard_engagements": 0, "guard_active": false, "fm6_voices": 4,
-  "cpu2": true, "cpu2_gave_up": 0,
+  "core1_pct_mean": 19, "core1_pct_max": 21, "cpu2": true, "cpu2_gave_up": 0, "single_core": false,
   "prof_share_pct": {"909": 22.0, "808": 9.0, "303A": 12.0, "303B": 13.0,
                      "FX": 6.0, "MASTER": 5.0, "SEQ": 1.0, "FM6": 24.0, "NOISE": 8.0},
   "pass": {"mean_under_70": true, "max_under_85": true, "no_xruns": true,
@@ -108,6 +123,10 @@ How to read it:
   oversampling, NOISE density and FM6 voices). A nonzero count means the CPU was past ~85–92 %.
 - **`prof_share_pct`** is each engine's share of the render, from the PROF counter deltas — the
   FM6 share is what the chord costs.
+- **`core1_pct_mean` / `core1_pct_max`** (T5perf) are core 1's own busy share of the block, self-timed
+  on the second core, mean and max over the samples like `cpu_pct`. `cpu_pct_mean` is core 0's block
+  load, which only includes core-1 time core 0 waited for; when the FM6 render fits inside core 0's own
+  work, core 1's share is the only place it shows. Both read 0 when core 1 never ran the job.
 
 ### RC1 pass criteria
 
@@ -128,7 +147,7 @@ come down.
 `#if X0X_DEBUG`, and `host/x0x_host.c` includes it too, so the runner's `stress N [cap]` and
 `stats` script commands call the **same functions** the device's `ED_STRESS` / `ED_STATS` do.
 `tests/scenarios/rc1_probe.x0x` starts every level, checks the stats reply is well formed
-(`statswords 21`) and that LIVE actually plays (`liveclip0`, `fm6voices 4`, non-silent audio). The
+(`statswords 22`) and that LIVE actually plays (`liveclip0`, `fm6voices 4`, non-silent audio). The
 host build's FM6 array is the release's 4, so the scenario exercises `--stress 4 --cap 4`; the 6 and
 8 caps are a device-only measurement.
 
