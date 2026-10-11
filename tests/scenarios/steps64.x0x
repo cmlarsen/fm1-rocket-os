@@ -22,7 +22,7 @@ tap SEQ
 spin K1 48
 tap EDIT
 tap PLAY
-wait 7500
+wait 7540
 expect playhead0 64
 tap PLAY
 # back to steps 1-16
