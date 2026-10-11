@@ -1,0 +1,52 @@
+# T11i: notes on the live channel play the focused role and release.
+#
+# In STUDIO and LIVE external MIDI notes play the focused role through the held-note table; the
+# default focus is BASS. Program Change, the clock and the per-part channels are the other
+# scenarios. Nothing here is flashed (host only).
+wait 300
+expect focus 1                                  # BASS by default
+expect midiheld 0
+# omni (the default): a note on any channel plays the focused role and releases
+midi 90 3C 64
+wait 50
+expect midiheld 1
+midi 80 3C 00
+wait 200
+expect midiheld 0
+# a fixed channel (3): channel 3 reaches the app, channel 1 is ignored
+midicfg 3 0
+wait 20
+midi 90 3C 64
+wait 50
+expect midiheld 0
+midi 92 3C 64
+wait 50
+expect midiheld 1
+midi 82 3C 00
+wait 50
+expect midiheld 0
+# the focused role is CHORDS (FM6) here: it plays and releases to zero voices
+midicfg 0 0
+wait 20
+press PLAY
+wait 700
+release PLAY
+wait 20
+turn ALGO 2 80                                  # BASS -> CHORDS
+expect focus 3
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 0
+midi 90 3C 64
+midi 90 40 64
+wait 50
+expect fm6held 2
+midi 80 3C 00
+midi 80 40 00
+wait 2000
+expect fm6held 0
+expect fm6voices 0
+expect midiheld 0
+dump midi_notes.json

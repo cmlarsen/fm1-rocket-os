@@ -1,0 +1,52 @@
+# T11i: external MIDI clock. F8 ticks set the tempo and Start / Continue / Stop drive the
+# transport; when the clock stops the transport keeps playing at the last tempo and the EXT
+# indicator goes away; CLOCK IN = INTERNAL ignores the incoming clock and transport.
+wait 300
+expect ext 0
+midi FA 00 00
+wait 20
+expect playing 1
+midiclock 100 25                                # 25 sample-accurate F8 ticks at 100 bpm
+wait 20
+expect ext 1
+expect bpm 100
+expect midibpm 1000
+# clock lost: keeps playing at the last tempo, EXT goes away (one beat at 100 bpm is 600 ms)
+wait 1500
+expect playing 1
+expect bpm 100
+expect ext 0
+# Stop, then Continue resumes
+midi FC 00 00
+wait 20
+expect playing 0
+midi FB 00 00
+wait 20
+expect playing 1
+midi FC 00 00
+wait 20
+expect playing 0
+# GLOBAL -> CLOCK IN -> INTERNAL: the clock and the transport are not ours
+tap GLO
+turn SELECT 2 80
+turn ALGO 1 80
+tap GLO
+wait 20
+midi FA 00 00
+wait 20
+expect playing 0
+midiclock 120 64
+wait 20
+expect ext 0
+expect bpm 100
+# back to AUTO: the 120 bpm clock is followed
+tap GLO
+turn SELECT 2 80
+turn ALGO -1 80
+tap GLO
+wait 20
+midiclock 120 64
+wait 20
+expect ext 1
+expect bpm 120
+dump midi_clock.json

@@ -1,0 +1,38 @@
+# T11i: Program Change launches a clip, bar-quantized; an out-of-range PC and a PC on another
+# channel are ignored; CC 120 and 123 release everything.
+noise 1
+songseed
+wait 300
+midicfg 0 1                                     # omni, PC launch on
+midi FA 00 00
+wait 20
+expect playing 1
+midi C0 00 00                                   # PC 0 -> clip 0 at the song's bar quantize
+wait 5000
+expect liveclip0 0
+midi C0 7F 00                                   # out of range: ignored
+wait 1000
+expect liveclip0 0
+# a fixed channel: a PC on the wrong channel does nothing
+midicfg 3 1
+wait 20
+midi C0 01 00
+wait 500
+expect liveclip0 0
+midi C2 01 00                                   # channel 3, clip 1 (DRUMS B)
+wait 5000
+expect liveclip0 1
+# CC 123 and CC 120 (the panic) release everything external MIDI holds
+midi 92 3C 64
+wait 50
+expect midiheld 1
+midi B2 7B 00                                   # CC 123 on channel 3
+wait 400
+expect midiheld 0
+midi 92 3E 64
+wait 50
+expect midiheld 1
+midi B2 78 00                                   # CC 120
+wait 400
+expect midiheld 0
+dump midi_launch.json
