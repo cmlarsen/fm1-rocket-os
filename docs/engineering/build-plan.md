@@ -168,7 +168,7 @@ Overnight the owner asked for more parallelism. Each task with a self-contained 
   - `songs_load_now` refuses silently on a timeout after the current song is deleted, so the next autosave brings the deleted song back (`ui.c:2592`). It should show a message and pick another slot.
 - **Remove Classic, delay 0.75 s (TCLS)**, owner decision [ADR-0004](../decisions/0004-remove-classic-shorten-delay.md); spec in [tasks/TCLS.md](tasks/TCLS.md). Runs in parallel with T9i r1 from `integration`; merge after T9i. TPOL then drops its Classic exception and renames SCL to SEL.
 - **LIVE SETUP (TLSET)**: EDIT in LIVE opens the setup rows (assign keys, launch default, stage lock, external keys channel, Program Change, clock in, the take) plus the header EXT chip; spec in [tasks/TLSET.md](tasks/TLSET.md). Runs from `integration` after T9i; TPOL follows it.
-- **Gesture polish (TPOL), from T11h's model-versus-code audit.** Do this after T7b, T9i and LIVE SETUP merge.
+- **Gesture polish (TPOL), from T11h's model-versus-code audit.** Do this after T7b, T9i and LIVE SETUP merge. Spec in [tasks/TPOL.md](tasks/TPOL.md) (adds the SCL → SEL rename, the live-note take offset and the glossary).
   - **HOME + touching a knob clears that knob's motion lane** everywhere outside Classic. X0X's SAVE + knob stays in Classic only.
   - **HOME + tap launches now in STUDIO too.**
   - Re-run `tools/check_help.py` and the cards against the final handlers.
