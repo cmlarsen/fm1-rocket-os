@@ -218,7 +218,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-engines unit-store unit-take unit-midi unit-fx
+unit-core: unit-clip unit-engines unit-store unit-take unit-midi unit-fx unit-name
 .PHONY: unit-midi
 unit-midi:
 	@mkdir -p build/host
