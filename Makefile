@@ -102,3 +102,8 @@ unit-clip:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/clip_engine_test_san \
 	    tests/host/clip_engine_test.c core/seq/clip_engine.c
 	build/host/clip_engine_test_san
+
+.PHONY: unit-engines
+unit-engines:
+	@sh tests/host/run_fm6.sh
+	@sh tests/host/run_noise.sh
