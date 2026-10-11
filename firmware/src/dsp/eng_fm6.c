@@ -94,17 +94,6 @@ void eng_fm6_init(void)
     fm6_tail_n = 0;
 }
 
-/* TCLS: a patch change retires every live voice. A released voice finishes under the *current*
- * patch (fm6_note_done reads its envelope), so a swap mid-release can leave it sounding forever
- * (the fuzzer's hung FM6 voice). Browsing presets cuts the auditioning note, which is what a new
- * patch does anyway. */
-static void fm6_retire_voices(void)
-{
-    int i;
-    for (i = 0; i < ENG_FM6_VOICES; i++)
-        fm6_voice[i].live = 0;
-}
-
 void eng_fm6_set_patch(const uint8_t *v155)
 {
     uint8_t s[FP_SIZE + 1u];
@@ -113,7 +102,6 @@ void eng_fm6_set_patch(const uint8_t *v155)
     eng_memcpy(fm6_patch, s, FP_SIZE + 1u);
     fm6_slot = ENG_FM6_OWN;
     fm6_eff.dirty = 1;
-    fm6_retire_voices();
 }
 
 const uint8_t *eng_fm6_patch(void) { return fm6_patch; }
@@ -137,7 +125,6 @@ int eng_fm6_load_slot(int s)
     eng_memcpy(fm6_patch, v, FP_SIZE + 1u);
     fm6_slot = (uint8_t)s;
     fm6_eff.dirty = 1;
-    fm6_retire_voices();                                    /* a patch swap must not hang a voice */
     return 0;
 }
 

@@ -25,6 +25,10 @@ engine). X0X's pattern editors, its pattern sequencer, its song arranger, TB-3PO
   help is the GLO + button card and the HOME cheat sheet. The cards that named Classic were rewritten.
 - `SAVE` now waits for the **clip** transport to stop, not X0X's (`save_project`): with Classic gone
   `seq.playing` is always 0, so a SAVE while the clip engine played would have written flash mid-audio.
+- **STOP releases every voice again.** X0X's transport stop all-off'd through `engine.c`'s
+  playing→stopped edge; that edge is dead now (`seq.playing` is always 0). The STOP button (STUDIO
+  and LIVE) calls `engine_all_off()` after stopping, so a note a key, MIDI or a sound page left
+  sounding is released as before.
 - `RUN PERF TEST` (GLOBAL → PERFORMANCE) is gone: it played three X0X patterns through the removed
   sequencer. The PERF screen keeps its live CPU/stats readout.
 - The LIVE footer is uppercase (`SCL PLAY`, `KEYS PLAY BASS`, `TAP LATCH`, `HOME+FX RESET`), which
@@ -49,10 +53,16 @@ engine). X0X's pattern editors, its pattern sequencer, its song arranger, TB-3PO
   boot (no stored song) builds the **Starter** song from `song_templates.c` (owner: a new device should
   play something at once); an empty song slot uses the New-song templates as before. `project_pat(i)`
   returns one shared scratch pattern for the unreachable inherited editor code.
-- A patch change in FM6 (`eng_fm6_load_slot` / `eng_fm6_set_patch`) now retires every live voice. The
-  fuzzer found a hung FM6 voice: a released voice's `fm6_note_done` reads the *current* patch, so a
-  preset swap mid-release left it sounding forever. Browsing presets cuts the auditioning note, as a
-  new patch does anyway.
+- FM6 is unchanged. The fuzzer found "3 voices after the release tail" on seed 27; it is **not** a
+  hung note and not a TCLS regression: every one of the run's 103 FM6 note-ons has its note-off, the
+  voices are released (`fm6held 0`), and they ring out slowly — the **GLASS BELL** factory patch
+  (F2) releases over several seconds, which the engine's own test already allows (it renders up to
+  ~24 s for the voices to end, `tests/host/fm6_engine.c`). The same minimal sequence (load F2 on the
+  CHORDS sound card, play and release a note) fails identically on the base commit `615c93d`
+  (`firmware/src/dsp/eng_fm6.c` and `fm6_core.c` are byte-identical to it), so it predates TCLS;
+  TCLS only changed the fuzz's state trajectory so seed 27 reaches it. The fuzz's fixed 3 s tail was
+  too short, so it now waits for the voices to end, bounded at ~25 s (a truly hung note never ends
+  and still fails); the new `tests/scenarios/fm6_release.x0x` pins the exact sequence.
 
 ## Pool and RAM before and after
 
@@ -125,8 +135,11 @@ Hardware was never flashed.
 
 Changed: `firmware/src/app/{ui.c,ui_live.c,ui_studio.c,ui_help.c,ui_help.h,engine.c,midi_live.c,
 midi_live.h,live_bridge.c,live_bridge.h,song_io.c,song_io.h,project.c,x0x.h,plat.h,rc_debug.c,
-main_fm1.c}`, `firmware/src/dsp/eng_fm6.c`, `core/seq/clip_engine.h`,
+main_fm1.c}`, `core/seq/clip_engine.h`,
 `host/x0x_host.c`, `tests/host/{delay_clamp_test.c,song_io_test.c,live_bridge_test.c}`,
 `tests/run_tests.sh`, `tests/parity.sh`, `tools/rc_probe.py`, `Makefile`, the scenarios and goldens
-above, `docs/{MANUAL.md,manual.html,open-questions.md,product/interaction-model.md,
-product/screens.md,engineering/architecture.md,decisions/0004-remove-classic-shorten-delay.md}`.
+above, the new `tests/scenarios/fm6_release.x0x`, `docs/{MANUAL.md,manual.html,open-questions.md,
+product/interaction-model.md,product/screens.md,engineering/architecture.md,
+engineering/rc1-probe.md,decisions/0004-remove-classic-shorten-delay.md}`.
+
+Not changed: `firmware/src/dsp/` (FM6 and the DSP are byte-identical to the base commit).

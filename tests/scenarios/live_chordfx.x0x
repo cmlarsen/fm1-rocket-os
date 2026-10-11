@@ -1,5 +1,5 @@
 # T5i item 7: in LIVE, CHORDS plays FM6 and FX plays NOISE, through the clip engine's ISR-direct path.
-# Build a 303 A line (so a CHORDS clip is derived from BASS), enter LIVE, launch CHORDS A and FX A,
+# TCLS: the boot song is the Starter template, so CHORDS A and FX A exist; enter LIVE, launch them,
 # and check the FM6/NOISE events and non-silent audio.
 wait 300
 # TCLS: the boot song is the Starter template, so CHORDS and FX have clips.

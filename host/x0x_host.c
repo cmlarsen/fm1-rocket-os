@@ -1539,7 +1539,7 @@ static int fuzz_cmd(const char *dir, int seed, int n)
             run_ms(2);
         }
     if (wrote && !midfail) {
-        fputs("stop\nwait 3000\nexpect voices 0\nexpect heldnotes 0\n", f);
+        fputs("stop\nwait 25000\nexpect voices 0\nexpect heldnotes 0\n", f);
         fflush(f);
     }
     if (wrote)
@@ -1549,7 +1549,12 @@ static int fuzz_cmd(const char *dir, int seed, int n)
         return 1;
     }
     host_all_stop();                                  /* stop both transports (never the all-notes-off) */
-    run_ms(3000);                                     /* wait 3 s */
+    /* TCLS: wait for the voices to end, bounded at ~25 s. A factory patch can release slowly (the
+     * FM6 engine's own test allows up to ~24 s: the GLASS BELL rings out), so a fixed 3 s tail
+     * flagged a legitimate long release as a hung note. A truly hung note never ends and still
+     * fails. */
+    for (i = 0; i < 500 && engine_voices_active() != 0; i++)
+        run_ms(50);
     {
         int v = engine_voices_active(), h = fz_tracked();
         if (v != 0 || h != 0) {

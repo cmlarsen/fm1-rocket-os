@@ -2458,6 +2458,7 @@ static void button_tap(int b)
         }
         if (live_bridge_transport_playing()) {      /* T7a/TCLS: the clip engine's transport, everywhere */
             live_bridge_transport_stop();
+            engine_all_off();                       /* TCLS: STOP releases every voice, as X0X's did */
             say("STOP", 0);
         } else {
             live_bridge_transport_start();

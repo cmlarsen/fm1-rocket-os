@@ -214,6 +214,7 @@ static int live_handle_button(int b)
     case B_PLAY:
         if (live_bridge_transport_playing()) {
             live_bridge_transport_stop();
+            engine_all_off();                      /* TCLS: STOP releases every voice, as X0X's did */
             say("STOP", 0);
         } else {
             live_bridge_transport_start();

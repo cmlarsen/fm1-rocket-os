@@ -1,0 +1,17 @@
+# TCLS: a slow FM6 release must still end. The fuzzer (seed 27) played the GLASS BELL factory patch
+# (F2, the CHORDS sound card's SLOT) and released the note; the release rings out for several seconds,
+# which a fixed 3 s tail flagged as a hung voice. The engine's own test allows up to ~24 s, so this
+# asserts the voice ends within a generous bound and that no note is left held.
+wait 300
+cursor 3 0
+tap EDIT
+tap EDIT
+expect view 12
+turn K4 1 90
+expect sound3.0.7 1
+key 4 down
+key 4 up
+wait 12000
+expect fm6voices 0
+expect fm6held 0
+expect heldnotes 0
