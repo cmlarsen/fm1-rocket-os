@@ -22,8 +22,21 @@
  *   peakreset                    restart the output peak (expect peak_db_min / peak_db_max)
  *   shot FILE.png                save the screen
  *   leds                         print the lit buttons and keys
- *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, ...): exit 1 on mismatch;
- *                                VALUE "<N" / ">N" is a bound
+ *   dump FILE.json               one JSON object: transport (playing, bpm, bar, beat, step,
+ *                                sample), parts (each part's ppat, pcue, mute), view and leds
+ *                                (keys F3..G5: 0 off, 1 dim, 2 bright; the lit buttons). The
+ *                                sample counter is frames rendered since boot (the only clock);
+ *                                bar counts the 909's wraps since the transport started, beat is
+ *                                the 909 playhead / 4, step its step (both 0-based)
+ *   wait-bar N                   run until N bar boundaries have passed (the sequencer's bar:
+ *                                the 909's wrap), not a wall-clock wait
+ *   events FILE.txt              start logging every engine command (drum and bass note on, note
+ *                                off, parameter change) and every cue and mute, one per line with
+ *                                its sample time; eventsstop stops it
+ *   expect WHAT VALUE            check state (playing, pattern, cue, view-part, bar, beat, ...): exit
+ *                                1 on mismatch; VALUE "<N" / ">N" is a bound
+ *   expect key K L               the LED level of key K (0 off, 1 dim, 2 bright); K as "key" takes
+ *   expect button B L            (w0..w15, b0..b10 or 0..26); the lit state of button B, 0 or 1
  *   reboot                       save nothing; re-run boot from the simulated flash (persistence test)
  *   snapline B                   remember 303 B's line on the pattern shown (expect linechgB: 1 = it changed since)
  *   projimg FILE                 a project as the FM-1 holds it in RAM (fm1_debug peek of proj): saved
@@ -209,7 +222,7 @@ int plat_cpu2_run(void (*fn)(uint32_t), uint32_t arg)
 int plat_cpu2_wait(void) { return 0; }
 int plat_cpu2_gave_up(void) { return 0; }
 uint32_t plat_cpu2_bad(void) { return 0; }
-uint32_t plat_cpu_pct(void) { return cpu_pct; }
+uint32_t plat_cpu_pct(void) { return load_force >= 0 ? (uint32_t)load_force : 0u; }   /* deterministic: the scripted load ("load N"), never the host's wall clock */
 uint32_t plat_xruns(void) { return 0; }
 /* performance: no CPU counter here: the "cycles" are nanoseconds (plat_cycles_hz) */
 static uint64_t host_ns(void)
@@ -238,6 +251,70 @@ void plat_stalls_enable(int on) { (void)on; }
 #include "../firmware/src/app/x0x.h"
 #include "../firmware/src/app/project.c"
 #include "../firmware/src/app/ui.c"
+
+/* ------------------------------------------------------- event log --- */
+/* The engine taps the command queue here (engine_tap, engine.h) with the command word and the
+ * sample counter; the host also watches the cues and mutes the app sets. Both go to the file
+ * "events FILE.txt" opened, one line per event. The command word is engine.c's: type:4 | a:8 |
+ * b:8 | c:12, type 0..7 = a parameter's target (engine.h T_*), 8 = a drum note, 9 = a bass note
+ * on, 10 = a bass note off. */
+static FILE *events_log;
+static uint32_t host_sample;             /* frames rendered since boot: the only clock */
+static uint32_t bar_count;               /* the 909's wraps since the transport started */
+static uint8_t tr_prev_pos;
+static int was_playing;
+static uint8_t prev_pcue[NPARTS];
+static uint32_t prev_mute;
+
+static void host_engine_tap(uint32_t sample, uint32_t cmd)
+{
+    uint32_t type = cmd >> 28, a = (cmd >> 20) & 0xFFu, b = (cmd >> 12) & 0xFFu, v = cmd & 0xFFFu;
+    if (!events_log)
+        return;
+    switch (type) {
+    case 8:  fprintf(events_log, "%u drum %u %u %u\n", sample, a, b, v); break;
+    case 9:  fprintf(events_log, "%u bon %u %u %u %u\n", sample, a, b, v & 1u, (v >> 1) & 1u); break;
+    case 10: fprintf(events_log, "%u boff %u\n", sample, a); break;
+    default: fprintf(events_log, "%u param %u %u %u %u\n", sample, type, a, b, v); break;
+    }
+}
+
+/* the 909's wrap is the bar boundary (sequencer.h); track it from outside the engine */
+static void host_count_bar(void)
+{
+    uint8_t p = seq.t[TRK_DRUM].pos;
+    if (seq.playing && !was_playing) {           /* the transport started: bar 0, no boundary yet */
+        bar_count = 0;
+        tr_prev_pos = p;
+        was_playing = 1;
+        return;
+    }
+    if (!seq.playing) {
+        was_playing = 0;
+        tr_prev_pos = p;
+        return;
+    }
+    if (p < tr_prev_pos)                         /* wrapped: a bar passed */
+        bar_count++;
+    tr_prev_pos = p;
+}
+
+/* cues and mutes the app sets (ui.c writes seq.pcue / seq.mute directly); the host sees them
+ * here, at the sample time they are in effect */
+static void host_log_seq(void)
+{
+    int t;
+    for (t = 0; t < NPARTS; t++) {
+        if (events_log && seq.pcue[t] < NPAT && seq.pcue[t] != prev_pcue[t])
+            fprintf(events_log, "%u cue %d %u\n", host_sample, t, seq.pcue[t]);
+        prev_pcue[t] = seq.pcue[t];
+    }
+    if (seq.mute != prev_mute) {
+        if (events_log)
+            fprintf(events_log, "%u mute %u\n", host_sample, seq.mute);
+        prev_mute = seq.mute;
+    }
+}
 
 /* ---------------------------------------------------------- outputs --- */
 static void png_write(const char *path)
@@ -414,7 +491,9 @@ static void run_ms(uint32_t ms)
             uint32_t pr0[ENG_PROF_N];
             for (k = 0; k < ENG_PROF_N; k++)
                 pr0[k] = eng_prof[k];
+            host_sample += 256;                          /* the tap and every dump read this clock */
             engine_render(blk, 256);
+            host_count_bar();                            /* the 909's wrap is the bar boundary */
 #ifdef X0X_WEB
             web_audio(blk, 256);                         /* the browser build: to the AudioWorklet */
 #endif
@@ -436,7 +515,7 @@ static void run_ms(uint32_t ms)
 #ifdef X0X_WEB
             engine_load(load_force >= 0 ? (uint32_t)load_force : 0u, 256);   /* a browser's timing is not the FM-1's */
 #else
-            engine_load(load_force >= 0 ? (uint32_t)load_force : cpu_pct, 256);
+            engine_load(load_force >= 0 ? (uint32_t)load_force : 0u, 256);   /* deterministic: only "load N" */
 #endif
             for (k = 0; k < 256; k++) {
                 float l = (float)blk[2 * k] / 8388608.0f, r = (float)blk[2 * k + 1] / 8388608.0f;
@@ -460,6 +539,7 @@ static void run_ms(uint32_t ms)
         } else {
             ui_input_only();
         }
+        host_log_seq();                                  /* cues and mutes set this millisecond */
     }
 }
 
@@ -610,6 +690,14 @@ static int expect(const char *what, const char *val)
     int got;
     if (!strcmp(what, "playing"))
         got = seq.playing;
+    else if (!strcmp(what, "bar"))                 /* the 909's wraps since the transport started */
+        got = (int)bar_count;
+    else if (!strcmp(what, "beat"))                /* the 909 playhead: beat (0-3), step */
+        got = seq.t[TRK_DRUM].pos / 4;
+    else if (!strcmp(what, "step"))
+        got = seq.t[TRK_DRUM].pos;
+    else if (!strcmp(what, "sample"))              /* frames rendered since boot */
+        got = (int)host_sample;
     else if (!strcmp(what, "pattern"))
         got = seq.ppat[PART_909] + 1;
     else if (!strcmp(what, "cue"))
@@ -738,6 +826,66 @@ static int expect(const char *what, const char *val)
     }
     printf("  ok %s == %d\n", what, got);
     return 0;
+}
+
+/* expect key K L: K's LED level (0 off, 1 dim, 2 bright) */
+static int expect_key(const char *k, const char *l)
+{
+    int n = key_of(k), got;
+    if (n < 0 || n >= NKEYS) {
+        printf("FAIL expect key %s: no such key\n", k);
+        return 1;
+    }
+    got = (lit_keys >> n & 1u) ? 2 : (dim_keys >> n & 1u) ? 1 : 0;
+    if (got != atoi(l)) {
+        printf("FAIL expect key %s == %s, got %d\n", k, l, got);
+        return 1;
+    }
+    printf("  ok key %s == %d\n", k, got);
+    return 0;
+}
+
+/* expect button B L: B's lit state, 0 or 1 */
+static int expect_button(const char *b, const char *l)
+{
+    int i = find_name(BTN_N, NB, b), got;
+    if (i < 0) {
+        printf("FAIL expect button %s: no such button\n", b);
+        return 1;
+    }
+    got = (int)(lit_btn >> i & 1u);
+    if (got != atoi(l)) {
+        printf("FAIL expect button %s == %s, got %d\n", b, l, got);
+        return 1;
+    }
+    printf("  ok button %s == %d\n", b, got);
+    return 0;
+}
+
+/* dump FILE.json: transport, parts, view and leds in one object */
+static void dump_json(const char *path)
+{
+    FILE *f = fopen(path, "w");
+    int p, i, n;
+    if (!f) {
+        printf("cannot write %s\n", path);
+        return;
+    }
+    fprintf(f, "{\n  \"transport\": {\"playing\": %d, \"bpm\": %.1f, \"bar\": %u, \"beat\": %u, \"step\": %u, \"sample\": %u},\n",
+            seq.playing ? 1 : 0, (double)seq.bpm, bar_count, seq.t[TRK_DRUM].pos / 4u, seq.t[TRK_DRUM].pos, host_sample);
+    fprintf(f, "  \"parts\": [");
+    for (p = 0; p < NPARTS; p++)
+        fprintf(f, "%s\n    {\"part\": %d, \"ppat\": %u, \"pcue\": %d, \"mute\": %d}", p ? "," : "", p, seq.ppat[p],
+                seq.pcue[p] < NPAT ? (int)seq.pcue[p] : -1, seq_part_muted(&seq, p));
+    fprintf(f, "\n  ],\n  \"view\": %d,\n  \"leds\": {\n    \"keys\": [", ui.view);
+    for (i = 0; i < NKEYS; i++)
+        fprintf(f, "%s%d", i ? ", " : "", (lit_keys >> i & 1u) ? 2 : (dim_keys >> i & 1u) ? 1 : 0);
+    fprintf(f, "],\n    \"buttons\": {");
+    for (i = 0, n = 0; i < NB; i++)
+        if (lit_btn >> i & 1u)
+            fprintf(f, "%s\"%s\": 1", n++ ? ", " : "", BTN_N[i]);
+    fprintf(f, "}\n  }\n}\n");
+    fclose(f);
 }
 
 #ifndef X0X_WEB
@@ -897,9 +1045,45 @@ int main(int argc, char **argv)
             for (i = 0; i < 11; i++)
                 printf("%c", (lit_keys >> BLACK_K[i] & 1u) ? '#' : (dim_keys >> BLACK_K[i] & 1u) ? 'o' : '.');
             printf("\n");
-        } else if (!strcmp(cmd, "expect"))
-            fails += expect(a, b);
-        else if (!strcmp(cmd, "projimg")) {
+        } else if (!strcmp(cmd, "dump")) {
+            snprintf(out, sizeof out, "%s/%s", dir, a);
+            dump_json(out);
+        } else if (!strcmp(cmd, "wait-bar")) {           /* run until N bar boundaries have passed */
+            uint32_t target = bar_count + (uint32_t)atoi(a), guard = 0;
+            while (bar_count < target && guard++ < 120000u)
+                run_ms(1);
+            if (bar_count < target) {
+                printf("FAIL wait-bar %s: no bar boundary (stopped?)\n", a);
+                fails++;
+            }
+        } else if (!strcmp(cmd, "events")) {             /* log the engine command queue from here */
+            snprintf(out, sizeof out, "%s/%s", dir, a);
+            events_log = fopen(out, "w");
+            if (!events_log) {
+                printf("line %d: cannot write %s\n", lineno, out);
+                return 2;
+            }
+            engine_tap = host_engine_tap;
+            {
+                int t;
+                for (t = 0; t < NPARTS; t++)             /* no stale cue from before */
+                    prev_pcue[t] = seq.pcue[t];
+            }
+            prev_mute = seq.mute;
+        } else if (!strcmp(cmd, "eventsstop")) {
+            if (events_log) {
+                fclose(events_log);
+                events_log = 0;
+            }
+            engine_tap = 0;
+        } else if (!strcmp(cmd, "expect")) {
+            if (!strcmp(a, "key"))
+                fails += expect_key(b, c);               /* expect key K LEVEL */
+            else if (!strcmp(a, "button"))
+                fails += expect_button(b, c);            /* expect button B LIT */
+            else
+                fails += expect(a, b);
+        } else if (!strcmp(cmd, "projimg")) {
             FILE *f;
             snprintf(out, sizeof out, "%s", a);
             if (!(f = fopen(out, "rb")) || fread(&proj, 1, sizeof proj, f) != sizeof proj) {
@@ -970,6 +1154,9 @@ int main(int argc, char **argv)
     wav_close();
     if (midi_log)
         fclose(midi_log);
+    if (events_log)
+        fclose(events_log);
+    engine_tap = 0;
     printf("host: %u ms simulated, %u blits, render %.1f%% of real time (host CPU)%s\n", now_ms, blits,
            render_budget_ns_total > 0 ? 100.0 * render_ns_total / render_budget_ns_total : 0.0,
            fails ? ", EXPECTATIONS FAILED" : "");
