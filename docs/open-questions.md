@@ -51,3 +51,11 @@ X0X's core-1 check word covers the job hand-off, not the data core 1 reads while
 
 ## The layer-toggle button's printed label (2026-10-11, T11h)
 X0X's code calls the panel button we use for the LIVE layer toggle `B_SEL`, and the T11h worker reports that the panel prints **SEL**. Our hardware notes and the interaction model call it **SCL**. Please read the label on the device. The help cards use SEL for now. Whichever it is, the docs will be made to match.
+
+## The RAM budget is nearly spent (2026-10-11)
+After takes (T9i) and MIDI (T11i), the RAM pool has only a few KB above X0X's required 8 KB spare. To fit, takes were cut to 1,024 events and the undo ring to about 6 KB. Any further feature will need RAM from somewhere. The big remaining users:
+- **X0X's delay line: 88 KB for 1.0 s.** Cutting it to 0.75 s frees about 22 KB; the longest synced delay at 80 bpm stays a quarter note.
+- **X0X's project patterns, kept in RAM for Classic.** Loading them only when you enter Classic would free roughly 17 KB or more.
+- The punch FX history (32 KB).
+
+The first two are the candidates. Which trade do you prefer before v1 grows further?

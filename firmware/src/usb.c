@@ -125,10 +125,52 @@ static uint32_t sx_out_q[SXQ];
 static volatile uint32_t so_w, so_r;
 #endif
 
-/* MIDI rings: 4-byte USB-MIDI event packets */
+/* MIDI rings: 4-byte USB-MIDI event packets.
+ * The update loader (loader.c includes this file with FELUCCA_LOADER) must compile to exactly the
+ * X0X 1.0.5 loader tools/check_loader.sh pins, so it keeps the original 64-slot rings and the
+ * original endpoint write; the app gets T11i's 256-slot pool rings with an arrival stamp and a
+ * note-on-first overflow policy. */
+#ifdef FELUCCA_LOADER
 #define MQ 64u
 static uint32_t midi_in_q[MQ], midi_out_q[MQ];
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
+#else
+#define MQ 256u
+#define MIDI_Q_RESERVE 16u          /* below this many free, drop note-ons to keep room for note-offs */
+#ifndef X0X_POOL                  /* the host unit tests include this file with no plat.h */
+#define X0X_POOL
+static uint32_t plat_sample_now(void) { return 0; }
+#endif
+static uint32_t midi_in_q[MQ] X0X_POOL;
+static uint32_t midi_in_ts[MQ] X0X_POOL;
+static uint32_t midi_out_q[MQ] X0X_POOL;
+static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
+static volatile uint8_t midi_in_overflow;
+
+static int midi_is_note_on(uint32_t pkt)
+{
+    uint8_t st = (uint8_t)(pkt >> 8);
+    return (st & 0xF0u) == 0x90u && ((pkt >> 24) & 0x7Fu) != 0u;
+}
+
+/* One packet into the ring with its arrival stamp (T11i). When the ring is full a note-on is
+ * dropped first (a lost note-on cannot hang); a truly dropped packet sets the overflow flag, and
+ * the app releases every note it holds at the next poll, so a lost note-off cannot hang either. */
+static int midi_q_push(uint32_t pkt, uint32_t ts)
+{
+    uint32_t fill = mi_w - mi_r;
+    if (fill >= MQ || (fill >= MQ - MIDI_Q_RESERVE && midi_is_note_on(pkt))) {
+        if (fill >= MQ)
+            midi_in_overflow = 1;
+        return 0;
+    }
+    midi_in_q[mi_w % MQ] = pkt;
+    midi_in_ts[mi_w % MQ] = ts;
+    RING_PUBLISH();
+    mi_w++;
+    return 1;
+}
+#endif
 
 static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 {
@@ -637,12 +679,19 @@ static void ep1_rx(void)
             uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
             for (k = 0; k < nb; k++)
                 sysex_byte(ep1rx[i + 1 + k]);
+#ifdef FELUCCA_LOADER
         } else if (((cin >= 8u && cin <= 0xEu) || (cin == 0xFu && ep1rx[i + 1] >= 0xF8u)) && mi_w - mi_r < MQ) {
             /* CIN 0xF: a single byte; the real-time ones (clock, start, continue, stop) matter */
             midi_in_q[mi_w % MQ] = pkt;
             RING_PUBLISH();
             mi_w++;
         }
+#else
+        } else if ((cin >= 8u && cin <= 0xEu) || (cin == 0xFu && ep1rx[i + 1] >= 0xF8u)) {
+            /* CIN 0xF: a single byte; the real-time ones (clock, start, continue, stop) matter */
+            midi_q_push(pkt, plat_sample_now());
+        }
+#endif
     }
     usb.rx_pkts++;
     csr = (csr & ~0x164u) | 0x10u;

@@ -1,0 +1,29 @@
+# T11i: MIDI Start resets to bar 1, step 0 and relaunches what was playing; Continue resumes
+# from the stop point (the clip and the position).
+noise 1
+songseed
+wait 300
+midicfg 0 1
+midi FA 00 00
+wait 20
+expect playing 1
+midi C0 00 00
+wait 2500
+expect liveclip0 0
+midi FC 00 00                                   # Stop: no reset
+wait 20
+expect playing 0
+midi FB 00 00                                   # Continue: resumes
+wait 10
+expect playing 1
+expect liveclip0 0
+expect step >0
+dump cont.json
+midi FC 00 00
+wait 20
+midi FA 00 00                                   # Start: bar 1, step 0
+wait 10
+expect playing 1
+expect liveclip0 0
+expect step 0
+dump start.json

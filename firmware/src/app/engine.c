@@ -595,7 +595,7 @@ void engine_take_cmd(uint32_t c) { apply_raw(c); }
 
 static void drain(uint32_t base)
 {
-    uint32_t r = cq_r, pkt;
+    uint32_t r = cq_r, pkt, ts;
     int guard = 64;
     while (r != cq_w) {
         uint32_t c = cq[r % CQ];
@@ -606,8 +606,11 @@ static void drain(uint32_t base)
         apply_raw(c);
     }
     cq_r = r;
-    while (guard-- && plat_midi_in(&pkt))
-        midi_in(pkt);
+    if (!live_bridge_active())                          /* T11i: in STUDIO/LIVE the main loop's
+                                                         * midi_live_poll() owns the ring; Classic
+                                                         * keeps X0X's own per-part MIDI-in here */
+        while (guard-- && plat_midi_in(&pkt, &ts))
+            midi_in(pkt);
 }
 
 /* T9i: the audio sample clock and the parameter mirror the take recorder uses. */

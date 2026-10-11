@@ -138,16 +138,12 @@ static void clip_motion_set(int idx, int lane, int param)
 
 static void render_n(uint32_t n)
 {
-    if (eng.playing && !hplay) {               /* transport just started: time restarts at 0 */
-        hbase = 0;
-        hplay = 1;
-    }
-    win_base = hbase;
+    win_base = hbase;                          /* an absolute timeline: a mid-case start does not
+                                                * reset it (the engine's elapsed does) */
     clip_engine_render(&eng, n, &SINK);
     if (eng.playing)
         hbase += n;
-    else
-        hplay = 0;
+    hplay = eng.playing;
 }
 
 /* render exactly to absolute sample `target` (in transport time) */
@@ -201,6 +197,8 @@ static void run_script(const char *script)
             else if (!strcmp(t[0], "swing")) song.swing = (uint8_t)atoi_tok(t, 1);
             else if (!strcmp(t[0], "play"))  clip_engine_start(&eng);
             else if (!strcmp(t[0], "stop"))  clip_engine_transport_stop(&eng);
+            else if (!strcmp(t[0], "restart"))  clip_engine_restart(&eng);   /* T11i: MIDI Start */
+            else if (!strcmp(t[0], "continue")) clip_engine_continue(&eng);  /* T11i: MIDI Continue */
             else if (!strcmp(t[0], "run")) {
                 uint32_t n = utok(t, 1), i;
                 if (force_ones) {
@@ -217,6 +215,9 @@ static void run_script(const char *script)
                     render_n(1u);
             }
             else if (!strcmp(t[0], "queuebpm")) clip_engine_queue_bpm(&eng, (uint16_t)atoi_tok(t, 1));
+            else if (!strcmp(t[0], "queuebpms")) clip_engine_queue_bpm_soft(&eng, (uint16_t)atoi_tok(t, 1));
+            else if (!strcmp(t[0], "bpmof"))
+                putf("bpm %u ext %u song %u\n", eng.bpm_x10, eng.bpm_ext, eng.song_bpm);
             else if (!strcmp(t[0], "launch")) {
                 if (n >= 3) clip_engine_launch_quant(&eng, (uint8_t)atoi_tok(t, 1), (uint8_t)atoi_tok(t, 2));
                 else        clip_engine_launch(&eng, (uint8_t)atoi_tok(t, 1));
@@ -506,6 +507,49 @@ int main(void)
         "run 12000\n"
         "stoprole 2\n"                 /* Q_BEAT: stop at the next beat */
         "runto 30000\n");
+
+    run_case("restart_notes",
+        "clip 19 melodic 4\n"           /* CHORDS: one long note, sounding across steps */
+        "note 19 0 60 100 40\n"
+        "play\n"
+        "launch 19 0\n"
+        "run 20000\n"                   /* the note is sounding */
+        "restart\n"                     /* T11i: MIDI Start releases it, then step 0 sounds */
+        "runto 60000\n");
+
+    run_case("stop_continue",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 12000\n"
+        "stop\n"
+        "run 4000\n"
+        "continue\n"                    /* T11i: MIDI Continue resumes the stop point */
+        "runto 40000\n");
+
+    run_case("clock_then_load",
+        "clip 12 melodic 4\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "queuebpms 1000\n"              /* T11i: the external clock sets a live 100 bpm */
+        "run 2000\n"
+        "bpmof\n"
+        "bpm 900\n"                     /* a song loads with its own 90 bpm */
+        "run 2000\n"
+        "bpmof\n");
+
+    run_case("restart_after_edit",
+        "clip 12 melodic 8\n"
+        "note 12 0 60 100 1\n"
+        "play\n"
+        "launch 12 0\n"
+        "run 12000\n"
+        "stop\n"
+        "run 4000\n"
+        "note 12 4 67 100 1\n"          /* edit the song's clip while the transport is stopped */
+        "restart\n"                     /* T11i: MIDI Start relaunches the fresh copy, not play[] */
+        "runto 80000\n");
 
     run_case("mute_midnote",
         "clip 12 melodic 4\n"

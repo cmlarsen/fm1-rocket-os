@@ -10,6 +10,7 @@
 #include "../seq/tb3po.h"
 #include "../seq/motion.h"
 #include "../dsp/fxbus.h"            /* FX_* param indices (the send pages) */
+#include "midi_live.h"               /* T11i: the MIDI-in glue (ui.c and main_fm1.c both call it) */
 
 #ifndef X0X_VERSION                     /* a release build passes its own (tools/build.py --release) */
 #define X0X_VERSION "DEV"

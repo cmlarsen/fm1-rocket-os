@@ -31,7 +31,7 @@ expect laneval7.0.0.12 255
 expect hit0.0.0 1
 expect hit0.0.8 1
 tap GLO
-turn SELECT 1
+turn SELECT 2
 turn ALGO 1
 tap HOME
 tap EDIT

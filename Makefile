@@ -293,7 +293,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name unit-songs
+unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-name unit-songs
 
 # T7b re-review: the host plat_crit nesting (host/plat_crit_host.c).
 .PHONY: unit-crit
@@ -327,6 +327,29 @@ unit-midi:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/midi_in_test_san \
 	    tests/host/midi_in_test.c core/midi/midi_in.c
 	build/host/midi_in_test_san
+
+# T11i: the app's MIDI glue, and the followed clock under a stalled main loop (the reviewer's clk2).
+# The glue's app calls are stubs, so this is its own unit + the parser.
+.PHONY: unit-midilive
+unit-midilive:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -Ifirmware/src -o build/host/midi_live_test \
+	    tests/host/midi_live_test.c firmware/src/app/midi_live.c core/midi/midi_in.c
+	build/host/midi_live_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -Ifirmware/src -o build/host/midi_live_test_san \
+	    tests/host/midi_live_test.c firmware/src/app/midi_live.c core/midi/midi_in.c
+	build/host/midi_live_test_san
+
+# T11i: the sample clock's lock-free publish, with a reader interleaved at every writer store.
+.PHONY: unit-sampleclk
+unit-sampleclk:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/sample_clock_test \
+	    tests/host/sample_clock_test.c
+	build/host/sample_clock_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/sample_clock_test_san \
+	    tests/host/sample_clock_test.c
+	build/host/sample_clock_test_san
 
 .PHONY: unit-fx
 unit-fx:

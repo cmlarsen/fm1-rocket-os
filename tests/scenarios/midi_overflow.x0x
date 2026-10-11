@@ -1,0 +1,11 @@
+# T11i: a full ring drops note-ons first (never a note-off), and a truly dropped packet makes the
+# next poll release every note external MIDI holds, so an overflow cannot hang a note.
+wait 300
+midicfg 0 0
+midiflood 300                                   # 300 note-ons, 300 CCs and a note-off: the ring overflows
+wait 40
+expect midiheld 0
+wait 1000
+expect midiheld 0
+expect fm6voices 0
+dump midi_overflow.json

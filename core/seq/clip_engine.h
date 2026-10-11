@@ -44,7 +44,8 @@ typedef struct {
 /* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, a tempo, or
  * (T7b) a launch that takes effect on an exact global step (the recorded clip's close). */
 enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE,
-       CLIP_CMD_MUTE_CLEAR, CLIP_CMD_LAUNCH_AT };
+       CLIP_CMD_MUTE_CLEAR, CLIP_CMD_LAUNCH_AT, CLIP_CMD_SET_BPM_SOFT, CLIP_CMD_RESTART, CLIP_CMD_CONTINUE,
+       CLIP_CMD_TRANSPORT_STOP, CLIP_CMD_START };
 typedef struct {
     uint8_t  cmd;
     uint8_t  clip;     /* launch: the clip; stop / mute (T10i): the role */
@@ -64,6 +65,8 @@ typedef struct {
     uint8_t  was_playing;
     uint16_t bpm_x10;        /* current tempo (clamped) */
     uint16_t bpm_src;        /* last tempo requested, to detect a real change */
+    uint16_t bpm_ext;        /* T11i: a live tempo (the external clock) overriding the song; 0 = none */
+    uint16_t song_bpm;       /* T11i: the song's own bpm_x10 as last seen (a load/edit clears bpm_ext) */
     uint32_t step_L;         /* samples per 16th, integer part */
     uint32_t step_f;         /* remainder, in 1/bpm_x10 sample units */
     uint32_t step_sample;    /* absolute sample the current step starts on (unswung) */
@@ -76,6 +79,14 @@ typedef struct {
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
     uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
+
+    /* T11i: MIDI Start / Continue. start() resets to bar 1, step 0; continue() resumes from the
+     * stop point, which a stop saved here (the visible cur/pos are cleared as before). */
+    uint8_t  resume;             /* the pending start is a Continue */
+    uint8_t  restart;            /* clip_engine_start was called: force a reset */
+    uint8_t  s_cur[NROLES];
+    uint8_t  s_pos[NROLES];
+    uint32_t s_elapsed, s_step_sample, s_step_frac, s_global;
 
     /* Single-producer / single-consumer command ring (UI writer, ISR reader). */
     clip_cmd_t cmd[CLIP_CMD_RING];
@@ -99,8 +110,14 @@ typedef struct {
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
 
-/* Transport. Tempo and swing come from the song (or a tempo command). */
+/* Transport. Tempo and swing come from the song (or a tempo command).
+ * start() plays (resetting to bar 1, step 0 when it was stopped); restart() (T11i) forces the reset
+ * and relaunches what was playing (MIDI Start); continue() (T11i) resumes from where
+ * transport_stop() left it. restart() and continue() reach the engine through its command ring, so
+ * `playing` changes only in the ISR. */
 void clip_engine_start(clip_engine_t *e);
+void clip_engine_restart(clip_engine_t *e);
+void clip_engine_continue(clip_engine_t *e);
 void clip_engine_transport_stop(clip_engine_t *e);
 
 /* Queue the clip on its role (clip_role()) at the clip's own quantize; a second launch of
@@ -124,6 +141,11 @@ void clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step);
 /* Tempo change from the main loop, through the ring. It is applied at the next render and is
  * the one source of truth (it also writes song->bpm_x10). */
 void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
+
+/* T11i: a live/transient tempo (the external clock). It sets the running tempo but does NOT write
+ * song->bpm_x10, so switching the clock source back to Internal restores the song's own tempo.
+ * A later clip_engine_queue_bpm (or the song's own change) cancels it. */
+void clip_engine_queue_bpm_soft(clip_engine_t *e, uint16_t bpm_x10);
 
 /* T7b: after an edit to `clip`, the main loop writes the song's clip into the engine's play[] (when
  * it is the role's playing clip) and next[] (when a launch of it is staged), with the audio IRQs

@@ -731,7 +731,7 @@ void live_bridge_render(uint32_t nframes, const live_sink_t *sink)
 
 /* ----- transport and launching (main loop) ----- */
 
-void live_bridge_transport_start(void)
+static void take_arm_if_pending(void)
 {
     if (g_take_arm_at_start) {                        /* T9i: REC while stopped starts at PLAY (bar 0) */
         g_take_arm_at_start = 0;
@@ -739,7 +739,25 @@ void live_bridge_transport_start(void)
         take_arm(&g_take, engine_sample_now());
         g_bar_identity = 0;
     }
+}
+void live_bridge_transport_start(void)
+{
+    take_arm_if_pending();
     clip_engine_start(&g_eng);
+}
+void live_bridge_transport_restart(void)                 /* T11i: MIDI Start */
+{
+    uint32_t f;
+    take_arm_if_pending();
+    f = engine_crit_enter();
+    clip_engine_restart(&g_eng);                         /* stages next[] under the mask */
+    engine_crit_exit(f);
+}
+void live_bridge_transport_continue(void)                /* T11i: MIDI Continue resumes */
+{
+    uint32_t f = engine_crit_enter();
+    clip_engine_continue(&g_eng);
+    engine_crit_exit(f);
 }
 void live_bridge_transport_stop(void)
 {
@@ -756,6 +774,21 @@ void live_bridge_launch(uint8_t clip)
     clip_engine_launch(&g_eng, clip);                  /* stages next[] under the mask */
     engine_crit_exit(f);
     tp_post(TP_LAUNCH, clip, (uint8_t)clip_role(clip));   /* T9i: record it from the ISR */
+}
+
+/* T11i: Program Change launches a clip at the song's PC quantize (not the clip's own). Kept in its
+ * own block; it takes the same critical section as the other launches, because
+ * clip_engine_launch_quant also stages next[] from the main loop. */
+void live_bridge_launch_quant(uint8_t clip, uint8_t quant)
+{
+    uint32_t f;
+    if (clip >= NCLIPS)
+        return;
+    f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch_quant(&g_eng, clip, quant);
+    engine_crit_exit(f);
+    tp_post(TP_LAUNCH, clip, (uint8_t)clip_role(clip));
 }
 void live_bridge_launch_now(uint8_t clip)
 {
@@ -810,6 +843,7 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 }
 
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
+void live_bridge_set_bpm_soft(uint16_t bpm_x10) { clip_engine_queue_bpm_soft(&g_eng, bpm_x10); }   /* T11i: the clock */
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
 
 /* T7b: the main loop owns the snapshot. Every edit writes the clip into the engine's copies with

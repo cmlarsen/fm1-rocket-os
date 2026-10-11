@@ -187,6 +187,24 @@ static void case_cleanup(void)
     gen_tone(INL, INR, 40000, 440.0f, 0.5f);
     drive(40000);
     CHECK(exact(OUTL, INL, 40000), "nothing engaged: output == input, sample for sample");
+    {
+        /* T10perf: the idle fast path is the only thing recording while nothing is
+         * engaged. It must still write the exact mono downmix of the live signal,
+         * so a repeat / freeze engaged later captures the right audio. */
+        uint32_t s, n = PERFORM_HIST_N;
+        int ok = 1;
+        for (s = 40000u - n; s < 40000u; s++) {
+            float mono = (INL[s] + INR[s]) * 0.5f;
+            int16_t want = (mono >= 1.0f) ? (int16_t)32767
+                         : (mono <= -1.0f) ? (int16_t)-32768
+                         : (int16_t)(mono * 32767.0f);
+            if (P.hist[s & (PERFORM_HIST_N - 1u)] != want) { ok = 0; break; }
+        }
+        CHECK(ok, "idle: the history records the mono downmix exactly (last %u samples)", (unsigned)n);
+        CHECK(P.hist_w == (40000u & (PERFORM_HIST_N - 1u)),
+              "idle: the write head advanced (%u)", (unsigned)P.hist_w);
+        CHECK(P.hist_stalled == 0, "idle: the recording head never stalls");
+    }
     outn = 0;
     putf("# cleanup: no effect engaged, output == input exactly\n");
     putf("n=40000 exact=%d\n", (int)exact(OUTL, INL, 40000));

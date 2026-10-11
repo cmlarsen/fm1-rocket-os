@@ -1,0 +1,18 @@
+# case clock_then_load
+# script:
+clip 12 melodic 4
+note 12 0 60 100 1
+play
+queuebpms 1000
+run 2000
+bpmof
+bpm 900
+run 2000
+bpmof
+
+# events:
+0 playing bass 0 0 0
+bpm 1000 ext 1000 song 1200
+bpm 900 ext 0 song 900
+
+# events=1
