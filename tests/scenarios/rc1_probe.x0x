@@ -1,0 +1,75 @@
+# RC1p: the debug stress + stats, through the host runner. These are the same functions the
+# device's ED_STRESS / ED_STATS commands call (firmware/src/app/rc_debug.c), so the scenario is the
+# host half of tools/rc_probe.py. Each level starts, ED_STATS is well formed, and LIVE plays.
+wait 300
+
+# ED_STATS is well formed from a cold boot, and stress 0 is a no-op
+stats
+expect statswords 21
+stress 0
+expect stressactive 0
+
+# stress 1: the X0X baseline (909 + 808 + 303 A + 303 B, the sequencer's own path)
+stress 1
+wait 500
+expect stressactive 1
+expect stresslevel 1
+expect playing 1
+peakreset
+wait-bar 2
+expect peak_db_min -40
+stats
+expect statswords 21
+stress 0
+expect stressactive 0
+expect playing 0
+
+# stress 2: LIVE, a busy clip on every melodic/drum role and a held 4-note FM6 chord (the release
+# cap). The guard must stay off and no xruns, as RC1's pass criteria ask.
+stress 2
+wait 200
+expect liveactive 1
+expect stresslevel 2
+expect mode 1
+events rc1_probe_stress2_events.txt
+wait-bar 2
+expect liveclip0 0
+expect fm6voices 4
+expect guard 0
+expect guardcount 0
+wait-bar 1
+eventsstop
+peakreset
+wait-bar 1
+expect peak_db_min -30
+stats
+expect statswords 21
+stress 0
+expect liveactive 0
+expect mode 0
+expect guard 0
+
+# stress 3: stress 2 plus every wired punch FX (none are wired yet: T10i), so the same checks
+stress 3
+wait 200
+expect liveactive 1
+expect stresslevel 3
+expect fm6voices 4
+stats
+expect statswords 21
+stress 0
+expect liveactive 0
+
+# stress 4: the FM6 cap override for headroom. The host build's FM6 array is 4 (the release cap),
+# so 4 is the largest it can hold; the device's fw-debug array is 8 (see docs/engineering/rc1-probe.md).
+stress 4 4
+wait 200
+expect liveactive 1
+expect stresslevel 4
+expect fm6voices 4
+stats
+expect statswords 21
+stress 0
+expect liveactive 0
+expect guard 0
+statsreset

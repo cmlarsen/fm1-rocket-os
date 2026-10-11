@@ -263,6 +263,10 @@ extern int eng_fm6_voices_active(void);
 extern int eng_fm6_voices_held(void);
 extern int eng_noise_voices_active(void);
 
+/* RC1p: the debug stress / stats, the same source the device's editor.c includes (ED_STRESS / ED_STATS) */
+#include "../firmware/src/app/rc_debug.c"
+static int rc_host_words;                            /* fields the last `stats` returned */
+
 /* ------------------------------------------------------- event log --- */
 /* The engine taps the command queue here (engine_tap, engine.h) with the command word and the
  * sample counter; the host also watches the cues and mutes the app sets. Both go to the file
@@ -590,6 +594,9 @@ static void run_ms(uint32_t ms)
     }
 }
 
+/* RC1p: rc_debug.c's settle hook (it is compiled before run_ms is defined) */
+void rc_host_pump(uint32_t ms) { run_ms(ms); }
+
 /* ---------------------------------------------------------- script --- */
 static const char *const BTN_N[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                       "PLAY", "REC", "OCT-", "OCT+"};
@@ -889,6 +896,12 @@ static int expect(const char *what, const char *val)
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
         got = eng_noise_voices_active();
+    else if (!strcmp(what, "stresslevel"))          /* RC1p: the running stress level (0 none) */
+        got = rc_stress_level();
+    else if (!strcmp(what, "stressactive"))
+        got = rc_stress_active();
+    else if (!strcmp(what, "statswords"))           /* RC1p: the fields the last `stats` returned */
+        got = rc_host_words;
     else if (!strcmp(what, "mute"))
         got = (int)seq.mute;
     else if (!strcmp(what, "vmute"))                /* drum tracks muted on their own (bit kit * 11 + track) */
@@ -1148,6 +1161,27 @@ int main(int argc, char **argv)
             line_snap[b] = cur_pat()->bass[b];
         } else if (!strcmp(cmd, "load"))              /* load N: every block costs N% (the guard's input) */
             load_force = atoi(a);
+        else if (!strcmp(cmd, "stress")) {            /* RC1p: stress N [CAP]: same code the device runs */
+            int rc = rc_stress(atoi(a), b[0] ? atoi(b) : 0);
+            if (rc) {
+                printf("FAIL stress %s\n", a);
+                fails++;
+            } else
+                printf("  stress %s %s\n", a, b);
+        } else if (!strcmp(cmd, "stats")) {           /* RC1p: ED_STATS's fields, printed */
+            uint32_t s[RC_ST_N];
+            int k, n = rc_stats(s, RC_ST_N);
+            rc_host_words = n;
+            printf("  stats:");
+            for (k = 0; k < n; k++)
+                printf(" %u", s[k]);
+            printf("\n");
+            if (n != RC_ST_N) {
+                printf("FAIL stats: %d fields, wanted %d\n", n, RC_ST_N);
+                fails++;
+            }
+        } else if (!strcmp(cmd, "statsreset"))
+            rc_stats_reset();
         else if (!strcmp(cmd, "peakreset"))
             peak_out = 0.0f;
         else if (!strcmp(cmd, "silence")) {              /* silence MS [DB]: the next MS ms stay quiet */
