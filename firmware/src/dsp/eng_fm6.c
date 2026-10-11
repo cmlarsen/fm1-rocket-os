@@ -7,6 +7,14 @@
 #include "fm6_patches.h"          /* FM6_INIT, FM6_FACTORY (tools/gen_fm6_patches.py) */
 #include "eng_mem.h"
 
+/* T5i: on the device the voice array lives in the shared .pool (the RAM plan); the host tests keep it
+ * as an ordinary object (no .pool section on macOS). */
+#if defined(X0X_HOST) || defined(__APPLE__)
+#define FM6_POOL
+#else
+#define FM6_POOL __attribute__((section(".pool")))
+#endif
+
 #define FM6_VOICE_FS 24000                                  /* dsp.c VOICE_FS */
 
 typedef struct {
@@ -21,7 +29,7 @@ typedef struct {
 static uint8_t fm6_patch[FP_SIZE + 1u];                        /* the own patch (main loop writes) */
 static uint8_t fm6_slot;                                       /* the SLOT value last loaded */
 static int16_t fm6_prm[E_FM6_NEDIT];                           /* the macros: ALG FB MLVL MRAT MEG VMOD DTUN */
-static eng_fm6_voice_t fm6_voice[ENG_FM6_VOICES];
+static eng_fm6_voice_t fm6_voice[ENG_FM6_VOICES] FM6_POOL;      /* the voices: the pool (the RAM plan) */
 static fm6_lfo_t fm6_lfo;
 static int32_t fm6_lfo_v, fm6_lfo_d;
 static uint32_t fm6_age;
@@ -121,6 +129,17 @@ int eng_fm6_load_slot(int s)
 }
 
 int eng_fm6_slot(void) { return fm6_slot; }
+
+int eng_fm6_load_preset(int n)
+{
+    if (n < 0)
+        n = 0;
+    if (n < FM6_NFACTORY)
+        return eng_fm6_load_slot(n);                 /* a ROM factory voice */
+    if (eng_fm6_load_slot(n) == 0)
+        return 0;                                    /* OWN, or a bank voice that is there */
+    return eng_fm6_load_slot(((n - ENG_FM6_B1) % (int)FM6_NFACTORY + (int)FM6_NFACTORY) % (int)FM6_NFACTORY);
+}
 
 void eng_fm6_set_param(int i, int value)
 {

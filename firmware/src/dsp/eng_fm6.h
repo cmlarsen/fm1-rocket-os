@@ -26,7 +26,9 @@
 #include "fm6_vbank.h"
 
 #ifndef ENG_FM6_VOICES
-#define ENG_FM6_VOICES 6             /* polyphony: T5i tunes this for CPU (Felucca's FM6_POLY is 6) */
+#define ENG_FM6_VOICES 8             /* polyphony: T5i tunes this for CPU. The host estimate at 8 is far
+                                      * under 60 % of the block (see reports/T5i.md); the RAM plan's pool
+                                      * headroom and RC1's device measurement are the real checks. */
 #endif
 
 #define ENG_FM6_OWN 8                /* SLOT: the track's own patch (F1..F8 come before it) */
@@ -45,7 +47,11 @@ const uint8_t *eng_fm6_patch(void);
  * Returns 0 when it loaded, 1 when refused (a bank slot with no voice, or s out of range) */
 int eng_fm6_load_slot(int s);
 int eng_fm6_slot(void);
-/* the voice bank the B slots read (Felucca's flash bank, in RAM here; T5i fills it from storage) */
+/* T5i: load a preset by SLOT number (0..7 factory, ENG_FM6_OWN, B1..B32 bank). A bank slot with no
+ * voice (no bank, or an erased / corrupt bank) falls back to a ROM factory voice, so a preset always
+ * sounds. Returns 0 (the fallback always loads). */
+int eng_fm6_load_preset(int n);
+/* the voice bank the B slots read (the 0x9F000 flash sector, in RAM here; T5i fills it at boot) */
 void eng_fm6_set_vbank(const fm6_vbank_t *b);
 
 /* an EDIT macro; the SLOT parameter (E_FM6_SLOT) is a call to eng_fm6_load_slot() */

@@ -121,3 +121,24 @@ int fm6_vbank_read(const fm6_vbank_t *b, uint32_t k, uint8_t *v155)
     fm6_unpack(b->rec[k], v155);
     return 0;
 }
+
+#if FM6_NBANK > 32u
+#error "FM6_NBANK must fit in fm6_vbank_t.used"
+#endif
+int fm6_vbank_import(fm6_vbank_t *b, const uint8_t *img, uint32_t len)
+{
+    uint32_t k;
+    if (!b || !img || len < FM6_NBANK * FM6_PACKED)
+        return 0;
+    for (k = 0; k < FM6_NBANK; k++) {
+        uint8_t v[FP_SIZE + 1u], chk[FM6_PACKED];
+        const uint8_t *rec = img + k * FM6_PACKED;
+        fm6_unpack(rec, v);                                  /* masks to 7 bits, then sanitizes */
+        fm6_pack(v, chk);
+        if (eng_memcmp(chk, rec, FM6_PACKED) != 0)
+            return 0;                                        /* a field out of range, or blank / erased */
+        eng_memcpy(b->rec[k], rec, FM6_PACKED);
+    }
+    b->used = 0xFFFFFFFFu;                                   /* read guards k >= FM6_NBANK anyway */
+    return 1;
+}
