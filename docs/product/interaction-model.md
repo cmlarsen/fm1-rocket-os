@@ -144,6 +144,9 @@ The keyboard splits at its natural gaps, the places where two lower keys meet wi
 - **No countdown text** (the owner removed it on 2026-10-11).
 
 ### Performance controls (both layers)
+
+Role mutes and punch FX are performance state (decided 2026-10-11). They reset when you leave LIVE and are never saved with the song.
+
 - **K1** is a bipolar filter: low-pass to the left, high-pass to the right.
 - **K2** is Space, **K3** is Echo and **K4** is Drive.
 - **FX held or double-tapped** turns the first six lower keys into punch FX: **repeat 1/8, repeat 1/16, tape stop, filter dive, echo throw, freeze**.
