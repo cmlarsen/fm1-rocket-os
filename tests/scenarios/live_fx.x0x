@@ -69,6 +69,7 @@ wait 30
 expect fxlayer 1
 tapkey 17
 expect fxmute1 1
+expect songrolemute1 0
 expect key 17 2
 tapkey 17
 expect fxmute1 0
