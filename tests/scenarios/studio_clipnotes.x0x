@@ -1,5 +1,6 @@
-# T7b STUDIO 3: the notes page. SEQ creates BASS A and opens NOTES; ALGORITHM moves the step
-# cursor; keys add notes at the cursor (a hold adds a chord); HOME + a key removes a note.
+# T7b STUDIO 3: the notes page. SEQ creates BASS A and opens NOTES; the roll shows the octave the
+# keys play; ALGORITHM moves the step cursor; keys add notes at the cursor (a hold adds a chord);
+# HOME + a key removes a note.
 wait 300
 cursor 1 0
 tap SEQ
@@ -7,30 +8,30 @@ expect view 13
 expect editclip 7
 expect clipnotes7 0
 # four notes stepped in
-tapkey w0
-turn ALGO 2
-tapkey w4
-turn ALGO 2
 tapkey w7
+turn ALGO 2
+tapkey w8
+turn ALGO 2
+tapkey w9
 turn ALGO 4
-tapkey w11
+tapkey w10
 expect clipnotes7 4
 expect notestep7.0 0
-expect notenote7.0 53
+expect notenote7.0 41
 expect notestep7.1 2
 expect notestep7.3 8
 # a chord: hold three keys at the cursor step
 turn ALGO 2
-key w0 down
-key w2 down
-key w4 down
-key w0 up
-key w2 up
-key w4 up
+key w7 down
+key w8 down
+key w9 down
+key w7 up
+key w8 up
+key w9 up
 expect clipnotes7 7
 # HOME + a key removes that note at the cursor
 press HOME
-key w2 down
+key w8 down
 release HOME
 expect clipnotes7 6
 # the length defaults to one step

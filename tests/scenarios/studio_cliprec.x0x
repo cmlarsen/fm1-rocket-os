@@ -1,24 +1,29 @@
-# T7b: REC on an empty slot arms a pass from the next bar; the keys record into a new BASS clip
-# until REC closes the loop at the next bar. The length becomes the recorded bar count (1 bar) and
-# the clip starts looping; its notes play back as events.
+# T7b: REC on an empty slot arms a pass from the next bar; before it starts, keys audition only.
+# Notes keep their real length (note-on to note-off); the second REC closes the loop at the next
+# bar, the length becomes the recorded bar count (1 bar) and the clip launches now (no gap).
 wait 300
 cursor 1 0
+tap PLAY
+wait-bar 1
 tap REC
 expect view 13
 expect editclip 7
 expect recrec 1
+# pre-roll: a key before the pass starts auditions only, it does not step-enter
 key w0 down
 key w0 up
-wait 300
+expect clipnotes7 0
+wait-bar 1
+# the pass is running: two notes, the first held across steps
 key w2 down
-key w2 up
 wait 300
+key w2 up
+wait 200
 key w4 down
 key w4 up
-wait 300
-key w7 down
-key w7 up
-expect clipnotes7 4
+expect clipnotes7 2
+expect notelen7.0 >1
+expect notelen7.1 1
 tap REC
 wait-bar 2
 expect recrec 0

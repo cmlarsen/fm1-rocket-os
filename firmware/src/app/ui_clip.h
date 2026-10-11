@@ -17,9 +17,13 @@ void clip_open(int clip);
 int  clip_editing(void);                      /* the view is one of the editor's pages */
 int  clip_edit_is_drum(void);                 /* the clip being edited is a DRUMS clip */
 
+/* REC on the song home: open the editor and arm a pass (a fresh slot's create shares its entry). */
+void clip_record_open(int clip);
+
 /* Recording: REC arms a pass, a second REC closes it at the next bar, and the clip loops. */
 int  clip_rec_active(void);                   /* a pass is running */
-void clip_rec_button(void);                   /* arm / close */
+void clip_rec_button(void);                   /* arm / close (from the editor's REC) */
+void clip_rec_arm(int keep_session);          /* arm; keep_session: a fresh slot's create is the entry */
 void clip_tick(void);                         /* the record-close timer and the edit toast */
 
 /* Input and drawing (ui.c dispatches to these when clip_editing()). */

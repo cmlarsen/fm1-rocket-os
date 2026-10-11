@@ -267,7 +267,14 @@ void live_bridge_init(void)
 void *live_bridge_song(void) { return &g_song; }
 /* T7a: the song's tempo is authoritative in both modes; X0X's sequencer follows it. */
 static void sync_seq_tempo(void) { seq.bpm = (float)g_song.bpm_x10 / 10.0f; }
-void live_bridge_song_reload(void) { clip_engine_init(&g_eng, &g_song); g_eng_ready = 1; sync_seq_tempo(); }
+void live_bridge_song_reload(void)
+{
+    uint32_t f = engine_crit_enter();                  /* T7b: re-init never tears a render */
+    clip_engine_init(&g_eng, &g_song);
+    engine_crit_exit(f);
+    g_eng_ready = 1;
+    sync_seq_tempo();
+}
 void live_bridge_sync_tempo(void) { sync_seq_tempo(); }
 uint32_t live_bridge_pats_hash(const pattern_t *pats)
 {
@@ -391,8 +398,20 @@ void live_bridge_transport_start(void) { clip_engine_start(&g_eng); }
 void live_bridge_transport_stop(void) { clip_engine_transport_stop(&g_eng); }
 int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 
-void live_bridge_launch(uint8_t clip) { g_stop_q[clip_role(clip) % NROLES] = 0; clip_engine_launch(&g_eng, clip); }
-void live_bridge_launch_now(uint8_t clip) { g_stop_q[clip_role(clip) % NROLES] = 0; clip_engine_launch_now(&g_eng, clip); }
+void live_bridge_launch(uint8_t clip)
+{
+    uint32_t f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch(&g_eng, clip);                  /* stages next[] under the mask */
+    engine_crit_exit(f);
+}
+void live_bridge_launch_now(uint8_t clip)
+{
+    uint32_t f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch_now(&g_eng, clip);
+    engine_crit_exit(f);
+}
 void live_bridge_stop(uint8_t role)
 {
     if (role >= NROLES)
@@ -432,8 +451,17 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
 
-void live_bridge_clip_reload(uint8_t clip) { clip_engine_reload(&g_eng, clip); }
+/* T7b: the main loop owns the snapshot. Every edit writes the clip into the engine's copies with
+ * the audio IRQs masked; a launch stages its copy the same way before the command is posted, so the
+ * audio ISR only ever reads play[]/next[], never song->clip[]. */
+void live_bridge_clip_changed(uint8_t clip)
+{
+    uint32_t f = engine_crit_enter();
+    clip_engine_clip_changed(&g_eng, clip);
+    engine_crit_exit(f);
+}
 uint32_t live_bridge_global_step(void) { return clip_engine_global_step(&g_eng); }
+uint8_t live_bridge_step_phase(void) { return clip_engine_step_phase(&g_eng); }
 uint8_t live_bridge_clip_step(uint8_t role) { return clip_engine_clip_step(&g_eng, role); }
 
 /* ----- queries ----- */

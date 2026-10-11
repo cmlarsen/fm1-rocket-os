@@ -89,7 +89,93 @@ updated. On the device the pool grows to **294,772 B of 344,064** (from 292,132)
   to build it. Playing hits in as a drum take is left for later.
 - **Motion params.** The motion page's four knobs are the LIVE performance params (FILTER, SPACE,
   ECHO, DRIVE); a clip has two lanes, the model's cap.
-- **Edits while playing** land at the reload (an explicit edit) or the loop; a clip launched after
-  the edit takes it at the launch.
+- **Edits while playing** reach the audio at the next `ui_frame`: the main loop writes the playing
+  copy (masked), so the change is heard almost immediately; a staged launch takes it at its boundary.
 - The one-time project → song seed still maps CHORDS from the BASS clips and generates the FX clips
   (T5i's interim content); T8's Starter song will replace it.
+
+## Follow-up: review fixes (reports/T7b-review.md)
+
+Opus's review asked for changes; items 1–4 are fixed, each with a failing-then-passing test. Item 5
+(the T10i merge) is the coordinator's.
+
+### 1. The main loop owns the clip snapshot
+
+The ISR used to copy `song->clip[]` into `play[]` at a launch and a loop, so a mid-write `clip_t`
+could be read. Now **the audio ISR never reads `song->clip[]`**:
+
+- `clip_engine_t` has `play[NROLES]` (the role's playing copy) and `next[NROLES]` /
+  `next_set`/`next_clip` (a launch target the main loop stages before posting the command).
+- Every edit calls `song_io`'s `synced()` → `live_bridge_clip_changed()` →
+  `clip_engine_clip_changed()`, which copies the song's clip into `play[]` (when it is the role's
+  playing clip) and `next[]` (when a launch of it is staged) **with the audio IRQs masked**
+  (`engine_crit_enter` → `plat_crit_enter`, X0X's own `irq_save`/`irq_restore`).
+- A launch stages the target's copy in the main loop (masked) before posting; the ISR swaps
+  `next → play` at the step boundary (`apply_role`). The loop point and `consume_cmds` no longer
+  copy from the song (the old `CLIP_CMD_RELOAD` is gone).
+- Tests: `clip_engine_test` keeps `edit_while_playing` and gains **`edit_every_step`** (toggle every
+  step of the playing clip in turn, each with its own snapshot).
+
+Consequence, recorded: with one staged copy per role, a *burst* of launches for one role collapses
+to the last (only the newest has a copy). `ring_many_launches` is re-seeded for that (63 → 50
+events). The UI posts one launch per key press, so this only shows under the synthetic burst.
+
+### 2. Recording
+
+- **Pre-roll keys audition only** (`clip_handle_key`): before `rec.start` a key sounds but does not
+  step-enter.
+- **Overdub follows the clip's own playhead** (`cl_rec_step` uses `live_bridge_clip_step`), not
+  `(global-start) % len`.
+- **No gap after close** (`cl_rec_commit`): the length is set and the clip is `launch_now`'d at the
+  boundary.
+- **Motion in a new-clip pass** uses `cl_rec_step()` (the pass step), not the note cursor.
+- **Real note lengths**: note-on to note-off, in steps, min 1; a note still held when the loop
+  closes ends at the loop end (`cl_rec_note_on`/`_off`, `cl_rec_commit`).
+- **Quantize rounds to the nearest 16th** (`cl_rec_quant`, `step_phase`); a note in the last
+  half-step wraps.
+- **Drum REC** (`cl_rec_drum`): on a DRUMS clip the white keys 1–11 trigger and record lanes 1–11,
+  HOME accents the hit. `screens.md` STUDIO 4 says so.
+- **Undo of REC on an empty slot removes the clip** (`song_io_clip_create_undoable`): the creation is
+  in the pass's undo entry, so undo leaves the slot empty and stops the role.
+- Tests: `studio_cliprec` (pre-roll, real length, no gap), `studio_clipoverdub` (playhead overdub),
+  `studio_clipmotion` (motion at the pass step), `studio_clipdrumrec` (finger drumming),
+  `studio_clipundorec` (used 0 + stopped), and `song_io_test`'s `test_clip_create_undo`.
+
+### 3. The notes roll
+
+`cl.base` is the roll's bottom row; the keys play `cl.base + (k-7)`, so the visible range follows the
+octave the keys play; `cl_base_for_clip` scrolls to the clip's note range on open; OCT± moves the
+window and the keys together. The page also draws the design's step strip, the note-length bars (a
+note's width is its length) and "bar N of M". `studio_clipnotes` shows all of it.
+
+### 4. Visuals
+
+- `studio_clipdrums_playing.png` shows the **drum grid with the playhead** (the scenario reopens the
+  grid while the clip plays), not the song home.
+- The drum grid is **14 px rows** (`cl_draw_drums`), 9 lanes visible with the grid scrolled to the
+  selected lane (11 lanes no longer fit 138 px at 14 px).
+- The motion page draws the design's **page tabs** ("1 NOTES / 2 MOTION / 3 SETTINGS").
+
+### Re-seeded goldens and why
+
+- `studio_clipdrums`, `studio_clipliveedit`, `studio_cliplong`, `studio_clipmotion`,
+  `studio_clipnotes`, `studio_clipoverdub`, `studio_cliprec`, `studio_clipundorec`: the recorder,
+  the notes roll and the 14 px drum grid changed the screens and the event streams.
+- `studio_clipdrumrec` (new): a goldens directory with the drum-REC proof.
+- `tests/golden/clip_engine/`: `edit_every_step` (new) and `edit_while_playing` / `ring_many_launches`
+  (the command renamed, the burst collapse).
+- The T7a scenarios (`studio_clear`, `studio_copy`, `studio_seltap`) keep their goldens: SEQ on an
+  empty slot still creates the clip outside the undo entry, so only REC-on-empty is undoable.
+
+### Device build (after the fixes)
+
+| | value |
+|---|---|
+| app image `x0x.bin` | **525,456 B** |
+| RAM `.data+.bss` | **96,068 B** of 98,304 |
+| POOL | **297,424 B** of 344,064 (`play[5]` + `next[5]` = 5,280 B) |
+| package `x0x.fwsc` | 609,680 B, identity FM-1_900 |
+
+`make unit-core scenarios screens-lint parity check fw` and `tools/check_loader.sh` all pass.
+
+

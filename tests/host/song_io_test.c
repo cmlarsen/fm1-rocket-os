@@ -131,6 +131,10 @@ uint32_t live_bridge_rebuild(const pattern_t *pats)
     return g_song_hash;
 }
 void live_bridge_song_baseline(uint32_t h) { g_baselines++; g_song_hash = h; }
+void live_bridge_clip_changed(uint8_t clip) { (void)clip; }         /* T7b: no engine in this test */
+uint8_t live_bridge_playing_clip(uint8_t role) { (void)role; return 0xFFu; }
+void live_bridge_stop(uint8_t role) { (void)role; }
+int live_bridge_stop_queued(int role) { (void)role; return 0; }
 
 static void reset_flash(void)
 {
@@ -290,6 +294,25 @@ static void test_clip_editor_ops(void)
     song_io_edit_end();
 }
 
+/* T7b: undo of REC on an empty slot removes the clip it created (the creation is in the session). */
+static void test_clip_create_undo(void)
+{
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    CHECK(song_io_clip_used(7) == 0);
+    song_io_edit_begin(7);
+    song_io_clip_create_undoable(7, 16, 0, 0);
+    CHECK(song_io_clip_used(7) == 1);
+    CHECK(song_io_note_add(7, 0, 60, 100, 1) == 0);     /* the pass continues in the same entry */
+    song_io_edit_end();
+    CHECK(song_io_undo_depth() == 1);
+    CHECK(song_io_undo() == 1);
+    CHECK(song_io_clip_used(7) == 0);                   /* the create is undone too */
+    CHECK(song_io_redo() == 1);
+    CHECK(song_io_clip_used(7) == 1 && song_io_note_count(7) == 1);
+}
+
 static void test_backend_refuses_out_of_region(void)
 {
     uint8_t b[8];
@@ -387,6 +410,7 @@ int main(void)
     test_project_change_kept();
     test_clip_edits();
     test_clip_editor_ops();
+    test_clip_create_undo();
     test_backend_refuses_out_of_region();
     test_power_cut_keeps_previous();
     test_failed_save_no_retry();

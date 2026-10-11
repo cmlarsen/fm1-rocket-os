@@ -186,6 +186,10 @@ uint32_t plat_irq_stack_used(void)
     return (uint32_t)((const char *)top - (const char *)p);
 }
 
+/* T7b: the clip engine's snapshot critical section, on X0X's own irq_save / irq_restore */
+uint32_t plat_crit_enter(void) { return irq_save(); }
+void plat_crit_exit(uint32_t state) { irq_restore(state); }
+
 uint32_t plat_cpu_peak_pct(void)
 {
     uint32_t p = audio_peak_pct;

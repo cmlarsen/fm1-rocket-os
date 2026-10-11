@@ -344,9 +344,7 @@ static int studio_handle_button(int b)
     case B_SEQ: {                                        /* STUDIO 2/3/4: create the clip, open the editor */
         int c = st_cursor_clip();
         if (c >= 0) {
-            if (!live_bridge_clip_used(c))
-                song_io_clip_create(c, 16, 0 /*Loop*/, 0 /*Bar*/);
-            clip_open(c);                                /* T7b: NOTES (or DRUM) */
+            clip_open(c);                                /* T7b: creates an empty slot (undoably) + NOTES */
             say("CLIP EDIT", 0);
         }
         return 1;
@@ -360,10 +358,7 @@ static int studio_handle_button(int b)
         {                                                /* T7b: record into the cursor clip */
             int c = st_cursor_clip();
             if (c >= 0) {
-                if (!live_bridge_clip_used(c))
-                    song_io_clip_create(c, 16, 0, 0);
-                clip_open(c);
-                clip_rec_button();
+                clip_record_open(c);                     /* creates an empty slot: one undo entry */
                 say("REC", 0);
             }
         }

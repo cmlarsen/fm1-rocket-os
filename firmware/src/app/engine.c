@@ -57,6 +57,10 @@ void engine_motion_reset(void) { mot_release_req = 1; }   /* lanes changed under
 static volatile uint8_t all_off_req;
 void engine_all_off(void) { all_off_req = 1; }
 
+/* T7b: the clip engine's snapshot critical section, on the platform's IRQ mask */
+uint32_t engine_crit_enter(void) { return plat_crit_enter(); }
+void engine_crit_exit(uint32_t state) { plat_crit_exit(state); }
+
 /* overload guard: past the CPU (a block over 92%, or 85% on average) the two 303s drop their
  * oversampling (~12% of the CPU: a little aliasing on bright notes), the 808's voices end at
  * -50 dB instead of -90 (~2%), T5i caps FM6 polyphony at 2 (releasing the oldest) and skips the NOISE

@@ -6,7 +6,7 @@ play
 launch 0 0
 run 30000
 hit 0 0 2
-reload 0
+changed 0
 runto 150000
 
 # events:

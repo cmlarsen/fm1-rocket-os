@@ -247,6 +247,8 @@ int plat_cycles_cpu(void) { return 0; }
 uint32_t plat_ticks24(void) { return (uint32_t)(host_ns() * 24u / 1000u); }
 uint32_t plat_irq_stack_used(void) { return 0; }
 uint32_t plat_irq_stack_size(void) { return 0; }
+uint32_t plat_crit_enter(void) { return 0; }     /* T7b: the host is single-threaded */
+void plat_crit_exit(uint32_t state) { (void)state; }
 uint32_t plat_cpu_peak_pct(void)
 {
     uint32_t p = cpu_peak;
@@ -806,10 +808,21 @@ static int expect(const char *what, const char *val)
         int c, l, s;
         sscanf(what, "drumget%d.%d.%d", &c, &l, &s);
         got = song_io_drum_get(c, l, s);
-    } else if (!strncmp(what, "drumacc", 7)) {     /* T7b: drumacc C.S */
+    } else if (!strncmp(what, "drumacc", 7) && what[7] != 's') {   /* T7b: drumacc C.S (not drumaccs) */
         int c, s;
         sscanf(what, "drumacc%d.%d", &c, &s);
         got = song_io_drum_accent(c, s);
+    } else if (!strncmp(what, "drumhits", 8)) {    /* T7b: set hits in a DRUMS clip */
+        int c = atoi(what + 8), lane, s, n = 0;
+        for (lane = 0; lane < (int)LIVE_DRUM_LANES; lane++)
+            for (s = 0; s < (int)LIVE_MAX_STEPS; s++)
+                n += song_io_drum_get(c, lane, s);
+        got = n;
+    } else if (!strncmp(what, "drumaccs", 8)) {    /* T7b: accented steps in a DRUMS clip */
+        int c = atoi(what + 8), s, n = 0;
+        for (s = 0; s < (int)LIVE_MAX_STEPS; s++)
+            n += song_io_drum_accent(c, s);
+        got = n;
     } else if (!strncmp(what, "notestep", 8)) {    /* T7b: notestep C.I */
         int c, i;
         sscanf(what, "notestep%d.%d", &c, &i);
@@ -834,6 +847,13 @@ static int expect(const char *what, const char *val)
         int c, l, s;
         sscanf(what, "mlval%d.%d.%d", &c, &l, &s);
         got = song_io_motion_get(c, l, s);
+    } else if (!strncmp(what, "mlany", 5)) {       /* T7b: mlany C.L: the lane has a value */
+        int c, l, s, n = 0;
+        sscanf(what, "mlany%d.%d", &c, &l);
+        for (s = 0; s < (int)LIVE_MAX_STEPS; s++)
+            if (song_io_motion_get(c, l, s) >= 0)
+                n = 1;
+        got = n;
     } else if (!strcmp(what, "recrec"))            /* T7b: a record pass is running */
         got = clip_rec_active();
     else if (!strcmp(what, "bassheld"))            /* T7a r2: 303 gates still held */

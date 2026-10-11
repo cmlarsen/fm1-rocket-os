@@ -27,6 +27,8 @@ void engine_note_on(int part, int note, int vel) { (void)part; (void)note; (void
 void engine_note_off(int part, int note) { (void)part; (void)note; }
 void engine_set(int t, int v, int i, int val) { (void)t; (void)v; (void)i; (void)val; }
 void engine_all_off(void) {}
+uint32_t engine_crit_enter(void) { return 0; }        /* T7b: the test has no ISR */
+void engine_crit_exit(uint32_t s) { (void)s; }
 
 static int fails;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); fails++; } } while (0)

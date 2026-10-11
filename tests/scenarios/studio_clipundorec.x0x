@@ -1,5 +1,5 @@
-# T7b: a record pass is one undo entry. After REC closes, HOME + REC undoes the whole pass (the
-# clip goes back to what it held before it), and the redo stack holds the recorded clip.
+# T7b: a record pass on an empty slot is one undo entry, and the creation is inside it: HOME + REC
+# leaves the slot empty again and stops the role.
 wait 300
 cursor 1 0
 tap REC
@@ -15,12 +15,15 @@ tap REC
 wait-bar 2
 expect clipnotes7 3
 expect cliplen7 16
+expect clipused7 1
 expect undodepth 1
-# HOME + REC undoes the pass
+# HOME + REC undoes the pass (and the clip the slot created)
 press HOME
 tap REC
 release HOME
 expect clipnotes7 0
+expect clipused7 0
+expect liveclip1 -1
 expect undopos 0
 wait 1400
 shot studio_clipundorec.png

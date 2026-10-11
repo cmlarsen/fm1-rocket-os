@@ -17,11 +17,13 @@ enum { CLI_NOTES = 1, CLI_DRUMS, CLI_MOTION };
 #define CL_COL_LANE 22                     /* the drum grid's lane-label column */
 #define CL_GRID_X 26
 #define CL_GRID_Y 2
-#define CL_DRUM_ROW 12
+#define CL_DRUM_ROW 14                     /* the design's drum-grid rows */
 #define CL_DRUM_STEP 13
 #define CL_NOTE_ROW 9
 #define CL_NOTE_X 24
 #define CL_NOTE_STEP 13
+#define CL_STEP_STRIP_Y 112                /* the notes roll's step strip */
+#define CL_BAR_Y 124                       /* "bar N of M" */
 #define CL_MOTION_CARD_H 42
 #define CL_TOAST_MS 1800u
 
@@ -32,24 +34,30 @@ typedef struct {
     int role;
     int step;                              /* the step cursor / the drum step the keys show */
     int lane;                              /* the drum grid's selected lane */
+    int lane_top;                          /* the drum grid's first visible lane (14 px rows) */
     int page;                              /* the visible 16-step page */
-    int oct;                               /* the keyboard octave */
+    int base;                              /* the notes roll's bottom visible note (12 rows) */
     char tag[8], msg[26];                  /* the edit toast (UNDO / MOTION ...) */
     uint32_t toast_until;
 } cl_ui_t;
 static cl_ui_t cl = {.clip = -1};
 
 /* ---- the recorder -------------------------------------------------------- */
-/* One pass at a time. Notes land in the clip as they are played (so the editor shows them), and
- * the length is set when the pass closes at a bar boundary. The pass is one undo entry. */
+/* One pass at a time. Notes land in the clip as they are played (so the editor shows them), and a
+ * note keeps its real length (note-on to note-off, in steps, min 1); a note still held at the close
+ * ends at the loop end. The length is set when the pass closes at a bar boundary and the clip is
+ * launched now, so the loop plays from the boundary. The pass is one undo entry. */
 static struct {
     int active, overdub;                   /* a pass is running; it adds to an existing clip */
-    int clip;
+    int clip, role;
     uint32_t start;                        /* the global step the pass begins on */
     int closing;                           /* REC pressed again: close at the next bar */
     uint32_t close;
     int n;                                 /* notes recorded this pass (for the toast) */
     uint16_t touched;                      /* the params this pass recorded (for the toast) */
+    uint8_t  note_on[NKEYS];               /* a recorded note is held for this key */
+    uint8_t  note_idx[NKEYS];              /* its index in the clip */
+    uint32_t note_g[NKEYS];                /* its quantized note-on global step */
 } rec;
 
 /* ================================================================ the mode === */
@@ -73,31 +81,72 @@ static void cl_toast(const char *tag, const char *msg)
     put_s(cl.msg, msg);
     cl.toast_until = plat_ms() + CL_TOAST_MS;
 }
-static void cl_reload(void)
+static void cl_sync(void)
 {
     if (cl.clip >= 0)
-        live_bridge_clip_reload((uint8_t)cl.clip);     /* T7b: re-take the playing copy */
+        live_bridge_clip_changed((uint8_t)cl.clip);    /* T7b: snapshot under the audio IRQ mask */
 }
 
-/* the keyboard note a key plays on the notes page */
+/* the keyboard note a key plays on the notes page: key 7 (the 8th key) is the roll's bottom row, so
+ * the visible range follows the octave the keys play (T7b review item 3). */
 static int cl_note_of(int k)
 {
-    int n = 53 + k + 12 * cl.oct;
+    int n = cl.base + (k - 7);
     return n < 0 ? 0 : n > 127 ? 127 : n;
 }
 
-/* the step the pass writes to now, quantized to the 16th (0..cap-1); -1 before it starts */
+/* the roll's 12 rows are cl.base .. cl.base+11; show the clip's notes on open by placing the
+ * lowest one a few rows up (and slide only when a note falls outside the window). */
+static void cl_base_for_clip(void)
+{
+    int i, n = song_io_note_count(cl.clip), lo = 128, hi = -1;
+    for (i = 0; i < n; i++) {
+        int note;
+        if (!song_io_note_get(cl.clip, i, 0, &note, 0, 0))
+            continue;
+        if (note < lo) lo = note;
+        if (note > hi) hi = note;
+    }
+    if (hi < 0) {                                       /* an empty clip: C2 at the bottom */
+        cl.base = 36;
+        return;
+    }
+    cl.base = lo - 3;
+    if (cl.base < 0)
+        cl.base = 0;
+    if (hi > cl.base + 11)                              /* the range does not fit: keep the low end */
+        cl.base = hi - 11;                              /* ... anchored to the top instead */
+    if (cl.base < 0)
+        cl.base = 0;
+    if (cl.base > 115)
+        cl.base = 115;
+}
+
+/* the nearest 16th at the playhead: a press in the last half of a step rounds up (and a note in
+ * the last half-step of the clip wraps to step 0 of the next pass). */
+static uint32_t cl_rec_quant(uint32_t g)
+{
+    return g + (live_bridge_step_phase() >= 128 ? 1u : 0u);
+}
+
+/* the step the pass writes to now (0..cap-1); -1 before the pass starts. An overdub follows the
+ * clip's own playhead; a new clip counts from the pass start. */
 static int cl_rec_step(void)
 {
     uint32_t g = live_bridge_global_step();
     int cap, s;
     if (!rec.active || g < rec.start)
         return -1;
-    s = (int)(g - rec.start);
+    if (rec.overdub && live_bridge_playing_clip((uint8_t)rec.role) == (uint8_t)rec.clip)
+        return (int)live_bridge_clip_step((uint8_t)rec.role);
+    s = (int)(cl_rec_quant(g) - rec.start);
     cap = rec.overdub ? cl_len() : (int)LIVE_MAX_STEPS;
     if (cap < 1)
         cap = 1;
-    return s % cap;
+    s %= cap;
+    if (s < 0)
+        s += cap;
+    return s;
 }
 static int cl_rec_playing(void) { return rec.active && live_bridge_global_step() >= rec.start; }
 
@@ -122,7 +171,29 @@ static void cl_session_end(void)
     ui.rec = 0;
 }
 
-void clip_open(int clip)
+void clip_open(int clip)                               /* SEQ: the create is not its own undo entry */
+{
+    int role = live_bridge_role_of(clip);
+    if (clip < 0 || role < 0)
+        return;
+    if (!live_bridge_clip_used(clip))
+        song_io_clip_create(clip, 16, 0 /*Loop*/, 0 /*Bar*/);
+    cl_session_end();
+    cl.clip = clip;
+    cl.role = role;
+    cl.step = 0;
+    cl.lane = 0;
+    cl.lane_top = 0;
+    cl.page = 0;
+    cl.toast_until = 0;
+    song_io_edit_begin(clip);                          /* the editor session's one undo entry */
+    cl_base_for_clip();
+    set_view(V_CLIPEDIT);
+}
+
+/* REC on the song home: open the editor and arm a pass. A fresh slot's creation shares the pass's
+ * undo entry, so undoing the pass leaves the slot empty and stops it. */
+void clip_record_open(int clip)
 {
     int role = live_bridge_role_of(clip);
     if (clip < 0 || role < 0)
@@ -132,11 +203,15 @@ void clip_open(int clip)
     cl.role = role;
     cl.step = 0;
     cl.lane = 0;
+    cl.lane_top = 0;
     cl.page = 0;
-    cl.oct = 0;
     cl.toast_until = 0;
-    song_io_edit_begin(clip);                          /* the editor session's one undo entry */
+    song_io_edit_begin(clip);
+    if (!live_bridge_clip_used(clip))
+        song_io_clip_create_undoable(clip, 16, 0 /*Loop*/, 0 /*Bar*/);
+    cl_base_for_clip();
     set_view(V_CLIPEDIT);
+    clip_rec_arm(1);                                   /* the pass shares the session's entry */
 }
 
 /* SEQ's cycle: EDIT -> MOTION -> SETTINGS -> (the song home) */
@@ -235,7 +310,7 @@ void clip_edit_set(int which, int v)
         break;
     default: break;
     }
-    cl_reload();
+    cl_sync();
 }
 
 /* ============================================================ recording === */
@@ -243,7 +318,42 @@ void clip_edit_set(int which, int v)
 /* the bar boundary at or after step g (a pass starts / closes on it) */
 static uint32_t cl_next_bar(uint32_t g) { return ((g / LIVE_STEPS_PER_BAR) + 1u) * LIVE_STEPS_PER_BAR; }
 
-void clip_rec_button(void)
+static void cl_rec_clear_keys(void)
+{
+    int k;
+    for (k = 0; k < NKEYS; k++)
+        rec.note_on[k] = 0;
+}
+
+/* arm a pass. `keep_session` keeps the open editor session (a fresh slot's create is its entry). */
+void clip_rec_arm(int keep_session)
+{
+    int clip = cl.clip;
+    if (clip < 0)
+        return;
+    if (!keep_session) {
+        song_io_edit_end();                            /* the pass is its own undo entry */
+        song_io_edit_begin(clip);
+    }
+    if (!live_bridge_transport_playing()) {
+        live_bridge_transport_start();
+        rec.start = 0;                                 /* the transport starts on bar 1 */
+    } else {
+        rec.start = cl_next_bar(live_bridge_global_step());
+    }
+    rec.active = 1;
+    rec.role = cl.role;
+    rec.overdub = song_io_clip_is_drum(clip) ? 0 : (song_io_note_count(clip) > 0);
+    rec.clip = clip;
+    rec.closing = 0;
+    rec.n = 0;
+    rec.touched = 0;
+    cl_rec_clear_keys();
+    ui.rec = 1;
+    say("REC", 0);
+}
+
+void clip_rec_button(void)                             /* REC in the editor: arm, or close */
 {
     if (rec.active) {
         if (!rec.closing) {
@@ -253,50 +363,69 @@ void clip_rec_button(void)
         }
         return;
     }
-    {   /* arm a pass on the current clip */
-        int clip = cl.clip;
-        if (clip < 0)
-            return;
-        cl_session_end();
-        if (!live_bridge_transport_playing()) {
-            live_bridge_transport_start();
-            rec.start = 0;                             /* the transport starts on bar 1 */
-        } else {
-            rec.start = cl_next_bar(live_bridge_global_step());
-        }
-        rec.active = 1;
-        rec.overdub = song_io_clip_is_drum(clip) ? 0 : (song_io_note_count(clip) > 0);
-        rec.clip = clip;
-        rec.closing = 0;
-        rec.n = 0;
-        rec.touched = 0;
-        ui.rec = 1;
-        song_io_edit_begin(clip);                      /* the pass is its own undo entry */
-        say("REC", 0);
-    }
+    clip_rec_arm(0);
 }
 
-/* a note played while a pass runs: quantized to the step under the playhead */
-static void cl_rec_note(int note, int vel)
+/* a note played while a pass runs: recorded at the quantized step with a min length, holding its
+ * note-on step until the release sets the real length. */
+static void cl_rec_note_on(int k, int note, int vel)
+{
+    int step = cl_rec_step();
+    int idx;
+    if (step < 0)
+        return;
+    idx = song_io_note_add(rec.clip, step, note, vel, 1);
+    if (idx >= 0) {
+        rec.n++;
+        rec.note_on[k] = 1;
+        rec.note_idx[k] = (uint8_t)idx;
+        rec.note_g[k] = cl_rec_quant(live_bridge_global_step());
+    }
+    cl_sync();
+}
+/* the release: the note keeps its length (note-on to note-off, in steps, min 1) */
+static void cl_rec_note_off(int k)
+{
+    int idx, step, len;
+    uint32_t off;
+    if (!rec.note_on[k])
+        return;
+    rec.note_on[k] = 0;
+    idx = rec.note_idx[k];
+    if (!song_io_note_get(rec.clip, idx, &step, 0, 0, 0))
+        return;
+    off = cl_rec_quant(live_bridge_global_step());
+    len = (int)(off - rec.note_g[k]);
+    if (len < 1)
+        len = 1;
+    if (rec.overdub && step + len > cl_len())
+        len = cl_len() - step;                         /* an overdub note ends at the loop */
+    if (len < 1)
+        len = 1;
+    song_io_note_set(rec.clip, idx, -1, -1, -1, len);
+    cl_sync();
+}
+
+/* a drum hit played during a pass: recorded at the quantized step, accented with HOME */
+static void cl_rec_drum(int k, int lane, int acc)
 {
     int step = cl_rec_step();
     if (step < 0)
         return;
-    if (song_io_note_add(rec.clip, step, note, vel, 1) >= 0)
-        rec.n++;
-    cl_reload();
+    note_key_down(k, (uint8_t)LIVE_DRUMS, (uint8_t)lane);
+    song_io_drum_set(rec.clip, lane, step, 1);
+    if (acc)
+        song_io_drum_set_accent(rec.clip, step, 1);
+    rec.n++;
+    cl_sync();
 }
 
 static void cl_rec_commit(void)
 {
-    int bars, len, step_1 = 0;
+    int bars, len, i;
     uint32_t recorded;
     if (!rec.active)
         return;
-    if (rec.closing)
-        step_1 = 1;
-    else
-        step_1 = 0;
     recorded = live_bridge_global_step() > rec.start ? live_bridge_global_step() - rec.start : 0;
     bars = (int)((recorded + LIVE_STEPS_PER_BAR - 1u) / LIVE_STEPS_PER_BAR);
     if (bars < 1)
@@ -310,11 +439,23 @@ static void cl_rec_commit(void)
     len = bars * (int)LIVE_STEPS_PER_BAR;
     if (!rec.overdub && !song_io_clip_is_drum(rec.clip))
         song_io_clip_set_len(rec.clip, len);           /* a melodic take sets its bar count */
+    for (i = 0; i < NKEYS; i++) {                      /* a held note ends at the loop end */
+        int step;
+        if (!rec.note_on[i])
+            continue;
+        if (song_io_note_get(rec.clip, rec.note_idx[i], &step, 0, 0, 0)) {
+            int l = cl_len() - step;
+            if (l < 1)
+                l = 1;
+            song_io_note_set(rec.clip, rec.note_idx[i], -1, -1, -1, l);
+        }
+        rec.note_on[i] = 0;
+    }
     song_io_edit_end();
-    cl_reload();
+    cl_sync();
     if (rec.n > 0)
-        cl_toast(step_1 ? "REC" : "REC", step_1 ? "closed" : "recorded");
-    live_bridge_launch((uint8_t)rec.clip);             /* the loop starts looping */
+        cl_toast("REC", "recorded");
+    live_bridge_launch_now((uint8_t)rec.clip);         /* no gap: the loop starts at the boundary */
     rec.active = 0;
     rec.closing = 0;
     ui.rec = 0;
@@ -349,12 +490,27 @@ void clip_handle_key(int k, int down)
 {
     int w = KEY_WHITE[k], bl = KEY_BLACK[k];
     if (!down) {
-        /* the release is done by ui.c's shared table */
-        return;
+        if (rec.active)
+            cl_rec_note_off(k);                        /* the release ends the recorded note */
+        return;                                        /* the sounding note is released by ui.c */
     }
     if (ui.view == V_CLIPMOTION)
         return;                                        /* the keys are inert on the motion page */
     if (clip_is_drum()) {
+        if (rec.active && cl_rec_playing()) {          /* REC: white keys 1-11 finger-drum lanes */
+            if (w >= 0 && w < (int)LIVE_DRUM_LANES) {
+                int acc = (ui.btn & (1u << B_HOME)) != 0;
+                if (acc)
+                    ui.btn_used |= 1u << B_HOME;
+                cl_rec_drum(k, w, acc);
+            }
+            return;
+        }
+        if (rec.active) {                              /* pre-roll: audition only, no step entry */
+            if (w >= 0 && w < (int)LIVE_DRUM_LANES)
+                note_key_down(k, (uint8_t)LIVE_DRUMS, (uint8_t)w);
+            return;
+        }
         if (bl >= 0) {                                 /* a black key picks the lane */
             cl.lane = bl < (int)LIVE_DRUM_LANES ? bl : (int)LIVE_DRUM_LANES - 1;
             return;
@@ -369,27 +525,28 @@ void clip_handle_key(int k, int down)
             } else {
                 song_io_drum_set(cl.clip, cl.lane, step, !song_io_drum_get(cl.clip, cl.lane, step));
             }
-            cl_reload();
+            cl_sync();
             cl.step = step;
         }
         return;
     }
-    {   /* the notes page: the keys enter notes at the cursor */
+    {   /* the notes page: the keys enter notes at the cursor, or record them at the playhead */
         int note = cl_note_of(k);
         if (ui.btn & (1u << B_HOME)) {                  /* HOME + a key removes that note */
             ui.btn_used |= 1u << B_HOME;
             if (song_io_note_remove(cl.clip, cl.step, note))
-                cl_reload();
+                cl_sync();
             return;
         }
-        if (rec.active && cl_rec_playing()) {           /* recording: write it at the playhead */
-            note_key_down(k, (uint8_t)cl.role, (uint8_t)note);
-            cl_rec_note(note, 100);
-        } else {
-            note_key_down(k, (uint8_t)cl.role, (uint8_t)note);
-            song_io_note_add(cl.clip, cl.step, note, 100, 1);
-            cl_reload();
+        if (rec.active) {
+            note_key_down(k, (uint8_t)cl.role, (uint8_t)note);   /* audition */
+            if (cl_rec_playing())                                /* record (with a real length) */
+                cl_rec_note_on(k, note, 100);
+            return;                                              /* pre-roll: audition only */
         }
+        note_key_down(k, (uint8_t)cl.role, (uint8_t)note);
+        song_io_note_add(cl.clip, cl.step, note, 100, 1);
+        cl_sync();
     }
 }
 
@@ -424,9 +581,12 @@ int clip_handle_button(int b)
             if (p > pages - 1)
                 p = pages - 1;
             cl.page = p;
-        } else if (!clip_is_drum()) {
-            int o = cl.oct + (up ? 1 : -1);
-            cl.oct = o < -3 ? -3 : o > 4 ? 4 : o;
+        } else {
+            cl.base += up ? 12 : -12;                  /* the roll and the keys move an octave */
+            if (cl.base < 0)
+                cl.base = 0;
+            if (cl.base > 115)
+                cl.base = 115;
         }
         return 1;
     }
@@ -496,24 +656,25 @@ void clip_motion_knob(int i, int e)
         } else {
             cl_toast("MOTION", "nothing");
         }
-        cl_reload();
+        cl_sync();
         ui.touched = (int8_t)i;
         ui.touch_until = plat_ms() + 900u;
         return;
     }
     turn_ref(r, e, EN_K1 + i);                          /* change the live value first */
     val = proj.sound.v[(param >> 12) & 15][(param >> 8) & 15][param & 0xFF];
-    if (rec.active || ui.rec) {                         /* write motion at the current step */
-        int ph = cl_playhead();
-        lane = song_io_motion_lane(cl.clip, param, 1);
-        if (lane < 0) {
-            cl_toast("MOTION", "2 lanes max");
-        } else {
-            step = ph >= 0 ? ph : cl.step;
-            song_io_motion_set(cl.clip, lane, step, val);
-            rec.touched |= (uint16_t)(1u << lane);
+    if (rec.active) {                                   /* a pass is recording: write motion */
+        step = cl_rec_step();                           /* the pass's step (an overdub: the playhead) */
+        if (step >= 0) {
+            lane = song_io_motion_lane(cl.clip, param, 1);
+            if (lane < 0) {
+                cl_toast("MOTION", "2 lanes max");
+            } else {
+                song_io_motion_set(cl.clip, lane, step, val);
+                rec.touched |= (uint16_t)(1u << lane);
+            }
+            cl_sync();
         }
-        cl_reload();
     }
     ui.touched = (int8_t)i;
     ui.touch_until = plat_ms() + 900u;
@@ -537,19 +698,21 @@ static void cl_draw_toast(int band)
     }
 }
 
-/* the notes page: a 12-row piano roll with a step cursor and a playhead */
+/* the notes page: a 12-row piano roll with a step cursor, a playhead, the design's step strip and
+ * "bar N of M"; the rows are the octave the keys play. */
 static void cl_draw_notes(int band)
 {
     int off = band * BAND_H;
-    int base = 60 + 12 * cl.oct, r, s;
+    int base = cl.base, r, s;
     int ph = cl_playhead();
     int n = song_io_note_count(cl.clip);
+    int pages = (cl_len() + 15) / 16;
     for (s = 0; s < 16; s++) {                          /* the beat grid */
         int x = CL_NOTE_X + s * CL_NOTE_STEP;
         if (s % 4 == 0)
             cv_line(x - 1, -off, x - 1, 2 * BAND_H - off, TOK_RAISE);
     }
-    for (r = 0; r < 12; r++) {                          /* the rows */
+    for (r = 0; r < 12; r++) {                          /* the rows: C and G labelled */
         int y = CL_GRID_Y + r * CL_NOTE_ROW;
         int note = base + 11 - r;
         if (!(note % 12 == 0 || note % 12 == 5))
@@ -571,7 +734,7 @@ static void cl_draw_notes(int band)
     }
     {
         int i;
-        for (i = 0; i < n; i++) {                       /* the notes */
+        for (i = 0; i < n; i++) {                       /* the notes (the bar is their length) */
             int st, note, len;
             int x, y, w, rr;
             if (!song_io_note_get(cl.clip, i, &st, &note, 0, &len))
@@ -592,41 +755,66 @@ static void cl_draw_notes(int band)
                 rbox(x, y - off, w, CL_NOTE_ROW - 1, 2, cl_role_col());
         }
     }
+    if (band == 1) {                                    /* the step strip + "bar N of M" */
+        int y = CL_STEP_STRIP_Y - off;
+        for (s = 0; s < 16; s++) {
+            int step = cl.page * 16 + s, x = CL_NOTE_X + s * CL_NOTE_STEP;
+            int on = 0, i;
+            for (i = 0; i < n; i++) {
+                int st;
+                if (song_io_note_get(cl.clip, i, &st, 0, 0, 0) && st == step) { on = 1; break; }
+            }
+            rbox(x, y, CL_NOTE_STEP - 3, 5, 1, on ? cl_role_col() : (step % 4 == 0 ? TOK_MID : TOK_RAISE));
+        }
+        {
+            char t[16], *q = put_s(t, "bar ");
+            q = put_i(q, cl.page + 1);
+            q = put_s(q, " of ");
+            put_i(q, pages < 1 ? 1 : pages);
+            cv_text(2, vc(&AF_S, CL_BAR_Y - off, 12), &AF_S, t, TOK_MID);
+        }
+    }
 }
 
-/* the drum grid: 11 lanes x the visible 16 steps */
+/* the drum grid: 11 lanes of 14 px, 9 visible, scrolled to keep the selected lane in view */
 static void cl_draw_drums(int band)
 {
     int off = band * BAND_H;
-    int lane, s;
+    int visible = (2 * BAND_H - CL_GRID_Y) / CL_DRUM_ROW;   /* 9 rows fit */
+    int top, lane, s;
     int ph = cl_playhead();
-    for (lane = 0; lane < (int)LIVE_DRUM_LANES; lane++) {
-        int y = CL_GRID_Y + lane * CL_DRUM_ROW;
-        if (!cl_vis(y, CL_DRUM_ROW, band))
-            continue;
+    if (visible < 1)
+        visible = 1;
+    top = cl.lane - visible / 2;
+    if (top > (int)LIVE_DRUM_LANES - visible)
+        top = (int)LIVE_DRUM_LANES - visible;
+    if (top < 0)
+        top = 0;
+    cl.lane_top = top;
+    for (lane = top; lane < (int)LIVE_DRUM_LANES && lane < top + visible; lane++) {
+        int y = CL_GRID_Y + (lane - top) * CL_DRUM_ROW;
+        int y0 = y + 1 - off;
+        int h = CL_DRUM_ROW - 3;
         if (lane == cl.lane)
-            box(0, y - off, 240, CL_DRUM_ROW - 1, TOK_SURF);
-        cv_text(2, vc(&AF_S, y - off, CL_DRUM_ROW - 1), &AF_S,
+            box(0, y - off, 240, CL_DRUM_ROW, TOK_SURF);
+        cv_text(2, vc(&AF_S, y - off, CL_DRUM_ROW), &AF_S,
                 engine_voice_name(T_909, lane), lane == cl.lane ? CL_COL[0] : TOK_MID);
         for (s = 0; s < 16; s++) {
             int step = cl.page * 16 + s, x = CL_GRID_X + s * CL_DRUM_STEP;
-            int on, acc, y0, w, h;
+            int on, acc;
             uint16_t bg;
             if (step >= cl_len())
                 continue;
             on = song_io_drum_get(cl.clip, lane, step);
             acc = song_io_drum_accent(cl.clip, step);
-            y0 = y + 1 - off;
-            w = 10;
-            h = CL_DRUM_ROW - 3;
             bg = on ? CL_COL[0] : (s % 4 == 0 ? TOK_LINE : TOK_RAISE);
-            rbox(x, y0, w, h, 2, bg);
+            rbox(x, y0, 10, h, 2, bg);
             if (on && acc)
-                rframe(x - 1, y0 - 1, w + 2, h + 2, 1, TOK_ACCENT);
+                rframe(x - 1, y0 - 1, 12, h + 2, 1, TOK_ACCENT);
             if (step == cl.step)
-                rframe(x - 1, y0 - 1, w + 2, h + 2, 1, TOK_ACCENT);
+                rframe(x - 1, y0 - 1, 12, h + 2, 1, TOK_ACCENT);
             if (step == ph)
-                box(x, y0, w, h, TOK_ACCENT);
+                box(x, y0, 10, h, TOK_ACCENT);
         }
     }
 }
@@ -655,11 +843,17 @@ static void cl_draw_motion(int band)
 {
     int off = band * BAND_H;
     int i;
-    if (cl_vis(2, 14, band))
-        cv_text(6, vc(&AF_S, 2 - off, 14), &AF_S, "MOTION", TOK_MID);
+    if (band == 0) {                                    /* the design's page tabs */
+        static const char *const TAB[3] = {"1 NOTES", "2 MOTION", "3 SETTINGS"};
+        for (i = 0; i < 3; i++) {
+            int x = 4 + i * 78, w = 74;
+            box(x, 14, w, 18, i == 1 ? TOK_THEME : TOK_SURF);
+            text_c(x + w / 2, vc(&AF_S, 14, 18), &AF_S, TAB[i], i == 1 ? TOK_INK : TOK_MID);
+        }
+    }
     for (i = 0; i < 2; i++) {
         int param = song_io_motion_param(cl.clip, i);
-        int y = 20 + i * 52;
+        int y = 36 + i * 50;
         if (!cl_vis(y, 48, band))
             continue;
         box(4, y - off, 232, 48, param >= 0 ? TOK_RAISE : TOK_SURF);
@@ -780,7 +974,7 @@ void clip_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
             if (!song_io_note_get(cl.clip, i, &st, &note, 0, 0))
                 continue;
             if (st == cl.step) {
-                int kk = note - 53 - 12 * cl.oct;
+                int kk = note - cl.base + 7;           /* cl_note_of()'s inverse */
                 if (kk >= 0 && kk < NKEYS)
                     *dim |= 1u << kk;
             }

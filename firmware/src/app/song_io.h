@@ -47,6 +47,7 @@ int  song_io_clip_nnotes(int clip);
 int  song_io_clip_motion(int clip);       /* the used motion lanes */
 int  song_io_clip_role(int clip);
 void song_io_clip_create(int clip, int len, int mode, int quant);
+void song_io_clip_create_undoable(int clip, int len, int mode, int quant);   /* T7b: + undo entry */
 void song_io_clip_clear(int clip);
 void song_io_clip_copy(int dst, int src);
 void song_io_clip_set_len(int clip, int len);

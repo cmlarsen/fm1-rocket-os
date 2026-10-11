@@ -318,10 +318,28 @@ static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, 
     return 0;
 }
 
+/* T7b: stage a launch target's copy in the main loop, so the ISR only ever swaps play[]/next[].
+ * A clip that does not validate stages nothing (the ISR then ignores the launch). */
+static void stage_clip(clip_engine_t *e, uint8_t clip)
+{
+    uint8_t role;
+    if (clip >= NCLIPS || !e->song)
+        return;
+    role = clip_role(clip);
+    if (!clip_valid(e, clip)) {
+        e->next_set[role] = 0;
+        return;
+    }
+    e->next[role] = e->song->clip[clip];
+    e->next_clip[role] = clip;
+    e->next_set[role] = 1;
+}
+
 void clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant)
 {
     if (clip >= NCLIPS)
         return;
+    stage_clip(e, clip);
     push_cmd(e, CLIP_CMD_LAUNCH, clip, (uint8_t)(quant & 3u), 0);
 }
 
@@ -329,6 +347,7 @@ void clip_engine_launch(clip_engine_t *e, uint8_t clip)
 {
     if (clip >= NCLIPS || !e->song)
         return;
+    stage_clip(e, clip);
     push_cmd(e, CLIP_CMD_LAUNCH, clip, (uint8_t)(e->song->clip[clip].quant & 3u), 0);
 }
 
@@ -336,6 +355,7 @@ void clip_engine_launch_now(clip_engine_t *e, uint8_t clip)
 {
     if (clip >= NCLIPS)
         return;
+    stage_clip(e, clip);
     push_cmd(e, CLIP_CMD_LAUNCH_NOW, clip, 0, 0);
 }
 
@@ -351,11 +371,16 @@ void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10)
     push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10);
 }
 
-void clip_engine_reload(clip_engine_t *e, uint8_t clip)
+void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
 {
-    if (clip >= NCLIPS)
+    uint8_t role;
+    if (clip >= NCLIPS || !e->song)
         return;
-    push_cmd(e, CLIP_CMD_RELOAD, clip, 0, 0);
+    role = clip_role(clip);
+    if (e->cur[role] == clip)                   /* the role is playing it: refresh the copy */
+        e->play[role] = e->song->clip[clip];
+    if (e->next_set[role] && e->next_clip[role] == clip)   /* a launch is staged: refresh that too */
+        e->next[role] = e->song->clip[clip];
 }
 
 /* ---- the render loop ----------------------------------------------------- */
@@ -367,15 +392,19 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
     e->que_set[role] = 0;
     release_role(e, role, off, sink);
     if (target == CLIP_NONE) {
+        e->next_set[role] = 0;                    /* T7b: drop any staged target */
         if (e->cur[role] != CLIP_NONE) {
             ev(sink, off, CLIPEV_CLIP_STOPPED, role, 0, 0, e->cur[role]);
             e->cur[role] = CLIP_NONE;
         }
         e->pos[role] = 0;
     } else {
+        if (e->next_set[role] && e->next_clip[role] == target) {   /* T7b: next -> play swap */
+            e->play[role] = e->next[role];
+            e->next_set[role] = 0;
+        }
         e->cur[role] = target;
         e->pos[role] = 0;
-        e->play[role] = e->song->clip[target];    /* T7b: the ISR reads this private copy */
         ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
     }
 }
@@ -400,8 +429,9 @@ static void advance_role(clip_engine_t *e, uint8_t role, uint32_t off, uint32_t 
             e->pos[role] = 0;
             return;
         }
-        /* loop: clamp notes still sounding to the loop point, then restart at step 0. T7b: the
-         * loop point is also where an edit to the playing clip lands (a fresh copy). */
+        /* loop: clamp notes still sounding to the loop point, then restart at step 0. T7b: an edit
+         * to the playing clip was already copied into play[] by the main loop, so the loop uses it
+         * as it stands (no song read in the ISR). */
         {
             uint32_t i;
             for (i = 0; i < CLIP_ENGINE_MAX_VOICES; i++)
@@ -409,7 +439,6 @@ static void advance_role(clip_engine_t *e, uint8_t role, uint32_t off, uint32_t 
                     (int32_t)(e->note[i].end - abs) > 0)
                     e->note[i].end = abs;
         }
-        e->play[role] = e->song->clip[clip];
         next = 0;
     }
     e->pos[role] = (uint8_t)next;
@@ -433,12 +462,6 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             set_bpm(e, c.bpm_x10);
             continue;
         }
-        if (c.cmd == CLIP_CMD_RELOAD) {        /* T7b: an edit landed; re-take the playing copy */
-            uint8_t r = clip_role(c.clip);
-            if (e->cur[r] == c.clip)
-                e->play[r] = e->song->clip[c.clip];
-            continue;
-        }
         if (c.cmd == CLIP_CMD_STOP) {
             role = c.clip;
             if (role >= NROLES)
@@ -458,14 +481,18 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             ev(sink, 0, CLIPEV_CLIP_QUEUED, role, 0, 0, CLIP_NONE);
             continue;
         }
-        /* CLIP_CMD_LAUNCH / CLIP_CMD_LAUNCH_NOW */
+        /* CLIP_CMD_LAUNCH / CLIP_CMD_LAUNCH_NOW: the main loop staged the target's copy in next[]
+         * before posting, so the ISR validates against that and never reads song->clip[] here. */
         target = c.clip;
-        if (!clip_valid(e, target))
+        if (target >= NCLIPS)
             continue;
         role = clip_role(target);
+        if (!e->next_set[role] || e->next_clip[role] != target)
+            continue;                         /* not staged (invalid or empty): ignore */
         if (c.cmd == CLIP_CMD_LAUNCH && e->que_set[role] && e->que[role] == target) {
             e->que_set[role] = 0;             /* relaunching the queued clip cancels */
             e->que[role] = CLIP_NONE;
+            e->next_set[role] = 0;            /* drop the staged target too */
             ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, target);
             continue;
         }
@@ -615,6 +642,18 @@ void clip_engine_pos(const clip_engine_t *e, uint8_t *bar, uint8_t *beat, uint8_
 }
 
 uint32_t clip_engine_global_step(const clip_engine_t *e) { return e->global_step; }
+
+uint8_t clip_engine_step_phase(const clip_engine_t *e)
+{
+    uint32_t into;
+    if (!e->playing || !e->step_L)
+        return 0;
+    into = e->elapsed - e->step_sample;          /* samples into the current step */
+    if (into >= e->step_L)
+        return 255;
+    into = (into * 256u) / e->step_L;
+    return into > 255u ? 255u : (uint8_t)into;
+}
 
 uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role)
 {

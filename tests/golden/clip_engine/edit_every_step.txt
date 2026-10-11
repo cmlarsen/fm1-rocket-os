@@ -1,0 +1,128 @@
+# case edit_every_step
+# script:
+clip 0 drum 16
+play
+launch 0 0
+run 2000
+hit 0 0 0
+changed 0
+run 3000
+hit 0 0 1
+changed 0
+run 3000
+hit 0 0 2
+changed 0
+run 3000
+hit 0 0 3
+changed 0
+run 3000
+hit 0 0 4
+changed 0
+run 3000
+hit 0 0 5
+changed 0
+run 3000
+hit 0 0 6
+changed 0
+run 3000
+hit 0 0 7
+changed 0
+run 3000
+hit 0 0 8
+changed 0
+run 3000
+hit 0 0 9
+changed 0
+run 3000
+hit 0 0 10
+changed 0
+run 3000
+hit 0 0 11
+changed 0
+run 3000
+hit 0 0 12
+changed 0
+run 3000
+hit 0 0 13
+changed 0
+run 3000
+hit 0 0 14
+changed 0
+run 3000
+hit 0 0 15
+changed 0
+run 3000
+runto 400000
+
+# events:
+0 clip_queued drums 0 0 0
+0 playing bass 0 0 0
+0 clip_started drums 0 0 0
+6000 drum drums 0 0 0
+12000 drum drums 0 0 0
+18000 drum drums 0 0 0
+24000 drum drums 0 0 0
+30000 drum drums 0 0 0
+36000 drum drums 0 0 0
+42000 drum drums 0 0 0
+48000 drum drums 0 0 0
+54000 drum drums 0 0 0
+60000 drum drums 0 0 0
+66000 drum drums 0 0 0
+72000 drum drums 0 0 0
+78000 drum drums 0 0 0
+84000 drum drums 0 0 0
+90000 drum drums 0 0 0
+96000 drum drums 0 0 0
+102000 drum drums 0 0 0
+108000 drum drums 0 0 0
+114000 drum drums 0 0 0
+120000 drum drums 0 0 0
+126000 drum drums 0 0 0
+132000 drum drums 0 0 0
+138000 drum drums 0 0 0
+144000 drum drums 0 0 0
+150000 drum drums 0 0 0
+156000 drum drums 0 0 0
+162000 drum drums 0 0 0
+168000 drum drums 0 0 0
+174000 drum drums 0 0 0
+180000 drum drums 0 0 0
+186000 drum drums 0 0 0
+192000 drum drums 0 0 0
+198000 drum drums 0 0 0
+204000 drum drums 0 0 0
+210000 drum drums 0 0 0
+216000 drum drums 0 0 0
+222000 drum drums 0 0 0
+228000 drum drums 0 0 0
+234000 drum drums 0 0 0
+240000 drum drums 0 0 0
+246000 drum drums 0 0 0
+252000 drum drums 0 0 0
+258000 drum drums 0 0 0
+264000 drum drums 0 0 0
+270000 drum drums 0 0 0
+276000 drum drums 0 0 0
+282000 drum drums 0 0 0
+288000 drum drums 0 0 0
+294000 drum drums 0 0 0
+300000 drum drums 0 0 0
+306000 drum drums 0 0 0
+312000 drum drums 0 0 0
+318000 drum drums 0 0 0
+324000 drum drums 0 0 0
+330000 drum drums 0 0 0
+336000 drum drums 0 0 0
+342000 drum drums 0 0 0
+348000 drum drums 0 0 0
+354000 drum drums 0 0 0
+360000 drum drums 0 0 0
+366000 drum drums 0 0 0
+372000 drum drums 0 0 0
+378000 drum drums 0 0 0
+384000 drum drums 0 0 0
+390000 drum drums 0 0 0
+396000 drum drums 0 0 0
+
+# events=69

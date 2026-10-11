@@ -108,9 +108,11 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
 void live_bridge_set_bpm(uint16_t bpm_x10);
 uint16_t live_bridge_bpm_x10(void);
 
-/* T7b: re-take the playing copy of an edited clip, and the transport's 16th index. */
-void live_bridge_clip_reload(uint8_t clip);
+/* T7b: after an edit to a clip, write it into the engine's playing copy (and a staged launch
+ * copy) with the audio IRQs masked; and the transport position for recording. */
+void live_bridge_clip_changed(uint8_t clip);
 uint32_t live_bridge_global_step(void);
+uint8_t live_bridge_step_phase(void);          /* 0..255 into the current 16th */
 uint8_t live_bridge_clip_step(uint8_t role);   /* the step inside a role's playing clip */
 
 /* UI queries. */
