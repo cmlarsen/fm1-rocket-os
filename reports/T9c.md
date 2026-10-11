@@ -2,10 +2,11 @@
 
 Core lane for T9 ([build-plan.md](../docs/engineering/build-plan.md#lanes-v3-2026-10-11)). New files
 only; T9i wires it into X0X's engine tap, the LIVE view and storage later. `core/model/model.h` is
-frozen and unchanged. Nothing was flashed.
+frozen and unchanged. Nothing was flashed. This revision applies the fixes in
+[T9c-review.md](T9c-review.md).
 
 - Files: `core/seq/take.h`, `core/seq/take.c`, `tests/host/take_test.c`,
-  `tests/golden/take/*.txt` (7 files), `Makefile` (`unit-take`), this report.
+  `tests/golden/take/*.txt` (9 files), `Makefile` (`unit-take`), this report.
 - `make unit-take` builds the test with `-Werror` and runs it, then rebuilds it under
   `-fsanitize=address,undefined` and runs it again. Both pass on the Mac.
 - A take is a `take_hdr_t` plus up to `TAKE_MAX_EVENTS` (2,048) `take_event_t {sample, cmd}`,
@@ -42,12 +43,12 @@ void take_set_bpm(take_t *t, uint16_t bpm_x10);
 /* recorder */
 void take_arm(take_t *t, uint32_t now);                        /* start at the next bar boundary */
 void take_feed(take_t *t, uint32_t sample, uint32_t cmd);      /* ISR: one drained command */
-void take_stop(take_t *t, uint32_t now);                       /* end at the next bar boundary */
-void take_tick(take_t *t, uint32_t now);                       /* arm/stop without an event */
+void take_stop(take_t *t, uint32_t now);                       /* request the end at the next bar */
+void take_tick(take_t *t, uint32_t now);                       /* every block: arm/stop, writes END */
 void take_setup_event(take_t *t, uint32_t cmd);                /* offset-0 event, from the prelude */
 
 /* player */
-void take_play(take_t *t, uint32_t now);                       /* start replaying */
+void take_play(take_t *t, uint32_t now);                       /* reset the cursor, start replaying */
 void take_render(take_t *t, uint32_t nframes, const take_sink_t *sink);  /* the per-window pump */
 void take_stop_play(take_t *t);
 
@@ -75,19 +76,21 @@ const take_event_t *take_events(const take_t *t);   /* the raw log, for storage 
 
 - **Recorder.** `take_arm(t, now)` clears the log, writes `TAKE_MARK start`, runs the prelude and
   records `start`, the next bar boundary. `take_feed(t, sample, cmd)` advances the state machine
-  and appends `{sample - start, cmd}` while recording. `take_stop(t, now)` records the next bar
-  boundary and the take closes there with `TAKE_MARK end` and `length_samples`. `take_tick(t, now)`
-  advances arm/stop with no event, so a take can close even when no command drains. An arm
-  stopped before its boundary cancels and leaves no take.
+  and appends `{sample - start, cmd}` while recording; a feed stamped before `start` is **dropped**
+  (not clamped), because the prelude already set the state at offset 0. `take_stop(t, now)` only
+  *requests* the end at the next bar boundary (it stores `stop_at` and a flag); the ISR's
+  `take_tick(t, now)` is what runs the close, writing `TAKE_MARK end` and `length_samples` exactly
+  once. `take_tick` also advances the arm-to-recording transition, so it can close a take even when
+  no command drains. An arm stopped before its boundary cancels and leaves no take.
 - **Prelude.** `take_arm` runs the caller's callback in main-loop context (not the ISR): the
   playing clip per role (`TAKE_LAUNCH now`), the mutes, the tempo, and the current value of every
   parameter. If the prelude writes a `TAKE_MARK tempo`, the header's `bpm_x10` follows it, so the
   header and the log cannot disagree.
-- **Player.** `take_play(t, now)` starts; `take_render(t, nframes, sink)` advances the replay
-  clock by `nframes` and calls the sink for every event in that window with its exact offset, then
-  moves past it. Any window size produces the same firing times because the log is sorted by
-  offset; an event exactly on a window boundary goes in the next window. `take_stop_play` ends
-  playback and leaves the log intact for another pass.
+- **Player.** `take_play(t, now)` resets the replay cursor and starts; `take_render(t, nframes,
+  sink)` advances the replay clock by `nframes` and calls the sink for every event in that window
+  with its exact offset, then moves past it. Any window size produces the same firing times because
+  the log is sorted by offset; an event exactly on a window boundary goes in the next window.
+  `take_stop_play` ends playback and leaves the log intact for another pass.
 - **Full buffer.** The last slot is reserved for the end mark. When a feed would leave no room,
   the take closes with `TAKE_MARK end` at that offset, sets `full`, and `take_state` returns to
   `TAKE_IDLE`; later feeds are ignored. A full take holds 2,048 entries (2,047 recorded + the end
@@ -95,6 +98,19 @@ const take_event_t *take_events(const take_t *t);   /* the raw log, for storage 
 - **32-bit wrap.** Offsets and `length_samples` are unsigned `sample - start`, so a take recorded
   across the audio counter's wrap is contiguous and replays the same.
 - **LIVE input** during playback is the caller's policy, not this module's.
+
+## Threading (ISR safety)
+
+The main loop only builds and requests; the ISR only appends and closes. Each handoff publishes
+data, then a `__asm__ volatile("" ::: "memory")` compiler barrier, then the flag:
+
+- `take_arm` builds the log and runs the prelude while `state == IDLE`, so an ISR `take_feed`
+  cannot interleave with the offset-0 events; it writes `start`, then the barrier, then
+  `state = ARMED/REC`. Only `take_feed` does `n++` once the take is armed.
+- `take_play` resets `play_i`/`play_pos`, then the barrier, then `state = PLAY`.
+- `take_stop` writes `stop_at`, then the barrier, then `stop_set`; the ISR's `take_tick` is the
+  only writer of the end mark, and an `ended` guard makes `take_end` idempotent.
+- `take_feed` is constant time and never allocates.
 
 ## Event-exactness
 
@@ -112,12 +128,14 @@ must emit an identical clip-engine event list.
 
 | case | what it pins |
 |---|---|
-| `record_replay` | a take with a bar-grid arm, pre-start events dropped, and a random-window replay that is event-exact (asserted and written as a golden) |
+| `record_replay` | a take with a bar-grid arm, pre-start events dropped, and a random-window replay that is event-exact (asserted and written as a golden); a second `take_play` pass is identical |
 | `bar_boundaries` | arm lands on the next bar, stop lands on the next bar with `length_samples`; a cancel leaves no take; arming exactly on a boundary records at offset 0 |
-| `prelude_restore` | the prelude's playing clips, mutes, tempo and parameters restore the identical state on replay; the header tempo matches |
+| `prestart_drop` | a feed stamped before `start` is dropped, the log stays sorted, and the surviving events keep their offsets |
+| `prelude_restore` | the prelude's playing clips, mutes, tempo and parameters restore the identical state on replay; the header tempo matches; a feed attempted *during* the prelude build is ignored (`bad_feed_present=0`) and no prelude event is lost |
 | `full_buffer` | feeding past the cap stops cleanly with `TAKE_MARK end`, `full = 1`, 2,048 entries in order, and replays exactly |
 | `counter_wrap` | events before and after the `2^32` wrap get the right offsets and `length_samples` |
-| `dense_window` | a take at the 2,048-entry cap with an event on every sample of the window replays exactly in one window |
+| `dense_window` | a take with an event on every sample replays exactly in a sequence of one-frame windows (at most two events share sample 0: the start mark and the first event) |
+| `stop_once` | a main-loop `take_stop` while feeds continue writes exactly one `TAKE_MARK end`, and feeds after it are ignored |
 | `clip_engine_parity` | record a real clip-engine session's launches, tempo and stops; replay them into a second engine; the two engines' event lists are identical (47 events) |
 
 ## Device build (deltron.local, JieLi clang 4.0.1, pi32v2)
@@ -127,8 +145,8 @@ Compiled as `tools/build.py` compiles X0X's units (`-target pi32v2 -mcpu=r3 -mfp
 
 | opt | `.text` | `.rodata` | `.data` | `.bss` | undefined syms |
 |---|---:|---:|---:|---:|---|
-| `-Os` | 820 B | 0 | 0 | 0 | none |
-| `-O2` | 1108 B | 0 | 0 | 0 | none |
+| `-Os` | 832 B | 0 | 0 | 0 | none |
+| `-O2` | 978 B | 0 | 0 | 0 | none |
 
 No globals, no heap, no `double`, no 64-bit division (the `nm -u` of both the device object and the
 host object is empty, so no `__udivdi3` and no libc). The take state is caller-allocated:
@@ -144,8 +162,11 @@ host object is empty, so no `__udivdi3` and no libc). The take state is caller-a
 2. **The bar grid.** `take_set_bar_fn()` with a function that returns the next bar boundary from
    the running transport (the same grid `clip_engine_pos`/`global_step` uses), so REC arms and
    stops line up. `take_arm(t, now)` on the REC tap; `take_stop(t, now)` on the second tap (or
-   the hold-to-clear path), and a 1.5 s hold clears the take (`take_init`). Call `take_tick` from
-   the main loop so a take closes at its boundary even when the transport is idle.
+   the hold-to-clear path), and a 1.5 s hold clears the take (`take_init`). **Call `take_tick(t,
+   now)` once every block** (main loop or ISR): it advances arm-to-recording and writes the END
+   mark at the stop boundary, so a take closes even when no command drains or the transport is
+   idle. Stamps fed before the take's `start` are dropped by the module, so a block-start stamp is
+   safe.
 3. **The prelude callback.** `take_set_prelude()` with a function that writes what is playing
    now: `TAKE_LAUNCH(clip, TAKE_LAUNCH_NOW, role)` for each playing role (or `TAKE_LAUNCH_STOP`
    for a stopped one), `TAKE_MUTE(role, on)` per role, `TAKE_MARK_TEMPO(bpm)`, then the current
@@ -169,10 +190,16 @@ host object is empty, so no `__udivdi3` and no libc). The take state is caller-a
 
 - **Makefile.** This branch's `Makefile` already had `unit-clip` and `unit-engines` (T4c + T5c);
   this change only appends `unit-take` and its `.PHONY`, keeping the rest byte-for-byte.
-- **`take_play` vs the pump.** The task names `take_play(t, now)`; that starts playback. The
-  per-window work (the `clip_engine_render` equivalent) is `take_render(t, nframes, sink)`,
-  because a window needs an `nframes` and a sink to be render-window style.
+- **`take_play` vs the pump.** The task names `take_play(t, now)`; that resets the cursor and
+  starts playback. The per-window work (the `clip_engine_render` equivalent) is `take_render(t,
+  nframes, sink)`, because a window needs an `nframes` and a sink to be render-window style.
 - **Prelude context.** The prelude runs inside `take_arm`, which is a main-loop call, so
-  `take_feed` stays constant time in the ISR. The trade-off (the prelude reflects the arm moment,
-  not the boundary) is noted in point 3 above.
+  `take_feed` stays constant time in the ISR. The log and the prelude are built while
+  `state == IDLE`, so an ISR feed cannot interleave; the trade-off (the prelude reflects the arm
+  moment, not the boundary) is noted in point 3 above.
+- **Review fixes (this revision).** Pre-start feeds are dropped (`take_feed`); `take_arm` builds
+  under `state == IDLE` and publishes `start` then the state behind a barrier; `take_play` publishes
+  its cursor behind a barrier; `take_stop` only requests the end and the ISR's `take_tick` writes
+  the END exactly once (guarded by `ended`); the unused `play_start` is gone; `dense_window` now
+  replays in one-frame windows, distinct from `full_buffer`.
 - **Nothing inherited was touched**; every new file carries `SPDX-License-Identifier: GPL-3.0-only`.
