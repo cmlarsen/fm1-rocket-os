@@ -77,6 +77,7 @@ typedef struct {
     uint8_t  cur[NROLES];    /* playing clip, or CLIP_NONE */
     uint8_t  que[NROLES];    /* target clip of the pending action, or CLIP_NONE */
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
+    uint8_t  que_ready[NROLES]; /* T9i r3/S1: que[role]'s bytes are already committed in play[] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
     uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
     uint8_t  take_mute[NROLES]; /* T9i: a take mute latched for the next render (the release needs the sink) */
@@ -159,6 +160,7 @@ void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip);
 /* T7b: the 16th index since the transport started, and the fraction into the current step (0..255),
  * for recording (the loop owns these). */
 uint32_t clip_engine_global_step(const clip_engine_t *e);
+uint32_t clip_engine_step_sample(const clip_engine_t *e, uint32_t step);
 uint8_t  clip_engine_step_phase(const clip_engine_t *e);
 
 /* T7b: the step inside a role's playing clip (the playhead), 0 when the role is stopped. */

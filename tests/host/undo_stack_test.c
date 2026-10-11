@@ -182,6 +182,30 @@ int main(void)
         check("new edit clears redo", undo_stack_redo_type(&u) == UNDO_NONE);
     }
 
+    /* T6c fix (r3): a new edit after an undo discards the redo tail. The old code kept the entry
+     * above `cur`, so edit v0->v1, undo, edit v0->v2, undo, undo wrongly restored v1. */
+    {
+        clip_t v0, v1, v2, v1b;
+        undo_stack_init(&u);
+        fill_clip(&v0, 10);
+        fill_clip(&v1, 20);
+        fill_clip(&v2, 30);
+        fill_clip(&v1b, 21);                            /* a detectable "branch" clip */
+        song.clip[0] = v0;
+        undo_stack_push_record(&u, 0, &v0);             /* the clip is about to become v1 */
+        song.clip[0] = v1;
+        check("branch: the first edit undoes", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE &&
+              memcmp(&song.clip[0], &v0, sizeof v0) == 0);
+        song.clip[0] = v1b;                             /* (the branch value lives only in the song) */
+        undo_stack_push_record(&u, 0, &v0);             /* a new edit from v0, so the clip becomes v2 */
+        song.clip[0] = v2;
+        check("branch: the new edit undoes", undo_stack_undo(&u, &song, 0, 0) == UNDO_DONE &&
+              memcmp(&song.clip[0], &v0, sizeof v0) == 0);
+        check("branch: the discarded redo is not undone again",
+              undo_stack_undo(&u, &song, 0, 0) == UNDO_EMPTY &&
+              memcmp(&song.clip[0], &v0, sizeof v0) == 0);
+    }
+
     /* the ring drops the oldest when full */
     {
         clip_t cl;

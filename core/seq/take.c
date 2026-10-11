@@ -28,13 +28,6 @@ _Static_assert(TAKE_MAX_EVENTS <= 0xFFFFu, "take_hdr_t.nevents is uint16_t");
 /* publish we have written the data / read the flag before the data */
 #define TAKE_BARRIER() __asm__ volatile("" ::: "memory")
 
-#ifdef X0X_HOST
-/* T9i r2: a host test's preemption injector, called at the exact take_end window (after `ended` is
- * set, before the END mark / n are written). The test's handler runs an ISR take_feed there to
- * prove the main loop's close must be masked. Never defined on the device. */
-void (*take_test_hook)(void);
-#endif
-
 /* ---- helpers ------------------------------------------------------------- */
 
 static uint32_t bar_of(const take_t *t, uint32_t sample)
@@ -50,10 +43,6 @@ static void take_end(take_t *t, uint32_t off, int full)
     if (t->ended)
         return;
     t->ended = 1;
-#ifdef X0X_HOST
-    if (take_test_hook)                  /* T9i r2: a test's ISR exactly here (the B2/race model) */
-        take_test_hook();
-#endif
     if (t->n < TAKE_MAX_EVENTS) {
         t->ev[t->n].sample = off;
         t->ev[t->n].cmd = TAKE_MARK_END;

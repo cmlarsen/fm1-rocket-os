@@ -470,6 +470,26 @@ static void test_take_undo_order_full_ring(void)
     CHECK(!song_io_take_pending());             /* now nothing newer: the take is cancelled */
 }
 
+/* T9i r3/NIT: the durable take undo is stamped when the take ended, not at the deferred flush, so a
+ * clip edit made after the take is undone first. */
+static void test_take_undo_order_flush(void)
+{
+    clip_t old;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    live_bridge_take_loaded(3, 1234u, 1200u);   /* the take buffer holds a finished recording */
+    song_io_take_request_save();                /* the recording ended: stamp the undo position */
+    CHECK(song_io_take_pending());
+    memset(&old, 0, sizeof old);
+    song_io_push_clear(0, &old);                /* a clip edit made after the take ended */
+    CHECK(song_io_take_flush() == 0);           /* the deferred write happens now */
+    CHECK(!song_io_take_pending());
+    CHECK(song_io_undo_type() == 1 /* UNDO_CLEAR_CLIP */);      /* the newer edit is on top ... */
+    CHECK(song_io_undo() == 1);
+    CHECK(song_io_undo_type() == 4 /* UNDO_REPLACE_TAKE */);    /* ... then the take */
+}
+
 int main(void)
 {
     test_boot_empty_builds();
@@ -484,6 +504,7 @@ int main(void)
     test_failed_save_no_retry();
     test_corrupt_record_falls_back();
     test_take_undo_order_full_ring();
+    test_take_undo_order_flush();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

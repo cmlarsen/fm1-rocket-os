@@ -68,6 +68,9 @@ void undo_stack_push_copy(undo_stack_t *u, uint8_t dst, uint8_t src, const clip_
  * sequence number of the record it will restore. A new take entry for a slot
  * invalidates older take entries for that slot, so only the newest is undoable. */
 void undo_stack_push_take(undo_stack_t *u, const song_store_t *store, uint8_t slot);
+/* T9i r3/NIT: push at the position `ser` (an undo_stack_serial() stamp from when the take ended),
+ * so a clip edit made after the take sits above it and undoes first. */
+void undo_stack_push_take_at(undo_stack_t *u, const song_store_t *store, uint8_t slot, uint32_t ser);
 void undo_stack_push_delete(undo_stack_t *u, const song_store_t *store, uint8_t slot);
 
 int undo_stack_undo(undo_stack_t *u, song_t *song, song_store_t *store, const undo_take_scratch_t *ts);

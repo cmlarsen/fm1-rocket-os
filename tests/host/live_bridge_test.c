@@ -301,6 +301,125 @@ static void r2_s4_finish_race_test(void)
     live_bridge_exit();
 }
 
+/* ---- T9i r3: the late press (S1) and the stalled UI (S2) ----------------- */
+
+/* Run one replay: A (bar-quantized) queued at sample 200, C (bar-quantized) pressed D samples after
+ * A's boundary (88,200 at 120 bpm). The main loop stages once every `frame` samples, phase-shifted.
+ * Returns whether A was heard, and reports the drops and the invariant. */
+static int r3_late_run(uint32_t D, uint32_t frame, uint32_t phase, int *drops, int *cons)
+{
+    uint32_t *ev, s, next_ui;
+    int d0, sawA = 0;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;         ev[1] = TAKE_MARK_TEMPO(1200u);   /* pin 120 bpm, so the bar lands at 88,200 */
+    ev[2] = 200u;       ev[3] = TAKE_LAUNCH_Q(0u, Q_BAR, LIVE_DRUMS);
+    ev[4] = 88200u + D; ev[5] = TAKE_LAUNCH_Q(2u, Q_BAR, LIVE_DRUMS);
+    ev[6] = 300000u;    ev[7] = TAKE_MARK_END;
+    live_bridge_take_loaded(4, 400000u, 1200u);
+    d0 = live_bridge_take_drops();
+    live_bridge_take_play();
+    next_ui = phase;
+    for (s = 0; s < 200000u; s += 128u) {
+        if (s >= next_ui) { live_bridge_take_stage(); next_ui += frame; }
+        run_isr_block(s, 128u);
+        if (s > 90000u && s < 180000u && live_bridge_playing_clip(LIVE_DRUMS) == 0)
+            sawA = 1;
+    }
+    *drops = live_bridge_take_drops() - d0;
+    *cons = live_bridge_test_consistent();
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+    return sawA;
+}
+
+/* S1: A queued to the bar, C pressed 11 ms after that bar. C's event must not steal A's staged copy
+ * before A's boundary (the r2 code staged C up to 31 ms early and dropped A in 4/5 phases). */
+static void r3_s1_late_press_test(void)
+{
+    uint32_t ph;
+    for (ph = 0; ph < 705u; ph += 141u) {
+        int drops = -1, cons = 0;
+        int sawA = r3_late_run(500u, 705u, ph, &drops, &cons);
+        CHECK(sawA);                                     /* A is not dropped (the S1 defect) */
+        CHECK(drops == 0);                               /* and C still plays: zero drops */
+        CHECK(cons);
+    }
+}
+
+/* S2: a launch well separated from the previous one must survive a stalled UI. `frame` models a
+ * 40 ms and a 100 ms frame; the r2 ~28 ms lookahead window was skipped outright, dropping it. */
+static void r3_s2_stall_test(void)
+{
+    static const uint32_t frames[2] = { 1764u, 4410u };  /* 40 ms, 100 ms at 44.1 kHz */
+    int fi;
+    uint32_t ph;
+    for (fi = 0; fi < 2; fi++)
+        for (ph = 0; ph < frames[fi]; ph += frames[fi] / 4u) {
+            int drops = -1, cons = 0;
+            int sawA = r3_late_run(30000u, frames[fi], ph, &drops, &cons);
+            CHECK(sawA && drops == 0 && cons);
+        }
+}
+
+/* NIT: the take_stage injection point must be live (it runs between roles, outside the role's
+ * critical section) — arm it and prove it fires. */
+static void r3_stage_hook_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    ((live_song_t *)live_bridge_song())->bpm_x10 = 1200u;
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;      ev[1] = TAKE_MARK_TEMPO(1200u);
+    ev[2] = 0u;      ev[3] = TAKE_LAUNCH(0u, TAKE_LAUNCH_NOW, LIVE_DRUMS);     /* the prelude */
+    ev[4] = 40000u;  ev[5] = TAKE_LAUNCH(2u, TAKE_LAUNCH_QUEUE, LIVE_DRUMS);   /* a later launch */
+    ev[6] = 400000u; ev[7] = TAKE_MARK_END;
+    live_bridge_take_loaded(4, 800000u, 1200u);
+    live_bridge_take_play();                     /* stages the prelude (masked: the hook is a no-op) */
+    run_isr_block(0, 128u);                      /* the prelude NOW launch applies */
+    CHECK(live_bridge_playing_clip(LIVE_DRUMS) == 0);
+    hook_mode = 0; hook_base = 128u; hook_n = 128u; hook_armed = 1;
+    live_bridge_take_stage();                    /* main loop: stages clip 2, then fires the hook */
+    CHECK(!hook_armed);                          /* the injection actually ran (NIT) */
+    CHECK(live_bridge_test_consistent());
+    live_bridge_take_stop_play();
+    live_bridge_exit();
+}
+
+/* NIT: an external clock the user follows wins over the take's recorded tempo (the take replays at
+ * clock tempo), and clearing the take's hold restores the followed clock, not the song's tempo. */
+static void r3_ext_clock_test(void)
+{
+    uint32_t *ev;
+    live_bridge_take_init();
+    live_bridge_enter(pats, 1200u);
+    g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0u;   ev[1] = TAKE_MARK_TEMPO(1200u);
+    ev[2] = 200u; ev[3] = TAKE_MARK_TEMPO(1400u);        /* the recorded change */
+    ev[4] = 400000u; ev[5] = TAKE_MARK_END;
+    live_bridge_take_loaded(3, 800000u, 1200u);
+    live_bridge_take_play();
+    run_isr_block(0, 128);
+    CHECK(live_bridge_bpm_x10() == 1200u);
+    live_bridge_set_bpm_soft(1600u);             /* the user follows a 160-bpm clock mid-replay */
+    run_isr_block(128, 128);
+    CHECK(live_bridge_bpm_x10() == 1600u);
+    run_isr_block(256, 6000);                    /* the recorded 1400 mark arrives: the clock wins */
+    CHECK(live_bridge_bpm_x10() == 1600u);
+    live_bridge_take_stop_play();
+    CHECK(live_bridge_bpm_x10() == 1600u);       /* the hold clears, the followed clock stays */
+    live_bridge_set_bpm(1200u);                  /* drop the clock: the song's tempo comes back */
+    run_isr_block(6400, 128);
+    CHECK(live_bridge_bpm_x10() == 1200u);
+    live_bridge_exit();
+}
+
 int main(void)
 {
     int i;
@@ -461,6 +580,12 @@ int main(void)
     r2_b2_tempo_test();
     r2_s3_next_stage_test();
     r2_s4_finish_race_test();
+
+    /* T9i r3: the late press and the stalled-UI staging, the live take_stage hook, the clock. */
+    r3_stage_hook_test();
+    r3_ext_clock_test();
+    r3_s1_late_press_test();
+    r3_s2_stall_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

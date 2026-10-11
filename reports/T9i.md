@@ -307,3 +307,77 @@ rule.
 `make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass on the committed
 tree, and `tools/check_loader.sh` is ok on both packages (release and debug). Nothing was flashed.
 
+
+## r3 (the third Opus review)
+
+The reviewer's repro harnesses `rv3/late.c` and `rv3/u.c` are now committed host tests that fail on
+`2f41b83` and pass here: `unit-live`'s `r3_s1_late_press_test` / `r3_s2_stall_test` (with the
+`r3_stage_hook_test` and `r3_ext_clock_test` alongside), `unit-store`'s undo-stack branch test, and
+`unit-songio`'s `test_take_undo_order_flush`. Nothing was flashed.
+
+- Files: `core/seq/clip_engine.{c,h}`, `firmware/src/app/live_bridge.c`, `core/seq/take.c`,
+  `firmware/src/app/song_io.c`, `core/model/undo_stack.{c,h}`, `docs/engineering/model.md`,
+  `tests/host/live_bridge_test.c`, `tests/host/undo_stack_test.c`, `tests/host/song_io_test.c`.
+
+### Should-fix
+
+- **1 — the late press dropped the earlier queued launch.** A (bar) is queued, C (bar) pressed 11 ms
+  after A's boundary; the replay staged C up to 31 ms early and *stole* `next[role]`, so A was
+  applied against C's bytes and dropped (`take_drop`). `live_bridge_take_stage` now never overwrites
+  `next[r]` while a *different* launch is queued but not applied, unless the event is due before the
+  queued launch's boundary (it will be replayed first and supersede it). `clip_engine_step_sample`
+  gives that boundary sample from the transport under the caller's mask. The wrong `TAKE_STAGE_MARGIN`
+  comment is rewritten.
+- **2 — a stalled UI dropped a launch.** The r2 ~28 ms lookahead window is smaller than a 77 ms
+  full redraw, so the main loop skipped straight over it. `live_bridge_take_stage` now stages a role's
+  next un-replayed launch **as soon as the role has no pending queued launch**, however far ahead;
+  the margin is used only for the overwrite case above. To make the one `next[]` slot free once a
+  queued launch no longer needs it, `clip_engine_take_launch` commits the staged copy to `play[]`
+  when nothing is playing for the role (`que_ready`; the bytes are silent until `cur[role]` is set),
+  and `apply_role` starts the queued launch from there when `next[]` has moved on. This keeps the r2
+  invariant `cur[role] == song->clip[cur]` byte-for-byte. `r3_s1_late_press_test` (A heard and zero
+  drops in every 60 Hz phase) and `r3_s2_stall_test` (zero drops at 40 ms and 100 ms frames, all
+  phases) pin both; a sweep over all 705/1764/4410 phase offsets is clean.
+
+### NITs
+
+- **Injection hooks.** The `take_play` hook ran inside the masked section (a no-op); it is moved to
+  just after `engine_crit_exit`. The `take_end` hook likewise moved out, to just after
+  `live_bridge_take_finish`'s critical section, where an IRQ can really run (the closed take ignores
+  the later feed). The `take_stage` hook (already outside the per-role mask) is now armed by
+  `r3_stage_hook_test`, which proves it fires between roles.
+- **Tempo clear mask.** `live_bridge_take_stop_play`'s `clip_engine_take_bpm_clear` (pure arithmetic
+  over the ISR-read transport words) runs inside `engine_crit`.
+- **External clock vs the take.** An external clock the user is following now wins over the take's
+  recorded tempo (`clip_engine_take_bpm` leaves the running clock tempo alone when `bpm_ext` is set),
+  and `clip_engine_take_bpm_clear` restores that followed clock instead of zeroing `bpm_ext`. Pinned
+  by `r3_ext_clock_test`; documented in `model.md`.
+- **Take undo order.** The durable take entry is pushed at the position it had when the take ended
+  (`undo_stack_push_take_at` with `take_pending_ser`), not at the deferred flush, so a clip edit made
+  after the take is undone first. Test: `unit-songio`'s `test_take_undo_order_flush`.
+- **Pre-existing T6c bug (redo tail).** `undo_push` never discarded the entries above `cur`, so edit
+  v0->v1, undo, edit v0->v2, undo, undo restored the discarded v1. `undo_push_at` now truncates the
+  redo tail before every push. Test: `unit-store`'s branch test (the `u.c` harness).
+
+### Proof the r3 tests fail on 2f41b83
+
+`tests/host/live_bridge_test.c` compiled against `2f41b83`'s `live_bridge.c`/`clip_engine.c`/`take.c`
+reports 16 failures (the take_stage hook never fires, the clock is overridden by the take, A is
+dropped and C dropped in every phase); `tests/host/undo_stack_test.c` against `2f41b83`'s
+`undo_stack.c` fails *the discarded redo is not undone again*; `tests/host/song_io_test.c` against
+`2f41b83`'s `song_io.c` fails three checks in `test_take_undo_order_flush`.
+
+### RAM
+
+| build | pool | spare | margin over 8 KiB |
+|---|---|---|---|
+| release | 335,572 / 344,064 | **8,492** | 300 |
+| debug (`X0X_DEBUG=1`) | 335,572 / 344,064 | **8,492** | 300 |
+
+r3 adds one byte per role of engine state (`que_ready[NROLES]`, 8 B aligned) and no buffer. Both
+builds keep the 8 KiB rule.
+
+### Ladder
+
+`make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass on the committed
+tree, and `tools/check_loader.sh` is ok on both packages (release and debug). Nothing was flashed.

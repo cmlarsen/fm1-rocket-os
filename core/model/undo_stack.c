@@ -12,10 +12,18 @@ void undo_stack_init(undo_stack_t *u)
 }
 
 /* store one entry and clear the redo tail; drop the oldest when full */
-static void undo_push(undo_stack_t *u, uint8_t type, uint8_t index, uint8_t aux, const clip_t *clip, uint32_t seq)
+static void undo_push_at(undo_stack_t *u, uint32_t pos, uint8_t type, uint8_t index, uint8_t aux,
+                         const clip_t *clip, uint32_t seq)
 {
     undo_entry_t *e;
+    undo_entry_t tmp;
     uint32_t i;
+    /* T6c fix: a new edit discards the redo tail. Without it, an entry above `cur` (a state undone
+     * before this edit) would be restored by a later undo, replaying a branch that no longer exists
+     * (edit v0->v1, undo, edit v0->v2, undo, undo restored v1). */
+    u->n = u->cur;
+    if (pos > u->n)
+        pos = u->n;
     if (u->n >= UNDO_STACK_DEPTH) {
         for (i = 1u; i < UNDO_STACK_DEPTH; i++)
             u->e[i - 1u] = u->e[i];
@@ -24,18 +32,28 @@ static void undo_push(undo_stack_t *u, uint8_t type, uint8_t index, uint8_t aux,
                                            * full ring drops the oldest entry (cur alone saturates) */
         if (u->cur)
             u->cur--;
+        if (pos)
+            pos--;
     }
-    e = &u->e[u->n];
-    e->type = type;
-    e->index = index;
-    e->aux = aux;
-    e->pad = 0u;
+    tmp.type = type;
+    tmp.index = index;
+    tmp.aux = aux;
+    tmp.pad = 0u;
     if (clip)
-        e->u.clip = *clip;
+        tmp.u.clip = *clip;
     else
-        e->u.seq = seq;
+        tmp.u.seq = seq;
+    for (i = u->n; i > pos; i--)          /* make room: entries above `pos` keep their order */
+        u->e[i] = u->e[i - 1u];
+    e = &u->e[pos];
+    *e = tmp;
     u->n++;
     u->cur = u->n;
+}
+
+static void undo_push(undo_stack_t *u, uint8_t type, uint8_t index, uint8_t aux, const clip_t *clip, uint32_t seq)
+{
+    undo_push_at(u, u->cur, type, index, aux, clip, seq);
 }
 
 void undo_stack_push_clear(undo_stack_t *u, uint8_t clip, const clip_t *old)
@@ -53,10 +71,15 @@ void undo_stack_push_copy(undo_stack_t *u, uint8_t dst, uint8_t src, const clip_
     undo_push(u, UNDO_COPY_CLIP, dst, src, old_dst, 0u);
 }
 
-void undo_stack_push_take(undo_stack_t *u, const song_store_t *store, uint8_t slot)
+/* T9i r3/NIT: push the take entry at the position `ser` implies, so a clip edit made after the take
+ * ended sits above it and is undone first. `ser` is undo_stack_serial() from when the take ended, not
+ * from this deferred flush. */
+void undo_stack_push_take_at(undo_stack_t *u, const song_store_t *store, uint8_t slot, uint32_t ser)
 {
     uint32_t seq = 0u;
-    uint32_t i;
+    uint32_t i, pos;
+    if (!u)
+        return;
     /* only the newest replace-take per slot is undoable: the previous take it
      * names is the one an extent reuse would destroy first */
     for (i = 0u; i < u->n; i++)
@@ -64,7 +87,13 @@ void undo_stack_push_take(undo_stack_t *u, const song_store_t *store, uint8_t sl
             u->e[i].u.seq = 0u;
     if (store && slot < (int)SONG_STORE_SLOTS && store->slot[slot].prev_take_ext >= 0)
         seq = store->slot[slot].prev_take_seq;
-    undo_push(u, UNDO_REPLACE_TAKE, slot, 0u, 0, seq);
+    pos = ser > u->base_ser ? ser - u->base_ser : 0u;
+    undo_push_at(u, pos, UNDO_REPLACE_TAKE, slot, 0u, 0, seq);
+}
+
+void undo_stack_push_take(undo_stack_t *u, const song_store_t *store, uint8_t slot)
+{
+    undo_stack_push_take_at(u, store, slot, undo_stack_serial(u));
 }
 
 void undo_stack_push_delete(undo_stack_t *u, const song_store_t *store, uint8_t slot)

@@ -651,7 +651,9 @@ int song_io_take_flush(void)
             return -1;
         }
     }
-    undo_stack_push_take(&undo, &store, (uint8_t)slot);   /* durable take undo (T6c) */
+    /* T9i r3/NIT: the durable take undo goes at the position it had when the take ended, not at
+     * this deferred flush, so a clip edit made after the take is undone first. */
+    undo_stack_push_take_at(&undo, &store, (uint8_t)slot, take_pending_ser);
     take_pending = TAKE_NONE;
     return 0;
 }

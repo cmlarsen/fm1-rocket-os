@@ -439,6 +439,8 @@ void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
     role = clip_role(clip);
     if (e->cur[role] == clip)                   /* the role is playing it: refresh the copy */
         e->play[role] = e->song->clip[clip];
+    if (e->que_ready[role] && e->que[role] == clip)        /* T9i r3/S1: or it is pre-committed */
+        e->play[role] = e->song->clip[clip];
     if (e->next_set[role] && e->next_clip[role] == clip)   /* a launch is staged: refresh that too */
         e->next[role] = e->song->clip[clip];
 }
@@ -496,10 +498,22 @@ int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t
     if (how == 0 && e->que_set[role] && e->que[role] == clip) {
         e->que_set[role] = 0;
         e->que[role] = CLIP_NONE;
+        e->que_ready[role] = 0;
         return 1;
     }
     e->que[role] = clip;
     e->que_set[role] = 1;
+    /* T9i r3/S1: when nothing is playing for the role, commit the staged copy to play[] now. The
+     * bytes are not heard (step_events only reads play[] when cur[role] != CLIP_NONE), but they no
+     * longer need next[role], so the main loop may stage a later launch (a bar event pressed just
+     * after this launch's boundary) without stealing them: apply_role uses que_ready to keep the
+     * queued launch's own sound. */
+    if (e->cur[role] == CLIP_NONE) {
+        e->play[role] = e->next[role];
+        e->que_ready[role] = 1;
+    } else {
+        e->que_ready[role] = 0;
+    }
     if (how == 1)
         e->que_at[role] = e->global_step + 1u;
     else
@@ -514,10 +528,12 @@ void clip_engine_take_stop(clip_engine_t *e, uint8_t role)
         return;
     if (e->que_set[role] && e->que[role] == CLIP_NONE) {   /* a second stop cancels, as consume_cmds */
         e->que_set[role] = 0;
+        e->que_ready[role] = 0;
         return;
     }
     e->que[role] = CLIP_NONE;
     e->que_set[role] = 1;
+    e->que_ready[role] = 0;                                /* a stop supersedes any pre-committed launch */
     q = (e->cur[role] != CLIP_NONE) ? e->play[role].quant : Q_BAR;
     e->que_at[role] = e->global_step + action_lead(e, role, q);
 }
@@ -545,6 +561,9 @@ void clip_engine_take_mute_clear(clip_engine_t *e)
 void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10)
 {
     e->bpm_take_on = 1;                                /* B2: hold the take's tempo, not the song's */
+    /* T9i r3/NIT: an external clock the user is following wins over the take's recorded tempo. */
+    if (e->bpm_ext)
+        return;
     set_bpm(e, bpm_x10);
 }
 
@@ -552,15 +571,16 @@ void clip_engine_take_bpm(clip_engine_t *e, uint16_t bpm_x10)
  * offset 0) so the song's own tempo cannot clobber it in the meantime. */
 void clip_engine_take_bpm_hold(clip_engine_t *e) { e->bpm_take_on = 1; }
 
-/* B2: the take ended/stopped: release the hold and go back to the song's own tempo. Pure
- * arithmetic (no ring), so the take's natural ISR end may call it. */
+/* B2/NIT: the take ended/stopped: release the hold. A followed external clock keeps winning (the
+ * take replays at clock tempo and so does the transport afterwards); otherwise the song's own
+ * tempo comes back. Pure arithmetic (no ring), so the take's natural ISR end may call it. */
 void clip_engine_take_bpm_clear(clip_engine_t *e)
 {
     e->bpm_take_on = 0;
-    if (e->song && e->song->bpm_x10) {
-        e->bpm_ext = 0;
+    if (e->bpm_ext)
+        set_bpm(e, e->bpm_ext);                        /* NIT: restore the followed clock, not zero it */
+    else if (e->song && e->song->bpm_x10)
         set_bpm(e, e->song->bpm_x10);
-    }
 }
 
 int clip_engine_take_drops(const clip_engine_t *e) { return e ? e->take_drop : 0; }
@@ -580,20 +600,25 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
             e->cur[role] = CLIP_NONE;
         }
         e->pos[role] = 0;
+    } else if (e->next_set[role] && e->next_clip[role] == target) {   /* T7b: next -> play swap */
+        e->que_ready[role] = 0;
+        e->play[role] = e->next[role];
+        e->next_set[role] = 0;
+        e->cur[role] = target;
+        e->pos[role] = 0;
+        ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
+    } else if (e->que_ready[role]) {
+        /* T9i r3/S1: the main loop re-used next[role] for a later launch, but this launch's sound
+         * was already committed to play[] when it was queued (nothing was playing). Start it from
+         * there; the invariant cur[role] == song->clip[cur] still holds byte-for-byte. */
+        e->que_ready[role] = 0;
+        e->cur[role] = target;
+        e->pos[role] = 0;
+        ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
     } else {
-        /* T9i r2/B1: the hard invariant. Only a target whose staged copy is present may become
-         * cur[role]; the ISR never sets cur without swapping the matching play[] copy in. If the
-         * staging is missing (a missed window), drop the launch, count it, and keep cur/play
-         * consistent. */
-        if (e->next_set[role] && e->next_clip[role] == target) {   /* T7b: next -> play swap */
-            e->play[role] = e->next[role];
-            e->next_set[role] = 0;
-            e->cur[role] = target;
-            e->pos[role] = 0;
-            ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
-        } else {
-            e->take_drop++;
-        }
+        /* T9i r2/B1: the hard invariant. The staged copy is missing (a missed window): drop the
+         * launch, count it, and keep cur/play consistent. */
+        e->take_drop++;
     }
 }
 
@@ -704,11 +729,13 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
                 continue;
             if (e->que_set[role] && e->que[role] == CLIP_NONE) {   /* a second stop cancels */
                 e->que_set[role] = 0;
+                e->que_ready[role] = 0;
                 ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, CLIP_NONE);
                 continue;
             }
             e->que[role] = CLIP_NONE;
             e->que_set[role] = 1;
+            e->que_ready[role] = 0;                /* a main-loop stop supersedes any pre-committed launch */
             {
                 uint8_t q = (e->cur[role] != CLIP_NONE)
                             ? e->play[role].quant : Q_BAR;
@@ -728,11 +755,13 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         if (c.cmd == CLIP_CMD_LAUNCH && e->que_set[role] && e->que[role] == target) {
             e->que_set[role] = 0;             /* relaunching the queued clip cancels */
             e->que[role] = CLIP_NONE;
+            e->que_ready[role] = 0;
             ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, target);
             continue;
         }
         e->que[role] = target;
         e->que_set[role] = 1;
+        e->que_ready[role] = 0;               /* a main-loop launch never pre-commits play[] */
         if (c.cmd == CLIP_CMD_LAUNCH_AT)
             e->que_at[role] = c.at;           /* exactly the requested global step (T7b) */
         else
@@ -826,6 +855,7 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
             for (r = 0; r < NROLES; r++) {
                 e->cur[r] = e->s_cur[r];
                 e->pos[r] = e->s_pos[r];
+                e->que_ready[r] = 0;
                 if (e->next_set[r] && e->next_clip[r] == e->s_cur[r]) {   /* T11i: an edit while stopped is picked up */
                     e->play[r] = e->next[r];
                     e->next_set[r] = 0;
@@ -845,6 +875,7 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
                     }
                 }
                 e->pos[r] = 0;
+                e->que_ready[r] = 0;
                 if (e->que_set[r])
                     e->que_at[r] = 0;
             }
@@ -943,6 +974,21 @@ void clip_engine_pos(const clip_engine_t *e, uint8_t *bar, uint8_t *beat, uint8_
 }
 
 uint32_t clip_engine_global_step(const clip_engine_t *e) { return e->global_step; }
+
+/* T9i r3/S1: the absolute sample global step `step` begins on, from the current transport. The take
+ * staging (main loop) uses it to tell whether a not-yet-replayed launch is due before a queued
+ * launch's boundary, so it only steals the staged copy when the new launch supersedes it. The
+ * caller masks the audio IRQs (the ISR advances these words every block). */
+uint32_t clip_engine_step_sample(const clip_engine_t *e, uint32_t step)
+{
+    uint32_t d;
+    if (!e->playing || !e->bpm_x10 || !e->step_L)
+        return e->elapsed;
+    if ((int32_t)(step - e->global_step) <= 0)
+        return e->elapsed;                             /* already reached */
+    d = step - e->global_step;
+    return e->step_sample + d * e->step_L + (e->step_frac + d * e->step_f) / e->bpm_x10;
+}
 
 uint8_t clip_engine_step_phase(const clip_engine_t *e)
 {
