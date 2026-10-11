@@ -87,6 +87,7 @@ Measured from `firmware/app.ld` and the T2b build. The POOL is 344,064 B, 328,05
 | `song_t` (the live song) | −14,352 |
 | `take_t` | −16,436 |
 | Undo ring | −12,240 |
+| T7b clip editor: the clip engine's per-role playing copy (`clip_t play[5]`) | −2,640 |
 | FM6 + NOISE state, moved to the pool if `.bss` is tight | about −3,000 |
 | **Left after the 8 KiB spare** | **about 18 KB** |
 

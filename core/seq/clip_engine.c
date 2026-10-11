@@ -107,9 +107,10 @@ static int clip_len_raw(const clip_t *c)
     return n > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : n;
 }
 
-static int clip_len(const clip_engine_t *e, uint8_t clip)
+/* T7b: the length of a role's playing copy (the ISR reads play[], never song->clip[]). */
+static int play_len(const clip_engine_t *e, uint8_t role)
 {
-    return clip_len_raw(&e->song->clip[clip]);
+    return clip_len_raw(&e->play[role]);
 }
 
 static int clip_notes(const clip_t *c)
@@ -218,7 +219,7 @@ static void release_pitch(clip_engine_t *e, uint8_t role, uint8_t note, uint32_t
 static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t step,
                         uint32_t off, uint32_t abs, const clip_sink_t *sink)
 {
-    const clip_t *c = &e->song->clip[clip];
+    const clip_t *c = &e->play[role];        /* T7b: the playing copy, not the editable song */
     int i;
 
     /* motion first: a drum or a note hears this step's parameters as it fires */
@@ -265,7 +266,7 @@ static uint32_t action_lead(const clip_engine_t *e, uint8_t role, uint8_t quant)
 {
     uint32_t r;
     if (quant == Q_END && e->cur[role] != CLIP_NONE) {
-        int len = clip_len(e, e->cur[role]);
+        int len = play_len(e, role);
         int off = len - (int)e->pos[role];
         return off < 1 ? 1u : (uint32_t)off;
     }
@@ -350,6 +351,13 @@ void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10)
     push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10);
 }
 
+void clip_engine_reload(clip_engine_t *e, uint8_t clip)
+{
+    if (clip >= NCLIPS)
+        return;
+    push_cmd(e, CLIP_CMD_RELOAD, clip, 0, 0);
+}
+
 /* ---- the render loop ----------------------------------------------------- */
 
 /* apply a queued action (off = the boundary's window offset) */
@@ -367,6 +375,7 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
     } else {
         e->cur[role] = target;
         e->pos[role] = 0;
+        e->play[role] = e->song->clip[target];    /* T7b: the ISR reads this private copy */
         ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
     }
 }
@@ -381,17 +390,18 @@ static void advance_role(clip_engine_t *e, uint8_t role, uint32_t off, uint32_t 
         e->pos[role] = 0;
         return;
     }
-    len = clip_len(e, clip);
+    len = play_len(e, role);
     next = (int)e->pos[role] + 1;
     if (next >= len) {
-        if (e->song->clip[clip].mode == CLIP_ONCE) {
+        if (e->play[role].mode == CLIP_ONCE) {
             release_role(e, role, off, sink);
             ev(sink, off, CLIPEV_CLIP_STOPPED, role, 0, 0, clip);
             e->cur[role] = CLIP_NONE;
             e->pos[role] = 0;
             return;
         }
-        /* loop: clamp notes still sounding to the loop point, then restart at step 0 */
+        /* loop: clamp notes still sounding to the loop point, then restart at step 0. T7b: the
+         * loop point is also where an edit to the playing clip lands (a fresh copy). */
         {
             uint32_t i;
             for (i = 0; i < CLIP_ENGINE_MAX_VOICES; i++)
@@ -399,6 +409,7 @@ static void advance_role(clip_engine_t *e, uint8_t role, uint32_t off, uint32_t 
                     (int32_t)(e->note[i].end - abs) > 0)
                     e->note[i].end = abs;
         }
+        e->play[role] = e->song->clip[clip];
         next = 0;
     }
     e->pos[role] = (uint8_t)next;
@@ -422,6 +433,12 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             set_bpm(e, c.bpm_x10);
             continue;
         }
+        if (c.cmd == CLIP_CMD_RELOAD) {        /* T7b: an edit landed; re-take the playing copy */
+            uint8_t r = clip_role(c.clip);
+            if (e->cur[r] == c.clip)
+                e->play[r] = e->song->clip[c.clip];
+            continue;
+        }
         if (c.cmd == CLIP_CMD_STOP) {
             role = c.clip;
             if (role >= NROLES)
@@ -435,7 +452,7 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             e->que_set[role] = 1;
             {
                 uint8_t q = (e->cur[role] != CLIP_NONE)
-                            ? e->song->clip[e->cur[role]].quant : Q_BAR;
+                            ? e->play[role].quant : Q_BAR;
                 e->que_at[role] = e->global_step + action_lead(e, role, q);
             }
             ev(sink, 0, CLIPEV_CLIP_QUEUED, role, 0, 0, CLIP_NONE);
@@ -584,7 +601,7 @@ uint8_t clip_engine_progress(const clip_engine_t *e, uint8_t role)
     uint32_t p;
     if (role >= NROLES || e->cur[role] == CLIP_NONE)
         return 0;
-    len = clip_len(e, e->cur[role]);
+    len = play_len(e, role);
     p = ((uint32_t)e->pos[role] * 256u) / (uint32_t)len;
     return p > 255u ? 255u : (uint8_t)p;
 }
@@ -595,4 +612,11 @@ void clip_engine_pos(const clip_engine_t *e, uint8_t *bar, uint8_t *beat, uint8_
     if (bar)  *bar  = (uint8_t)((s / STEPS_PER_BAR) & 0xFFu);
     if (beat) *beat = (uint8_t)(inbar / 4u);
     if (step) *step = (uint8_t)inbar;
+}
+
+uint32_t clip_engine_global_step(const clip_engine_t *e) { return e->global_step; }
+
+uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role)
+{
+    return role < NROLES ? e->pos[role] : 0;
 }

@@ -41,8 +41,9 @@ typedef struct {
     void *ctx;
 } clip_sink_t;
 
-/* UI-side command: a clip index in model.h's key-zone order, a role stop, or a tempo. */
-enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM };
+/* UI-side command: a clip index in model.h's key-zone order, a role stop, a tempo, or (T7b) a
+ * reload of a playing clip's private copy after an edit. */
+enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_RELOAD };
 typedef struct {
     uint8_t  cmd;
     uint8_t  clip;     /* launch: the clip; stop: the role */
@@ -80,6 +81,12 @@ typedef struct {
 
     /* Note pool: every note this engine turned on but has not turned off yet. */
     struct { uint8_t used, role, note; uint32_t end; } note[CLIP_ENGINE_MAX_VOICES];
+
+    /* T7b: each playing role's clip has its own copy. The audio ISR reads only this, never
+     * `song->clip[]`, which the UI edits in the main loop. A copy is taken at launch, at the
+     * loop point, and on CLIP_CMD_RELOAD (posted after an edit) — i.e. a double-buffer swap at a
+     * step boundary, so the ISR never sees a half-written clip_t. */
+    clip_t play[NROLES];
 } clip_engine_t;
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
@@ -105,6 +112,16 @@ void clip_engine_launch_now(clip_engine_t *e, uint8_t clip);
 /* Tempo change from the main loop, through the ring. It is applied at the next render and is
  * the one source of truth (it also writes song->bpm_x10). */
 void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
+
+/* T7b: re-take the playing copy of `clip` from song->clip[clip] at the next step boundary, after
+ * the UI edited it. A no-op when the role is not playing that clip (it is loaded on launch). */
+void clip_engine_reload(clip_engine_t *e, uint8_t clip);
+
+/* T7b: the 16th index since the transport started (for recording and the playhead). */
+uint32_t clip_engine_global_step(const clip_engine_t *e);
+
+/* T7b: the step inside a role's playing clip (the playhead), 0 when the role is stopped. */
+uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role);
 
 /* Add nframes of transport and call the sink for every event in that window, with its
  * exact sample offset into the window. */

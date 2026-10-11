@@ -432,6 +432,10 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
 
+void live_bridge_clip_reload(uint8_t clip) { clip_engine_reload(&g_eng, clip); }
+uint32_t live_bridge_global_step(void) { return clip_engine_global_step(&g_eng); }
+uint8_t live_bridge_clip_step(uint8_t role) { return clip_engine_clip_step(&g_eng, role); }
+
 /* ----- queries ----- */
 
 uint8_t live_bridge_playing_clip(uint8_t role) { return clip_engine_playing_clip(&g_eng, role); }
@@ -454,6 +458,9 @@ int live_bridge_stop_queued(int role)
 _Static_assert(ROLE_DRUMS == LIVE_DRUMS && ROLE_BASS == LIVE_BASS && ROLE_LEAD == LIVE_LEAD &&
                ROLE_CHORDS == LIVE_CHORDS && ROLE_FX == LIVE_FX && NROLES == LIVE_NROLES, "role order");
 _Static_assert(NCLIPS == (unsigned)LIVE_NCLIPS && CLIP_NONE == LIVE_CLIP_NONE, "clip constants");
+_Static_assert(CLIP_MAX_STEPS == (unsigned)LIVE_MAX_STEPS && STEPS_PER_BAR == (unsigned)LIVE_STEPS_PER_BAR &&
+               DRUM_LANES == (unsigned)LIVE_DRUM_LANES && CLIP_MAX_NOTES == (unsigned)LIVE_MAX_NOTES &&
+               CLIP_MOTION_LANES == (unsigned)LIVE_MOTION_LANES && PARAM_NONE == LIVE_PARAM_NONE, "editor constants");
 
 int live_bridge_role_first(int role)
 {

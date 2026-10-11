@@ -26,6 +26,12 @@ enum { LIVE_PADS, LIVE_PLAY };
 
 #define LIVE_NCLIPS 27u          /* core/model/model.h's NCLIPS (asserted in live_bridge.c) */
 #define LIVE_CLIP_NONE 0xFFu     /* core/model/model.h's CLIP_NONE */
+#define LIVE_MAX_STEPS 64u       /* model.h CLIP_MAX_STEPS */
+#define LIVE_STEPS_PER_BAR 16u   /* model.h STEPS_PER_BAR */
+#define LIVE_DRUM_LANES 11u      /* model.h DRUM_LANES */
+#define LIVE_MAX_NOTES 96u       /* model.h CLIP_MAX_NOTES */
+#define LIVE_MOTION_LANES 2u     /* model.h CLIP_MOTION_LANES */
+#define LIVE_PARAM_NONE 0xFFFFu  /* model.h PARAM_NONE */
 
 /* Behavior of a clip's motion lane's `param` field, which model.h leaves free: it is the
  * engine.h (target, voice, index) triple, packed so the low byte is the index and the high
@@ -101,6 +107,11 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel);
 /* Tempo, in the clip engine's single source of truth. */
 void live_bridge_set_bpm(uint16_t bpm_x10);
 uint16_t live_bridge_bpm_x10(void);
+
+/* T7b: re-take the playing copy of an edited clip, and the transport's 16th index. */
+void live_bridge_clip_reload(uint8_t clip);
+uint32_t live_bridge_global_step(void);
+uint8_t live_bridge_clip_step(uint8_t role);   /* the step inside a role's playing clip */
 
 /* UI queries. */
 uint8_t live_bridge_playing_clip(uint8_t role);   /* CLIP_NONE when stopped */
