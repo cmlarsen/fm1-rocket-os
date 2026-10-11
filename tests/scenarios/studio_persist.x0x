@@ -2,6 +2,8 @@
 # reboot brings the same song back (the T6i pattern-hash remap is gone; the song is the object).
 wait 300
 tap SEQ
+tap SEQ
+tap SEQ
 spin K1 16
 spin K2 1
 spin K3 1

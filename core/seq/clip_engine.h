@@ -41,15 +41,16 @@ typedef struct {
     void *ctx;
 } clip_sink_t;
 
-/* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, or a
- * tempo. */
+/* UI-side command: a clip index in model.h's key-zone order, a role stop, a role mute, a tempo, or
+ * (T7b) a launch that takes effect on an exact global step (the recorded clip's close). */
 enum { CLIP_CMD_LAUNCH, CLIP_CMD_STOP, CLIP_CMD_LAUNCH_NOW, CLIP_CMD_SET_BPM, CLIP_CMD_MUTE,
-       CLIP_CMD_MUTE_CLEAR };
+       CLIP_CMD_MUTE_CLEAR, CLIP_CMD_LAUNCH_AT };
 typedef struct {
     uint8_t  cmd;
     uint8_t  clip;     /* launch: the clip; stop / mute (T10i): the role */
     uint8_t  quant;    /* Q_BAR / Q_BEAT / Q_END; mute: 1 on, 0 off */
     uint16_t bpm_x10;  /* CLIP_CMD_SET_BPM */
+    uint32_t at;       /* CLIP_CMD_LAUNCH_AT: the global step it takes effect on */
 } clip_cmd_t;
 
 #define CLIP_CMD_RING 16u
@@ -83,6 +84,17 @@ typedef struct {
 
     /* Note pool: every note this engine turned on but has not turned off yet. */
     struct { uint8_t used, role, note; uint32_t end; } note[CLIP_ENGINE_MAX_VOICES];
+
+    /* T7b: the main loop owns the snapshot; the audio ISR only ever reads play[]/next[] here,
+     * never `song->clip[]`. `play[role]` is the role's playing copy and `next[role]` a launch
+     * target staged by the main loop before the launch command; the ISR swaps next -> play at the
+     * step boundary (apply_role). After an edit the main loop writes the changed clip into play[] /
+     * next[] with the audio IRQs masked (clip_engine_clip_changed), so the ISR never sees a
+     * half-written clip_t. */
+    clip_t play[NROLES];
+    clip_t next[NROLES];
+    uint8_t next_set[NROLES];   /* next[role] holds a staged launch target */
+    uint8_t next_clip[NROLES];  /* the clip index staged in next[role] */
 } clip_engine_t;
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
@@ -105,9 +117,26 @@ void clip_engine_stop(clip_engine_t *e, uint8_t role);
  * a queued clip; it launches the new one now. */
 void clip_engine_launch_now(clip_engine_t *e, uint8_t clip);
 
+/* T7b: launch so the clip starts on exactly global step `at_step` (the recorded clip's close
+ * boundary). Armed before the boundary is reached, so there is no gap. */
+void clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step);
+
 /* Tempo change from the main loop, through the ring. It is applied at the next render and is
  * the one source of truth (it also writes song->bpm_x10). */
 void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
+
+/* T7b: after an edit to `clip`, the main loop writes the song's clip into the engine's play[] (when
+ * it is the role's playing clip) and next[] (when a launch of it is staged), with the audio IRQs
+ * masked by the caller. The ISR never reads song->clip[]. */
+void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip);
+
+/* T7b: the 16th index since the transport started, and the fraction into the current step (0..255),
+ * for recording (the loop owns these). */
+uint32_t clip_engine_global_step(const clip_engine_t *e);
+uint8_t  clip_engine_step_phase(const clip_engine_t *e);
+
+/* T7b: the step inside a role's playing clip (the playhead), 0 when the role is stopped. */
+uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role);
 
 /* T10i: mute / unmute a role, through the same ring. Muting releases the role's sounding
  * notes immediately (note-offs at the window start) and suppresses new note-ons; the transport

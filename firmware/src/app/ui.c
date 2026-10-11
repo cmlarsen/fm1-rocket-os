@@ -25,8 +25,9 @@ static const int8_t KEY_WHITE[NKEYS] = {0, -1, 1, -1, 2, -1, 3, 4, -1, 5, -1, 6,
 static const int8_t KEY_BLACK[NKEYS] = {-1, 0, -1, 1, -1, 2, -1, -1, 3, -1, 4, -1, -1, 5, -1, 6, -1, 7, -1, -1, 8, -1, 9, -1, -1, 10, -1};
 static uint8_t WHITE_KEY[16], BLACK_KEY[11];
 
-enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND, V_SONGS, NVIEWS };
-static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND", "SONGS"};
+enum { V_HOME, V_PART, V_GEN, V_FX, V_MIX, V_GLO, V_SONG, V_PERF, V_SEQ, V_LIVE, V_STUDIO, V_CLIPSET, V_SOUND,
+       V_CLIPEDIT, V_CLIPMOTION, V_SONGS, NVIEWS };
+static const char *const VIEW_N[NVIEWS] = {"HOME", "", "TB-3PO", "FX", "MIX", "GLOBAL", "SONG", "PERF", "SEQ", "LIVE", "STUDIO", "STUDIO", "SOUND", "EDIT", "MOTION", "SONGS"};
 /* T7a: the classic X0X pages (the pattern editors) are not on the normal button paths any more;
  * they are reached from the GLOBAL list's "Classic patterns" row. `classic` is that mode: X0X's
  * sequencer is the audio source and its views behave exactly as before. */
@@ -142,6 +143,11 @@ static void studio_draw_sound(int band);       /* V_SOUND: the FM6/NOISE sound c
 static uint16_t studio_footer_sound(const char **a, const char **b, const char **c);
 /* the clip-setting knob refs (R_CLIP_*), used by build_pages / pref_* in ui.c */
 enum { RK_CLIP_LEN, RK_CLIP_MODE, RK_CLIP_QUANT, RK_CLIP_SWING };
+
+/* ====================================================== T7b: the clip editors === */
+/* ui_clip.c is included near the bottom (after ui_studio.c). The notes / drum editors, the motion
+ * page and recording into a clip are in it; its entry points live in ui_clip.h. */
+#include "ui_clip.h"
 
 /* ============================================================ T8i: SONGS === */
 /* The songs list and its CRUD, in ui_songs.c (included near the bottom, after ui_name.c).
@@ -318,7 +324,8 @@ static void say(const char *a, const char *b)
 enum { R_NONE, R_ENG, R_SWING, R_DLEN, R_DRATE, R_BLEN, R_BRATE, R_BDIR, R_BTRANS, R_GEN,
        R_TEMPO, R_ACCENT, R_CLKOUT, R_NOTEOUT, R_PALETTE, R_KEYLED, R_KEYSOUND, R_AUTOSAVE, R_ACT, R_SBAR, R_SPAT, R_SMODE,
        R_SLEN, R_STALLS, R_HDR, R_TAPE, R_MIDICH, R_OUTLOUD, R_SREP, R_BATT,
-       R_CLIP_LEN, R_CLIP_MODE, R_CLIP_QUANT, R_CLIP_SWING };   /* T7a: the cursor clip's settings */   /* R_TAPE: FX's one-knob TAPE (DIGI .. worn tape) */          /* R_HDR: a list's section header (a = its group), never selected */
+       R_CLIP_LEN, R_CLIP_MODE, R_CLIP_QUANT, R_CLIP_SWING,          /* T7a: the cursor clip's settings */
+       R_ED_STEP, R_ED_NOTE, R_ED_VEL, R_ED_LEN, R_ED_LANE };  /* T7b: the editor's cards */   /* R_TAPE: FX's one-knob TAPE (DIGI .. worn tape) */          /* R_HDR: a list's section header (a = its group), never selected */
 typedef struct { uint8_t kind, a, b, c; } pref_t;
 #define PR(k, a, b, c) ((pref_t){(k), (a), (b), (c)})
 #define NONE PR(R_NONE, 0, 0, 0)
@@ -336,6 +343,13 @@ static const x0x_param_t CLIP_LEN_P = {"LENGTH", 63, 0, 0};
 static const x0x_param_t CLIP_MODE_P = {"MODE", 1, 0, CLIPMODE_N};
 static const x0x_param_t CLIP_QUANT_P = {"LAUNCH", 2, 0, QUANT_N};
 static const x0x_param_t CLIP_SWING_P = {"SWING", 100, 0, 0};
+/* T7b: the editor's K1-K4 cards */
+static const x0x_param_t CLIP_STEP_P = {"STEP", LIVE_MAX_STEPS - 1, 0, 0};
+static const x0x_param_t CLIP_NOTE_P = {"NOTE", 127, 0, 0};
+static const x0x_param_t CLIP_VEL_P = {"VEL", 127, 0, 0};
+static const x0x_param_t CLIP_NLEN_P = {"LEN", LIVE_MAX_STEPS - 1, 0, 0};
+static const char *const CLIP_LANE_N[LIVE_DRUM_LANES] = {"BD", "SD", "LT", "MT", "HT", "RS", "CP", "CH", "OH", "CR", "RD"};
+static const x0x_param_t CLIP_LANE_P = {"LANE", LIVE_DRUM_LANES - 1, 0, CLIP_LANE_N};
 enum { G_DENS, G_ACC, G_SLIDE, G_OCTS, G_ROOT, G_SCALE, G_BASE, G_MUT, NGEN };
 static const x0x_param_t GEN_P[NGEN] = {
     {"DENS", 100, 70, 0}, {"ACCENT", 100, 40, 0}, {"SLIDE", 100, 25, 0}, {"OCTS", 2, 1, 0},
@@ -435,6 +449,11 @@ static const x0x_param_t *pref_desc(pref_t r)
     case R_CLIP_MODE: return &CLIP_MODE_P;
     case R_CLIP_QUANT: return &CLIP_QUANT_P;
     case R_CLIP_SWING: return &CLIP_SWING_P;
+    case R_ED_STEP: return &CLIP_STEP_P;
+    case R_ED_NOTE: return &CLIP_NOTE_P;
+    case R_ED_VEL: return &CLIP_VEL_P;
+    case R_ED_LEN: return &CLIP_NLEN_P;
+    case R_ED_LANE: return &CLIP_LANE_P;
     default: return 0;
     }
 }
@@ -503,6 +522,11 @@ static int pref_get(pref_t r)
         return c < 0 ? 0 : song_io_clip_quant(c);
     }
     case R_CLIP_SWING: return song_io_swing();
+    case R_ED_STEP: return clip_edit_get(CLK_STEP);
+    case R_ED_NOTE: return clip_edit_get(CLK_NOTE);
+    case R_ED_VEL: return clip_edit_get(CLK_VEL);
+    case R_ED_LEN: return clip_edit_get(CLK_LEN);
+    case R_ED_LANE: return clip_edit_get(CLK_LANE);
     default: return 0;
     }
 }
@@ -621,6 +645,11 @@ static void pref_set(pref_t r, int v)
         break;
     }
     case R_CLIP_SWING: song_io_set_swing(v); break;
+    case R_ED_STEP: clip_edit_set(CLK_STEP, v); break;
+    case R_ED_NOTE: clip_edit_set(CLK_NOTE, v); break;
+    case R_ED_VEL: clip_edit_set(CLK_VEL, v); break;
+    case R_ED_LEN: clip_edit_set(CLK_LEN, v); break;
+    case R_ED_LANE: clip_edit_set(CLK_LANE, v); break;
     default: break;
     }
 }
@@ -661,11 +690,12 @@ static const char *pref_name(pref_t r)
     static const char *const CHN[MX_NPARAMS] = {"LEVEL", "REV", "DLY", "PAN"};
     const x0x_param_t *d = pref_desc(r);
     static const char *const SEQN[6] = {"LENGTH", "RATE", "LENGTH", "RATE", "DIRECT", "TRANSP"};
-    if (r.kind == R_CLIP_LEN || r.kind == R_CLIP_MODE || r.kind == R_CLIP_QUANT || r.kind == R_CLIP_SWING)
+    if (r.kind == R_CLIP_LEN || r.kind == R_CLIP_MODE || r.kind == R_CLIP_QUANT || r.kind == R_CLIP_SWING ||
+        r.kind == R_ED_STEP || r.kind == R_ED_NOTE || r.kind == R_ED_VEL || r.kind == R_ED_LEN || r.kind == R_ED_LANE)
         return d->name;
     if (r.kind == R_ACT && r.a == ACT_CLASSIC)       /* T7a: enter Classic, or back to the song home */
         return ui.classic ? "BACK TO SONG" : "CLASSIC PATTERNS";
-    if (ui.view == V_LIVE && r.kind == R_ENG) {       /* T3: the LIVE performance knobs' design labels */
+    if ((ui.view == V_LIVE || ui.view == V_CLIPMOTION) && r.kind == R_ENG) {   /* T3/T7b: design labels */
         if (r.a == T_MST && r.c == MST_DJF)
             return "FILTER";
         if (r.a == T_FX && r.c == FX_RV_LEVEL)
@@ -1042,6 +1072,17 @@ static void build_pages(void)
                  PR(R_ENG, T_RSV, v, 6), PR(R_ENG, T_RSV, v, 7));
         break;
     }
+    case V_CLIPEDIT:                                   /* T7b: the notes / drum editor's cards */
+        if (clip_edit_is_drum())
+            add_page("DRUM", PR(R_ED_LANE, 0, 0, 0), NONE, NONE, NONE);
+        else
+            add_page("EDIT", PR(R_ED_STEP, 0, 0, 0), PR(R_ED_NOTE, 0, 0, 0),
+                     PR(R_ED_VEL, 0, 0, 0), PR(R_ED_LEN, 0, 0, 0));
+        break;
+    case V_CLIPMOTION:                                 /* T7b: the four performance params */
+        add_page("MOTION", PR(R_ENG, T_MST, 0, MST_DJF), PR(R_ENG, T_FX, 0, FX_RV_LEVEL),
+                 PR(R_ENG, T_FX, 0, FX_DL_LEVEL), PR(R_ENG, T_FX, 0, FX_DRIVE));
+        break;
     default: break;
     }
     if (pg.n == 0)
@@ -2248,6 +2289,10 @@ static void key_event(int k, int down)
         studio_handle_key(k, down);
         return;
     }
+    if (clip_editing()) {                                  /* T7b: the clip editors' keys */
+        clip_handle_key(k, down);
+        return;
+    }
     if (ui.view == V_CLIPSET)
         return;                                            /* the clip settings page: the keys are inert */
     if (!ui.classic && (ui.view == V_PART || ui.view == V_SOUND)) {   /* sound pages: audition the role */
@@ -2426,7 +2471,8 @@ static void button_tap(int b)
             studio_set_classic(0);
             return;
         }
-        if (!ui.classic && ui.view != V_STUDIO && ui.view != V_CLIPSET && ui.view != V_LIVE) {
+        if (!ui.classic && ui.view != V_STUDIO && ui.view != V_CLIPSET && ui.view != V_LIVE &&
+            ui.view != V_CLIPEDIT && ui.view != V_CLIPMOTION) {
             if (b == B_HOME && ui.overlay != O_NONE) {
                 close_overlay();
                 return;
@@ -2442,6 +2488,10 @@ static void button_tap(int b)
     }
     if (ui.view == V_STUDIO || ui.view == V_CLIPSET || ui.view == V_SOUND) {   /* T7a: the song pages */
         if (studio_handle_button(b))
+            return;
+    }
+    if (clip_editing()) {                              /* T7b: the clip editors' buttons */
+        if (clip_handle_button(b))
             return;
     }
     switch (b) {
@@ -2843,6 +2893,10 @@ static void input(void)
     }
     if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {   /* T7a: the song home's encoders */
         studio_input();
+        return;
+    }
+    if (clip_editing()) {                                /* T7b: the clip editors' encoders */
+        clip_input();
         return;
     }
     if ((e = enc(EN_SELECT)) != 0) {             /* SELECT: move; with HOME held: tempo */
@@ -3304,6 +3358,10 @@ static void draw_header(void)
     }
     if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {   /* T7a: the song home's header */
         studio_draw_header();
+        return;
+    }
+    if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {   /* T7b: the clip editors' header */
+        clip_draw_header();
         return;
     }
     {   /* T7a: in classic mode a CLASSIC chip sits at the left, everything else follows it */
@@ -4065,6 +4123,8 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
         return live_footer(a, b, c);
     } else if (ui.view == V_STUDIO || ui.view == V_CLIPSET) {
         return studio_footer(a, b, c);
+    } else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {
+        return clip_footer(a, b, c);
     } else if (ui.view == V_SOUND || (!ui.classic && ui.view == V_PART)) {
         return studio_footer_sound(a, b, c);        /* T7a: sound-only pages */
     } else if (ui.view == V_HOME) {
@@ -4149,6 +4209,8 @@ static void draw_main(void)
             live_draw(band);
         else if (ui.view == V_STUDIO || ui.view == V_CLIPSET)
             studio_draw(band);
+        else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION)
+            clip_draw(band);                                 /* T7b: the clip editors */
         else if (ui.view == V_SOUND)
             studio_draw_sound(band);
         else if (!ui.classic && ui.view == V_PART)
@@ -4165,6 +4227,8 @@ static void draw_main(void)
         live_draw_ring();
     else if (studio_holding())
         studio_draw_ring();
+    else if (clip_rec_active())                        /* T7b: a clip record pass: a red frame */
+        frame(0, 0, 240, 2 * BAND_H, TOK_REC);
     cv_commit_rect(1, 0, MAIN_Y);
 }
 
@@ -4354,6 +4418,8 @@ static void draw_knobs(void)
 /* ===================================================================== LEDs === */
 /* T7a: the STUDIO song home (its own file, included like ui_live.c below). */
 #include "ui_studio.c"
+/* T7b: the clip editors (notes / drums / motion) and recording. */
+#include "ui_clip.c"
 /* T3: the LIVE view lives in its own file, included here so it can use every helper above
  * (its entry points are forward-declared at the top of ui.c). */
 #include "ui_live.c"
@@ -4405,6 +4471,8 @@ static void leds(void)
             live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SCL shows the layer */
         } else if (ui.view == V_STUDIO) {
             studio_leds(&b, &k, &d);                 /* T7a: the clip grid's states on the keys */
+        } else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {
+            clip_leds(&b, &k, &d);                   /* T7b: the editor's states on the keys */
         } else if (ui.view == V_HOME || ui.view == V_SONG) {
             const song_t *sg = song();
             int bar = ui.view == V_SONG && ui.song_sel < sg->len;
@@ -4547,6 +4615,7 @@ void ui_frame(void)
     input();
     engine_perform_tick();                          /* T10i: the echo controller's targets */
     studio_tick();                                  /* T7a: the clear / copy hold timers */
+    clip_tick();                                    /* T7b: the record-close timer, the toast */
     undo_tick();
     autosave();
     perf_test_tick();

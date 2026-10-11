@@ -50,6 +50,7 @@ int  song_io_clip_nnotes(int clip);
 int  song_io_clip_motion(int clip);       /* the used motion lanes */
 int  song_io_clip_role(int clip);
 void song_io_clip_create(int clip, int len, int mode, int quant);
+void song_io_clip_create_undoable(int clip, int len, int mode, int quant);   /* T7b: + undo entry */
 void song_io_clip_clear(int clip);
 void song_io_clip_copy(int dst, int src);
 void song_io_clip_set_len(int clip, int len);
@@ -62,7 +63,38 @@ void song_io_name(char *out, int n);      /* the song's name, NUL-terminated */
 int  song_io_key(void);                   /* 0..11 (C..B) */
 int  song_io_scale(void);                 /* model.h's SCALE_* */
 
-/* Undo entry points (T7 wires the UI; no UI yet). The clip args are the model's `clip_t *`, passed
+/* ---- T7b: the clip editor's edits ---------------------------------------- */
+/* Each editor session and each record pass is one undo entry: edit_begin when the editor opens,
+ * edit_end when it closes, and a mutator calls edit_push() just before it writes the clip (the
+ * first push stores the clip as it was before the session, so undo reverts the whole session). */
+void song_io_edit_begin(int clip);
+void song_io_edit_end(void);
+void song_io_edit_push(void);
+
+int  song_io_clip_is_drum(int clip);      /* 1 when the clip's role is DRUMS */
+
+/* Drums: 11 lanes x the clip length, plus a per-step accent. */
+int  song_io_drum_get(int clip, int lane, int step);     /* 0 / 1 */
+int  song_io_drum_accent(int clip, int step);            /* 0 / 1 */
+void song_io_drum_set(int clip, int lane, int step, int on);
+void song_io_drum_set_accent(int clip, int step, int on);
+
+/* Notes: step, note (MIDI), vel (1..127), len (steps). */
+int  song_io_note_count(int clip);
+int  song_io_note_get(int clip, int i, int *step, int *note, int *vel, int *len);
+int  song_io_note_index(int clip, int step, int note);   /* -1 when absent */
+int  song_io_note_add(int clip, int step, int note, int vel, int len);  /* the index, or -1 */
+int  song_io_note_remove(int clip, int step, int note);
+void song_io_note_set(int clip, int i, int step, int note, int vel, int len);
+
+/* Motion: two lanes a clip; a lane is one packed param (live_bridge.h's LIVE_PARAM). */
+int  song_io_motion_param(int clip, int lane);           /* -1 when the lane is empty */
+int  song_io_motion_lane(int clip, int param, int create); /* the lane for a param, or -1 */
+int  song_io_motion_get(int clip, int lane, int step);   /* -1 when unset, else 0..127 */
+void song_io_motion_set(int clip, int lane, int step, int v);   /* v < 0 clears the cell */
+void song_io_motion_clear(int clip, int lane);
+
+/* ---- undo entry points (T7 wires the UI; no UI yet). The clip args are the model's `clip_t *`, passed
  * as void here. `push_*` are called after the edit, with the value it replaced. `undo`/`redo`
  * return model's UNDO_DONE (1) / UNDO_EMPTY (0) / UNDO_CANNOT (-1) and mark the song dirty when
  * they act. `undo_clip`/`redo_clip` name the clip the next undo/redo touches, -1 when none. */

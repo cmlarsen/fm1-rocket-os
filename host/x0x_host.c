@@ -735,6 +735,8 @@ static int expect(const char *what, const char *val)
     else if (!strncmp(what, "liveclip", 8)) {      /* liveclipR: the playing clip on role R, -1 none */
         uint8_t c = live_bridge_playing_clip((uint8_t)(atoi(what + 8) % LIVE_NROLES));
         got = c == LIVE_CLIP_NONE ? -1 : (int)c;
+    } else if (!strncmp(what, "liveprog", 8)) {     /* liveprogR: the playing clip's progress, 0..255 */
+        got = (int)live_bridge_progress((uint8_t)(atoi(what + 8) % LIVE_NROLES));
     } else if (!strncmp(what, "liveque", 7)) {      /* livequeR: the queued clip (or stop) on role R */
         uint8_t c = live_bridge_queued_clip((uint8_t)(atoi(what + 7) % LIVE_NROLES));
         got = c == LIVE_CLIP_NONE ? -1 : (int)c;
@@ -853,6 +855,64 @@ static int expect(const char *what, const char *val)
         got = song_io_scale();
     else if (!strcmp(what, "boffs"))               /* T7a D1: note-offs the tap logged */
         got = (int)boffs;
+    else if (!strcmp(what, "editclip"))            /* T7b: the clip the editor holds */
+        got = clip_cur_clip();
+    else if (!strcmp(what, "globalstep"))          /* T7b: the transport's 16th index */
+        got = (int)live_bridge_global_step();
+    else if (!strcmp(what, "clipstep"))            /* T7b: the step inside a playing clip */
+        got = (int)live_bridge_clip_step(0);
+    else if (!strncmp(what, "drumget", 7)) {       /* T7b: drumget C.L.S */
+        int c, l, s;
+        sscanf(what, "drumget%d.%d.%d", &c, &l, &s);
+        got = song_io_drum_get(c, l, s);
+    } else if (!strncmp(what, "drumacc", 7) && what[7] != 's') {   /* T7b: drumacc C.S (not drumaccs) */
+        int c, s;
+        sscanf(what, "drumacc%d.%d", &c, &s);
+        got = song_io_drum_accent(c, s);
+    } else if (!strncmp(what, "drumhits", 8)) {    /* T7b: set hits in a DRUMS clip */
+        int c = atoi(what + 8), lane, s, n = 0;
+        for (lane = 0; lane < (int)LIVE_DRUM_LANES; lane++)
+            for (s = 0; s < (int)LIVE_MAX_STEPS; s++)
+                n += song_io_drum_get(c, lane, s);
+        got = n;
+    } else if (!strncmp(what, "drumaccs", 8)) {    /* T7b: accented steps in a DRUMS clip */
+        int c = atoi(what + 8), s, n = 0;
+        for (s = 0; s < (int)LIVE_MAX_STEPS; s++)
+            n += song_io_drum_accent(c, s);
+        got = n;
+    } else if (!strncmp(what, "notestep", 8)) {    /* T7b: notestep C.I */
+        int c, i;
+        sscanf(what, "notestep%d.%d", &c, &i);
+        song_io_note_get(c, i, &got, 0, 0, 0);
+    } else if (!strncmp(what, "notenote", 8)) {
+        int c, i;
+        sscanf(what, "notenote%d.%d", &c, &i);
+        song_io_note_get(c, i, 0, &got, 0, 0);
+    } else if (!strncmp(what, "notevel", 7)) {
+        int c, i;
+        sscanf(what, "notevel%d.%d", &c, &i);
+        song_io_note_get(c, i, 0, 0, &got, 0);
+    } else if (!strncmp(what, "notelen", 7)) {
+        int c, i;
+        sscanf(what, "notelen%d.%d", &c, &i);
+        song_io_note_get(c, i, 0, 0, 0, &got);
+    } else if (!strncmp(what, "mlparam", 7)) {     /* T7b: mlparam C.L (the packed lane param) */
+        int c, l;
+        sscanf(what, "mlparam%d.%d", &c, &l);
+        got = song_io_motion_param(c, l);
+    } else if (!strncmp(what, "mlval", 5)) {       /* T7b: mlval C.L.S */
+        int c, l, s;
+        sscanf(what, "mlval%d.%d.%d", &c, &l, &s);
+        got = song_io_motion_get(c, l, s);
+    } else if (!strncmp(what, "mlany", 5)) {       /* T7b: mlany C.L: the lane has a value */
+        int c, l, s, n = 0;
+        sscanf(what, "mlany%d.%d", &c, &l);
+        for (s = 0; s < (int)LIVE_MAX_STEPS; s++)
+            if (song_io_motion_get(c, l, s) >= 0)
+                n = 1;
+        got = n;
+    } else if (!strcmp(what, "recrec"))            /* T7b: a record pass is running */
+        got = clip_rec_active();
     else if (!strcmp(what, "bassheld"))            /* T7a r2: 303 gates still held */
         got = (int)(bass_on[0] + bass_on[1]);
     else if (!strcmp(what, "undodepth"))

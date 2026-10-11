@@ -274,8 +274,10 @@ void *live_bridge_song(void) { return &g_song; }
 static void sync_seq_tempo(void) { seq.bpm = (float)g_song.bpm_x10 / 10.0f; }
 void live_bridge_song_reload(void)
 {
+    uint32_t f = engine_crit_enter();                  /* T7b: re-init never tears a render */
     int r;
     clip_engine_init(&g_eng, &g_song);                 /* T10i: init zeroes the engine's mute bits */
+    engine_crit_exit(f);
     g_eng_ready = 1;
     for (r = 0; r < NROLES; r++)                        /* a live mute is performance state: not kept */
         g_song.role[r].muted = 0;                       /* in the song, and cleared on load (T10i review) */
@@ -421,8 +423,27 @@ void live_bridge_transport_start(void) { clip_engine_start(&g_eng); }
 void live_bridge_transport_stop(void) { clip_engine_transport_stop(&g_eng); }
 int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 
-void live_bridge_launch(uint8_t clip) { g_stop_q[clip_role(clip) % NROLES] = 0; clip_engine_launch(&g_eng, clip); }
-void live_bridge_launch_now(uint8_t clip) { g_stop_q[clip_role(clip) % NROLES] = 0; clip_engine_launch_now(&g_eng, clip); }
+void live_bridge_launch(uint8_t clip)
+{
+    uint32_t f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch(&g_eng, clip);                  /* stages next[] under the mask */
+    engine_crit_exit(f);
+}
+void live_bridge_launch_now(uint8_t clip)
+{
+    uint32_t f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch_now(&g_eng, clip);
+    engine_crit_exit(f);
+}
+void live_bridge_launch_at(uint8_t clip, uint32_t at_step)
+{
+    uint32_t f = engine_crit_enter();
+    g_stop_q[clip_role(clip) % NROLES] = 0;
+    clip_engine_launch_at(&g_eng, clip, at_step);
+    engine_crit_exit(f);
+}
 void live_bridge_stop(uint8_t role)
 {
     if (role >= NROLES)
@@ -461,6 +482,19 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 
 void live_bridge_set_bpm(uint16_t bpm_x10) { clip_engine_queue_bpm(&g_eng, bpm_x10); }
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
+
+/* T7b: the main loop owns the snapshot. Every edit writes the clip into the engine's copies with
+ * the audio IRQs masked; a launch stages its copy the same way before the command is posted, so the
+ * audio ISR only ever reads play[]/next[], never song->clip[]. */
+void live_bridge_clip_changed(uint8_t clip)
+{
+    uint32_t f = engine_crit_enter();
+    clip_engine_clip_changed(&g_eng, clip);
+    engine_crit_exit(f);
+}
+uint32_t live_bridge_global_step(void) { return clip_engine_global_step(&g_eng); }
+uint8_t live_bridge_step_phase(void) { return clip_engine_step_phase(&g_eng); }
+uint8_t live_bridge_clip_step(uint8_t role) { return clip_engine_clip_step(&g_eng, role); }
 
 /* T10i: the next 1/8 and 1/16 grid distances. The clip engine's step math is
  *     step_sample(k + m) = step_sample + m*step_L + (step_frac + m*step_f) / bpm_x10
@@ -533,6 +567,9 @@ int live_bridge_stop_queued(int role)
 _Static_assert(ROLE_DRUMS == LIVE_DRUMS && ROLE_BASS == LIVE_BASS && ROLE_LEAD == LIVE_LEAD &&
                ROLE_CHORDS == LIVE_CHORDS && ROLE_FX == LIVE_FX && NROLES == LIVE_NROLES, "role order");
 _Static_assert(NCLIPS == (unsigned)LIVE_NCLIPS && CLIP_NONE == LIVE_CLIP_NONE, "clip constants");
+_Static_assert(CLIP_MAX_STEPS == (unsigned)LIVE_MAX_STEPS && STEPS_PER_BAR == (unsigned)LIVE_STEPS_PER_BAR &&
+               DRUM_LANES == (unsigned)LIVE_DRUM_LANES && CLIP_MAX_NOTES == (unsigned)LIVE_MAX_NOTES &&
+               CLIP_MOTION_LANES == (unsigned)LIVE_MOTION_LANES && PARAM_NONE == LIVE_PARAM_NONE, "editor constants");
 
 int live_bridge_role_first(int role)
 {

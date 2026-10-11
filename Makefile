@@ -181,7 +181,7 @@ check: fw host
 # lint the layout (tests/lint/check_layout.py). Runs on the Mac; exits non-zero on any finding or
 # on a shot that failed to write.
 screens-lint:
-	@mkdir -p build/screens/tour
+	@rm -rf build/screens/tour; mkdir -p build/screens/tour
 	@X0X_HOST_DEFS="-DX0X_LINT" X0X_HOST_OUT=build/host/x0x_host_lint sh host/build_host.sh
 	@X0X_LINT_LOG=build/screens/lint.log build/host/x0x_host_lint tests/scenarios/screens_tour.x0x build/screens/tour > build/screens/screens_tour.log 2>&1 || { cat build/screens/screens_tour.log; exit 1; }
 	@if grep -q "cannot write" build/screens/screens_tour.log; then echo "screens-lint: a shot failed to write"; exit 1; fi
@@ -293,7 +293,16 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name unit-songs
+unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-fx unit-name unit-songs
+
+# T7b re-review: the host plat_crit nesting (host/plat_crit_host.c).
+.PHONY: unit-crit
+unit-crit:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/crit_test tests/host/crit_test.c host/plat_crit_host.c
+	build/host/crit_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/crit_test_san tests/host/crit_test.c host/plat_crit_host.c
+	build/host/crit_test_san
 
 # T3: the LIVE bridge's pure pattern -> song mapping. The app builds add clip_engine.c at
 # FS = 44100 (the device sample counter); here it is passed explicitly so the T4c goldens

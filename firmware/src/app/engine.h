@@ -121,3 +121,9 @@ void engine_motion_rec(int lane);                           /* record a pass fro
 void engine_motion_hold(int lane);                          /* the knob wins for a pass */
 float engine_gr_db(void);                                   /* master compressor gain reduction (UI meter) */
 void engine_master_format(int i, char *buf);                /* a master pot in its unit */
+
+/* T7b: a short main-loop critical section for the clip engine's 528-byte snapshot: mask the audio
+ * interrupts (plat_crit_*), so live_bridge can write play[]/next[] without tearing the ISR's read.
+ * The token restores the previous state; nest-safe. */
+uint32_t engine_crit_enter(void);
+void engine_crit_exit(uint32_t state);

@@ -26,33 +26,50 @@ shot z02_card_seq_studio.png
 release SEQ
 release GLO
 wait 100
-# T7a STUDIO: the song home, the empty slot, the clip settings and the clear ring (the default view)
+# T7a STUDIO 1: the song home; the empty slot
 turn SELECT 4
 wait 1400
 shot s00_studio_home.png
 turn SELECT -4
 shot s00b_studio_empty.png
+# T7b STUDIO 3: the notes editor (SEQ creates BASS A and opens NOTES)
+cursor 1 0
 tap SEQ
 wait 1400
-shot s00c_studio_clipset.png
+shot s00c_studio_notes.png
+# T7b STUDIO 15: motion, then STUDIO 5: settings (SEQ cycles the editor's pages)
+tap SEQ
+wait 1400
+shot s00d_studio_motion.png
+tap SEQ
+wait 1400
+shot s00e_studio_clipset.png
 tap HOME
 wait 1400
+# T7b STUDIO 4: the drum grid (DRUMS A)
+cursor 0 0
+tap SEQ
+wait 1400
+shot s00f_studio_drums.png
+tap HOME
+wait 1400
+# T7a STUDIO 9: the clear ring
 press HOME
 key w0 down
 wait 700
-shot s00d_studio_clear.png
+shot s00g_studio_clear.png
 key w0 up
 release HOME
 # T7a: the sound cards outside Classic (EDIT from the song home)
 cursor 3 0
 tap EDIT
 wait 300
-shot s00e_sound_fm6.png
+shot s00h_sound_fm6.png
 tap HOME
 cursor 1 0
 tap EDIT
 wait 300
-shot s00f_sound_303.png
+shot s00i_sound_303.png
 tap HOME
 # T7a: into the classic X0X pages (GLOBAL -> Classic patterns)
 tap GLO

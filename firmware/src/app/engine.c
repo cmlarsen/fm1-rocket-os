@@ -61,6 +61,10 @@ void engine_motion_reset(void) { mot_release_req = 1; }   /* lanes changed under
 static volatile uint8_t all_off_req;
 void engine_all_off(void) { all_off_req = 1; }
 
+/* T7b: the clip engine's snapshot critical section, on the platform's IRQ mask */
+uint32_t engine_crit_enter(void) { return plat_crit_enter(); }
+void engine_crit_exit(uint32_t state) { plat_crit_exit(state); }
+
 /* ---- T10i: the punch FX ------------------------------------------------ */
 /* Engage/release/reset arrive from the main loop and reach the ISR through perform's own ring.
  * engine_perform_tick() runs each UI frame: it keeps perform's echo base in step with the
