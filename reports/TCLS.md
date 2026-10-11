@@ -143,3 +143,127 @@ product/interaction-model.md,product/screens.md,engineering/architecture.md,
 engineering/rc1-probe.md,decisions/0004-remove-classic-shorten-delay.md}`.
 
 Not changed: `firmware/src/dsp/` (FM6 and the DSP are byte-identical to the base commit).
+
+## r1: the Opus review findings
+
+The r1 pass fixes the three findings from the review of the TCLS tree, plus the nits it named. No
+behaviour the TCLS report promised changes; the ladder was re-run on the committed tree.
+
+### 1. No X0X pattern gesture survives on FX / MIX / GLOBAL
+
+`key_event` returned early for STUDIO, the clip editors and the sound pages only, so the inherited
+pattern gestures still ran on FX, MIX and GLOBAL:
+
+- SAVE + a white key pasted the pattern (`ACT_COPY` on the dead scratch pattern, `mark_dirty`);
+- HOME + a white key chained / cued it (`seq_chain` / `seq_cue`, and the inherited header drew a
+  `P1 >N` chip);
+- MIX + HOME + a black key muted a dead X0X part / drum track (`seq.mute` / `seq.vmute`).
+
+Those gestures are gone from `key_event`. MIX keeps its own black-key part / track pick (stereo.x0x
+still passes), and FX, MIX and GLOBAL return before the step keys. The fuzz then found the same
+kind of gesture on the encoders and buttons, so those went too: the PRESETS encoder no longer
+chains / cues a pattern on any surviving page, SAVE + OCT no longer picks the copy bank
+(`COPY TO P17-32`), and OCT no longer writes a step (LFO + OCT wrote a tie, ENV + OCT a rest) on the
+sound pages. The inherited header's X0X pattern / cue / chain chip is dropped
+(`draw_header`); the pages kept from X0X are setup / sound pages and no longer claim to play a
+pattern. `ui.help` (the Classic 1 s help) keeps its field only for the host's `expect help 0`.
+
+The UI fuzz now snapshots the shared scratch pattern, `proj.arr` (X0X's song and motion lanes),
+`seq.ppat`, `seq.pcue`, the chain, `seq.song_on` and `seq.pat`, and fails the moment an event
+changes any of them. The 200 × 2000 run found the PRESETS-encoder and the OCT step-edit paths the
+review's key-only repro missed; all are fixed. A scenario per gesture pins it (each fails on the
+pre-r1 tree, passes here):
+
+- `tests/scenarios/fx_save_paste.x0x` — FX + SAVE + white key; `expect dirty 0` and no pattern
+  state moves.
+- `tests/scenarios/fx_home_chain.x0x` — FX + HOME + white key; `expect cue 0`, and HOME returns.
+- `tests/scenarios/mix_home_mute.x0x` — MIX + HOME + black key (PARTS and a drum page);
+  `expect mute 0` / `vmute 0`.
+- `tests/scenarios/glo_pattern_gestures.x0x` — GLOBAL: paste, chain and the Classic keyboard all do
+  nothing (`expect voices 0`).
+- `tests/scenarios/sound_oct_no_edit.x0x` — a 303's sound page with REC on: LFO + OCT / ENV + OCT
+  leave the scratch step a rest and the project clean (`expect gate0.0 0`, `expect dirty 0`).
+
+`legato_cut.x0x` tested the Classic keyboard (REC + keys on GLOBAL), which is exactly the path that
+is gone; it is removed. `legato_live.x0x` keeps the mono-part rule on LIVE's PLAY layer.
+
+### 2. SAVE no longer sticks on "SAVES WHEN STOPPED"
+
+`save_project` and the autosave gated on `seq.playing` / `seq.req_stop`. With Classic gone
+`seq.playing` is always 0, and `seq.req_stop` was set by the OTA path's `seq_stop` and cleared only
+by `engine_all_off` (the audio ISR's `all_off_now`), so a SAVE after an OTA cancel could stick
+forever. Both gates now use the clip transport and the voices only:
+
+```c
+if (live_bridge_transport_playing() || engine_voices_active()) { ... }
+```
+
+The OTA path (`main_fm1.c`) stops the clip transport and releases the voices instead of calling
+`seq_stop`, and flushes the dirty song unconditionally before the OTA work (the
+`if (!live_bridge_active())` guard was dead: the clip engine is active from power-on). The host
+does not run `main_fm1.c` (no OTA session in the simulator), so `tests/scenarios/save_after_stop.x0x`
+reproduces the failure at the seam it can reach: the host's `stop` command sets the same
+`seq.req_stop` (it deliberately does not all-off), and the scenario then asserts SAVE saves
+(`expect store_writes >0`). It fails on the pre-r1 gate and passes here.
+
+### 3. FACTORY RESET wording
+
+The GLO question and the confirmation said `SOUND, PATTERNS, SONG` and `FACTORY SOUND + PATTERNS`,
+but `project_defaults` resets the settings and the sound only — not the X0X patterns (gone) and not
+the clip song. They now say `SOUNDS + SETTINGS` and `FACTORY SOUND + SETTINGS`. No test golden
+carried the wording (the `dump` JSON has no message text); the generated `docs/manual.html` was
+regenerated from `docs/MANUAL.md`, whose FACTORY RESET row now reads "the factory sounds and
+settings. The current song is kept".
+
+### NITs
+
+- **The fuzz tail is tighter.** It now waits 3 s after the stop and fails if any non-FM6 voice is
+  still sounding or any remaining FM6 voice is still held (not in its release stage); FM6's GLASS
+  BELL may then ring out, released, up to the same ~25 s bound, and the final `voices 0` /
+  `heldnotes 0` check stays. A reproduction writes `stop / wait 3000 / expect nfm6voices 0 /
+  expect fm6held 0 / wait 22000 / expect voices 0 / expect heldnotes 0`.
+- **Dead code removed.** `g_song_ready` (live_bridge.c; never read), `help_lines` and the dead
+  `draw_help` path (ui.c; `ui.help` was never set, so the stale THE PATTERN / TB-3PO / copy cards
+  never drew), and the whole PERF TEST (`perf_test_start/abort/tick`, the `perf` test fields,
+  `perf_bench`, `perf_snd`, `ACT_PERF_TEST`, its GLOBAL row and the host's `expect perftest` /
+  `perfres`). `rc_debug` does not touch it, so it was truly unreachable. The PERF screen keeps its
+  live CPU / stats readout.
+
+### Pool and RAM
+
+`make fw` and `make fw-debug` on deltron, committed tree.
+
+| Build | | POOL used | POOL spare | `.data+.bss` |
+|---|---|---:|---:|---:|
+| `make fw` (TCLS) | | 294,748 | 49,316 | 75,748 |
+| `make fw` r1 | | **294,748** | **49,316** | **72,676** |
+| `make fw-debug` (TCLS) | | 296,540 | 47,524 | 75,848 |
+| `make fw-debug` r1 | | **296,540** | **47,524** | **72,776** |
+
+The pool is unchanged; `.data+.bss` lost **3,072 B** (the PERF TEST's three bench `pattern_t`s and
+its `sound_t`, plus alignment).
+
+### Verification
+
+Every target the task asks for, on the committed tree. Logs under `build/ladder/`.
+
+| Command | Result |
+|---|---|
+| `make unit` | pass |
+| `make unit-core` | pass |
+| `make scenarios` | pass (incl. the 6 new scenarios; `legato_cut` removed) |
+| `make screens-lint` | pass: 0 findings |
+| `make fuzz-ui` | pass: 200 seeds × 2000 events |
+| `make check` | pass (forbidden symbols, flash guard, help cards, size, short fuzz) |
+| `make fw` | pass: pool 294,748 B of 344,064; `.data+.bss` 72,676 B |
+| `make fw-debug` | pass: pool 296,540 B of 344,064; `.data+.bss` 72,776 B |
+| `tools/check_loader.sh` (both packages) | ok: the loader is X0X 1.0.5's |
+
+Hardware was never flashed.
+
+### Files
+
+Changed: `firmware/src/app/{ui.c,ui_help.c,main_fm1.c,live_bridge.c}`, `host/x0x_host.c`,
+`docs/{MANUAL.md,manual.html}`, `reports/TCLS.md`, and the new
+`tests/scenarios/{fx_save_paste,fx_home_chain,mix_home_mute,glo_pattern_gestures,sound_oct_no_edit,save_after_stop}.x0x`.
+Removed: `tests/scenarios/legato_cut.x0x`.

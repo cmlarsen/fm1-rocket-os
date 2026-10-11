@@ -24,7 +24,6 @@
 static live_song_t g_song LIVE_POOL;
 static clip_engine_t g_eng LIVE_POOL;
 static uint8_t g_active;
-static uint8_t g_song_ready;                          /* T6i: g_song holds a loaded song or a mapped project */
 static uint8_t g_eng_ready;                           /* T7a: clip_engine_init has been called on g_eng */
 static uint32_t g_pat_hash;                           /* the project pattern hash the clips match */
 static uint8_t g_stop_q[NROLES];                      /* a stop on the role is pending (for the LED) */
@@ -262,7 +261,6 @@ void live_bridge_init(void)
     g_active = 1;                                     /* TCLS: the clip engine is the audio source in
                                                        * every view, from power-on; there is no second
                                                        * owner to hand it to. */
-    g_song_ready = 0;                                 /* T6i: nothing mapped or loaded yet */
     clip_engine_init(&g_eng, &g_song);
     g_eng_ready = 1;
 }
@@ -327,7 +325,6 @@ uint32_t live_bridge_rebuild(const pattern_t *pats)
 {
     rebuild_clips(pats, NPAT);
     g_pat_hash = live_bridge_pats_hash(pats);
-    g_song_ready = 1;
     return g_pat_hash;
 }
 
@@ -343,14 +340,12 @@ uint32_t live_bridge_rebuild_n(const pattern_t *pats, int npats)
             h = (h ^ p[n]) * 16777619u;
         g_pat_hash = h;
     }
-    g_song_ready = 1;
     return g_pat_hash;
 }
 
 void live_bridge_song_baseline(uint32_t pat_hash)
 {
     g_pat_hash = pat_hash;                            /* a stored song's clips match this project */
-    g_song_ready = 1;
 }
 
 /* TCLS: make the clip engine the audio source (the song is the edited object; there is no X0X

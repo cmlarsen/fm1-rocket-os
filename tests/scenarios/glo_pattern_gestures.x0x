@@ -1,0 +1,31 @@
+# TCLS r1: GLOBAL. The keys used to be the Classic keyboard (playing / writing the X0X pattern), and
+# SAVE + a white key pasted it, HOME + a white key chained / cued it. None of that may run here now.
+wait 300
+tap GLO
+expect view 5
+expect cue 0
+expect lanes 0
+expect voices 0
+press SAVE
+tapkey w2
+expect dirty 0               # the paste would have marked the project dirty
+release SAVE
+expect pattern 1
+expect cue 0
+press HOME
+tapkey w3
+expect cue 0                 # the chain / cue would have moved the part's cue to P4
+release HOME
+expect view 10
+# the keys play nothing: the Classic keyboard (and its step edits) is gone
+tap GLO
+expect view 5
+key 17 down
+wait 300
+expect voices 0
+key 17 up
+wait 200
+expect voices 0
+tap HOME
+expect view 10
+dump glo_pattern_gestures.json

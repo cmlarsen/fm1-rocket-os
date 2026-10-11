@@ -389,10 +389,9 @@ static void fm1_main(void)
         ota_service();                              /* M-UPGRADE handshake */
         if (usb.ota_req) {
             usb.ota_req = 0;
-            seq_stop(&seq);
-            if (!live_bridge_active())
-                song_io_flush();                    /* T6i: save a dirty song if it is safe; never re-init
-                                                     * the store here (ui_init below leaves it alone) */
+            live_bridge_transport_stop();               /* TCLS: the clip engine owns the transport */
+            engine_all_off();
+            song_io_flush();                            /* T6i: save a dirty song before the OTA work */
             if (flash_ok)
                 ota_session();                      /* returns only if nothing was committed */
             lcd_fill(0, 0, 240, 240, C_BLACK);

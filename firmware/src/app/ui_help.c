@@ -107,8 +107,8 @@ static help_ui_t hlp;
 
 int help_ctx(void)
 {
-    if (ui.overlay == O_ASK || perf_testing())
-        return -1;                         /* a question or the perf test: no overlay */
+    if (ui.overlay == O_ASK)
+        return -1;                         /* a question: no overlay */
     if (ui.view == V_SONGS)
         return HELP_CTX_SONGS;
     if (ui.view == V_LIVE)
@@ -125,7 +125,7 @@ void help_overlay_tick(uint32_t btn, uint32_t keys)
 {
     uint32_t home = 1u << B_HOME;
     int ctx = help_ctx();
-    if (ctx == -1) {                       /* Classic, a question, or the perf test: no overlay */
+    if (ctx == -1) {                       /* a question: no overlay */
         hlp.sheet = 0;
         hlp.card = 0;
         return;

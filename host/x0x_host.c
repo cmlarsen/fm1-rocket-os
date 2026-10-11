@@ -789,10 +789,6 @@ static int expect(const char *what, const char *val)
         got = seq_cue_of(&seq, PART_909) + 1;
     else if (!strncmp(what, "ppat", 4))            /* ppatP: part P's pattern, 1-based */
         got = seq.ppat[atoi(what + 4) % NPARTS] + 1;
-    else if (!strcmp(what, "perftest"))            /* -1 idle, 0..2 running, 3 done */
-        got = perf.test;
-    else if (!strncmp(what, "perfres", 7))         /* perfresK: scenario K's share of the CPU x 10 */
-        got = perf.res_load[atoi(what + 7) % 3];
     else if (!strncmp(what, "linechg", 7)) {       /* linechgB: 303 B's steps differ from snapline B */
         int b = atoi(what + 7) % NBASS;
         got = memcmp(cur_pat()->bass[b].step, line_snap[b].step, sizeof line_snap[b].step) != 0;
@@ -848,6 +844,8 @@ static int expect(const char *what, const char *val)
         got = help_fits();
     else if (!strcmp(what, "rec"))
         got = ui.rec;
+    else if (!strcmp(what, "dirty"))                 /* TCLS: the project has unsaved changes */
+        got = ui_dirty();
     else if (!strcmp(what, "sel"))                  /* the selected track of the part on screen */
         got = ui.sel[ui.part];
     else if (!strcmp(what, "view"))
@@ -1010,6 +1008,8 @@ static int expect(const char *what, const char *val)
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
         got = eng_noise_voices_active();
+    else if (!strcmp(what, "nfm6voices"))           /* TCLS: every voice except FM6's */
+        got = engine_voices_active() - eng_fm6_voices_active();
     else if (!strcmp(what, "stresslevel"))          /* RC1p: the running stress level (0 none) */
         got = rc_stress_level();
     else if (!strcmp(what, "core2forced"))          /* T5perf: the run has core 1 forced off */
@@ -1447,14 +1447,12 @@ static void fz_line(char *b, size_t sz, const fz_ev_t *e)
     }
 }
 
-/* T2c: stop everything the way the `stop` command and the fuzz release tail do — abort a perf
- * test, stop both transports. It deliberately does NOT call engine_all_off(): the tail must not
- * mask a hung note, so any voice a released key (or a stopped transport) leaves sounding remains
- * for `expect voices 0` to catch. Shared so a reproduction and the fuzz run match. */
+/* T2c: stop everything the way the `stop` command and the fuzz release tail do — stop both
+ * transports. It deliberately does NOT call engine_all_off(): the tail must not mask a hung note,
+ * so any voice a released key (or a stopped transport) leaves sounding remains for
+ * `expect voices 0` to catch. Shared so a reproduction and the fuzz run match. */
 static void host_all_stop(void)
 {
-    if (perf.test != PT_IDLE)
-        perf_test_abort();
     live_bridge_transport_stop();
     seq_stop(&seq);
     run_ms(1);
@@ -1471,6 +1469,45 @@ static int fz_tracked(void)
     return n;
 }
 
+/* TCLS: the X0X pattern bank is gone, so the one scratch pattern the dead editor shares and X0X's
+ * own arrangement (proj.arr: its song and motion lanes) must never change under any input. The fuzz
+ * snapshots them and fails the moment an event touches either. */
+static pattern_t fz_pat0;
+static uint8_t fz_arr0[sizeof(proj.arr)];
+static uint8_t fz_ppat0[NPARTS], fz_pcue0[NPARTS], fz_chain0[2], fz_songon0;
+static pattern_t *fz_patptr0;
+
+static void fz_pat_snapshot(void)
+{
+    memcpy(&fz_pat0, project_pat(0), sizeof fz_pat0);
+    memcpy(fz_arr0, &proj.arr, sizeof fz_arr0);
+    memcpy(fz_ppat0, (const void *)seq.ppat, sizeof fz_ppat0);
+    memcpy(fz_pcue0, (const void *)seq.pcue, sizeof fz_pcue0);
+    fz_chain0[0] = seq.chain_a;
+    fz_chain0[1] = seq.chain_b;
+    fz_songon0 = seq.song_on;
+    fz_patptr0 = seq.pat;
+}
+
+static const char *fz_pat_changed(void)
+{
+    if (memcmp(&fz_pat0, project_pat(0), sizeof fz_pat0))
+        return "the shared scratch pattern";
+    if (memcmp(fz_arr0, &proj.arr, sizeof fz_arr0))
+        return "proj.arr";
+    if (memcmp(fz_ppat0, (const void *)seq.ppat, sizeof fz_ppat0))
+        return "seq.ppat";
+    if (memcmp(fz_pcue0, (const void *)seq.pcue, sizeof fz_pcue0))
+        return "seq.pcue";
+    if (fz_chain0[0] != seq.chain_a || fz_chain0[1] != seq.chain_b)
+        return "the X0X chain";
+    if (fz_songon0 != seq.song_on)
+        return "seq.song_on";
+    if (fz_patptr0 != seq.pat)
+        return "seq.pat";
+    return 0;
+}
+
 /* the `fuzz SEED N` command: returns 1 when the invariant fails */
 static int fuzz_cmd(const char *dir, int seed, int n)
 {
@@ -1485,6 +1522,7 @@ static int fuzz_cmd(const char *dir, int seed, int n)
     fz_build(seed, n, &hk, &hb);
     (void)hk;
     (void)hb;
+    fz_pat_snapshot();                               /* TCLS: the pattern state / proj.arr baseline */
     snprintf(path, sizeof path, "%s/seed_%d.full.x0x", dir, seed);
     f = fopen(path, "w");                            /* written as the run goes: a crash still leaves it */
     if (f) {
@@ -1507,6 +1545,13 @@ static int fuzz_cmd(const char *dir, int seed, int n)
             fflush(f);
         }
         fz_apply(&fz_ev[i]);
+        {
+            const char *chg = fz_pat_changed();      /* TCLS: no input may touch the X0X patterns */
+            if (chg) {
+                printf("FAIL fuzz seed %d: event %d changed %s\n", seed, i, chg);
+                midfail = 1;
+            }
+        }
         if (ui.view != v0 || live_bridge_active() != la0) {
             int k;                                   /* a view / mode change releases what was held */
             for (k = 0; k < NKEYS; k++) {
@@ -1539,7 +1584,8 @@ static int fuzz_cmd(const char *dir, int seed, int n)
             run_ms(2);
         }
     if (wrote && !midfail) {
-        fputs("stop\nwait 25000\nexpect voices 0\nexpect heldnotes 0\n", f);
+        fputs("stop\nwait 3000\nexpect nfm6voices 0\nexpect fm6held 0\nwait 22000\n"
+              "expect voices 0\nexpect heldnotes 0\n", f);
         fflush(f);
     }
     if (wrote)
@@ -1549,10 +1595,19 @@ static int fuzz_cmd(const char *dir, int seed, int n)
         return 1;
     }
     host_all_stop();                                  /* stop both transports (never the all-notes-off) */
-    /* TCLS: wait for the voices to end, bounded at ~25 s. A factory patch can release slowly (the
-     * FM6 engine's own test allows up to ~24 s: the GLASS BELL rings out), so a fixed 3 s tail
-     * flagged a legitimate long release as a hung note. A truly hung note never ends and still
-     * fails. */
+    /* TCLS: 3 s after the stop every non-FM6 engine must be silent and every remaining FM6 voice
+     * released (in its release stage). FM6's GLASS BELL may ring out, released, up to the bound
+     * below (the engine's own test allows ~24 s); a truly hung note never ends and still fails. */
+    run_ms(3000);
+    {
+        int others = engine_voices_active() - eng_fm6_voices_active(), held = eng_fm6_voices_held();
+        if (others != 0 || held != 0) {
+            printf("FAIL fuzz seed %d: 3 s after the stop, %d non-FM6 voice(s), %d held FM6 voice(s)\n",
+                   seed, others, held);
+            printf("  seed %d -> %s\n", seed, path);
+            return 1;
+        }
+    }
     for (i = 0; i < 500 && engine_voices_active() != 0; i++)
         run_ms(50);
     {

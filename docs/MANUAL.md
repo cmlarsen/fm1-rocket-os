@@ -535,7 +535,7 @@ Press GLO for these settings:
 | THEME | The screen colour: green, amber, cyan, red or mono. |
 | SAVE | Saves the settings, the sound and the current song. (rocket-os: the pattern bank is gone.) |
 | AUTOSAVE | ON (the default): while the transport is stopped, changes are saved by themselves once nothing has been touched for four seconds. OFF: only SAVE saves. |
-| FACTORY RESET | Goes back to the factory sounds and an empty song. Your saved song is kept until you save over it. |
+| FACTORY RESET | Goes back to the factory sounds and settings. The current song is kept until you save over it. |
 | PERFORMANCE | Opens the performance page (below). |
 | ABOUT X0X | Shows the version, how full the memory for the settings and sound is (MEM), and the audio load. |
 | BATTERY | The battery's charge: FULL, 2/3, 1/3 or EMPTY; USB POWER while a computer powers the FM-1. Read only. |
