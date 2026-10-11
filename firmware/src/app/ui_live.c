@@ -89,12 +89,7 @@ static void live_clear_take(void)
 static void live_rec_tap(void)
 {
     if (live_bridge_take_recording() || live_bridge_take_armed()) {
-        int armed_only = live_bridge_take_armed() && !live_bridge_take_recording();
         live_bridge_take_stop();
-        /* NIT: an arm-then-cancel (the transport was playing but the bar never came) must not empty
-         * the song's take: restore the in-RAM copy from the store. */
-        if (armed_only && !live_bridge_take_has() && !song_io_take_pending())
-            song_io_take_load_ram();
         say("TAKE STOP", 0);
     } else {
         live_bridge_take_arm();
@@ -154,6 +149,8 @@ static void live_take_tick(void)
     /* T9i/B3: no in-LIVE flash write. A finished take's store write stays pending and rides the
      * normal autosave path (stopped and idle, after leaving LIVE), so autosave's own rules hold. */
     live_bridge_take_end_pending();             /* B1: clear the ISR's natural-end flag */
+    if (live_bridge_take_reload_pending() && !song_io_take_pending())
+        song_io_take_load_ram();                /* NIT: an arm-then-cancel restores the song's take */
     live_bridge_take_stage();                   /* B1: stage the queued launches ahead of the event time */
 }
 

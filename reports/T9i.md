@@ -111,3 +111,93 @@ then PLAY starts the take at bar 0).
 - **Two recordings without a stop between them**: the first take is not stored yet, so an undo
   cannot bring it back (the store still holds the pre-take state). The in-LIVE flush on transport
   stop makes the normal replace+undo work; documented in `model.md`'s undo limits.
+
+## r1: the Opus review findings
+
+Reviewed at `bf9c038` (already merged with integration, incl. T11i). Each blocker and should-fix is
+fixed and, where a host test can catch the race, proved by one that fails on the reviewed code. The
+ladder (`make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug`, plus
+`tools/check_loader.sh` on both packages) passes on the committed tree; both builds keep the 8 KiB
+pool spare (release and debug pool **335,556 B**, spare **8,508 B**).
+
+Host tests render synchronously and cannot catch ISR races, so the two new `unit-live` tests simulate
+the preemption: they call the ISR-side function between the main loop's steps. `clip_engine.c`'s
+`push_cmd` and `live_bridge.c`'s `tp_post` now trap under `X0X_HOST` when a host test sets the ISR
+flag, so a main-loop ring push from the audio path aborts the test. Restoring the reviewed sink (an
+`ISR`-side `live_bridge_launch_now`) makes `b1_isr_sink_test` trap; reverting `live_bridge_exit` to
+the reviewed "request a stop at a bar that never comes" makes `b2_leave_test` fail.
+
+### Blockers
+
+- **B1 — the sink ran main-loop APIs in the audio ISR.** The sink (`take_sink_ev`) now calls
+  ISR-side apply functions only: `clip_engine_take_launch/_stop/_mute/_bpm` (new, in
+  `clip_engine.c`) and `engine_take_perform`/`engine_take_perform_reset` (new, wrapping
+  `perform_take_fx`/`perform_take_reset`). None pushes a ring or reads `song->clip[]`. The main loop
+  stages each launch's clip copy in the clip engine's own `next[role]` (`live_bridge_take_stage`),
+  called at `take_play` (for the offset-0 prelude launches) and every UI frame while a take plays;
+  `apply_role` swaps it in at the boundary. The take end no longer calls
+  `clip_engine_transport_stop` from the ISR: it sets `g_eng.playing = 0` directly (the clip render's
+  stop branch releases every role), clears what the take set, and signals the main loop with
+  `g_take_end_req` (`live_bridge_take_end_pending`). Mutes are latched (`take_mute[]`) and applied at
+  the render's window start, so a mute's note-offs reach the sink.
+  Test: `unit-live`'s `b1_isr_sink_test` (stages, arms the traps, runs `live_bridge_take_block`,
+  asserts the launch was queued ISR-side with no ring push).
+- **B2 — leaving LIVE lost the recording.** `live_leave` now calls `live_bridge_take_live(0)`, which
+  finalizes the take at once (`take_finish`, new — no bar wait), stops any playback and stops the
+  feed. `live_bridge_take_feed` records only while `g_take_live` (entered in `live_bridge_enter`,
+  left in `live_bridge_take_live(0)`, also from `live_bridge_exit`). `song_io_take_load_ram` and the
+  take-undo paths refuse while a take is armed/recording/playing.
+  Test: `unit-live`'s `b2_leave_test` (records, leaves via `live_bridge_exit`, asserts the take was
+  finalized and kept, and that a later feed appends nothing).
+- **B3 — the in-LIVE flush bypassed autosave.** `live_take_tick`'s direct `song_io_flush()` is gone.
+  A finished take (or clear) stays pending and rides the normal autosave path (stopped and idle,
+  never while LIVE is active). Replace and undo still work in-session: undo of a not-yet-written
+  replace/clear cancels the pending write and reloads the stored take. `model.md`'s undo limits and
+  take notes are updated. The t9i scenarios now leave LIVE to let the save ride autosave; their
+  goldens are regenerated.
+
+### Should-fix
+
+- **S1 — a Program Change launch lost its quantize.** `live_bridge_launch_quant` posts a new
+  `TP_LAUNCH_Q` intent; the ISR records `TAKE_LAUNCH_QUANT` with the quantize packed into the
+  command's role byte, and the sink replays it with `clip_engine_take_launch(..., quant)`.
+- **S2 — tempo and FX state were not recorded.** The prelude now writes the tempo (already did) and
+  all six punch FX (latch/on/off from `engine_perform_active`), so a replay reconstructs the state.
+  UI tempo and the followed clock (`live_bridge_set_bpm`/`_soft`) post a `TP_BPM` intent, recorded
+  as a `TAKE_MARK_TEMPO`. A MIDI Start or Continue during a recording ends the take cleanly
+  (`live_bridge_take_finish`) and both now honour a take armed while stopped
+  (`take_arm_if_pending`). Documented in `model.md`.
+- **S3 — take end/stop left the FX and mutes it set.** Both the natural end (ISR) and
+  `live_bridge_take_stop_play` (main loop) now reset perform and clear the mutes; `live_leave`
+  resets them after the take stop.
+- **S4 — main-loop reads/writes of `g_eng` outside `engine_crit`.** `eng_reset_transport` and the
+  PLAY publish + `g_eng.playing = 1` are one `engine_crit` section in `live_bridge_take_play`;
+  `bridge_bar_fn` masks its transport-word reads; and `live_bridge_transport_start` makes arm+start
+  one critical section.
+- **S5 — classic notes recorded while leaving.** Covered by B2: `live_bridge_exit` finalizes the
+  take at once (no `stop_at` wait) and the feed is LIVE-only.
+- **S6 — undo order.** `song_io_undo` cancels a pending take only when no newer undo entry sits
+  above it (`undo.cur <= take_pending_cur`); a newer clip edit is undone first.
+- **S7 — MIDI fought take playback.** `live_bridge_launch_quant` is ignored while a take plays, and
+  `live_bridge_transport_stop` stops take playback too.
+
+### NITs
+
+- The stored-take loader validates `hdr.nevents` against the record length and that the event
+  samples are non-decreasing (`song_store.c`).
+- The parameter-coalescing path never writes past `stop_at`.
+- An arm-then-cancel (the transport was playing but the bar never came) restores the song's in-RAM
+  take: `live_bridge_take_stop` sets `g_take_reload_req`, polled by `live_take_tick`.
+- SEL stops take playback as the spec says (`live_handle_button`).
+
+### RAM
+
+| build | pool | spare |
+|---|---|---|
+| release | 335,556 / 344,064 | **8,508** |
+| debug (`X0X_DEBUG=1`) | 335,556 / 344,064 | **8,508** |
+
+The debug pool is freed with debug-only levers: `tools/build.py` drops the debug `ENG_FM6_VOICES`
+from 6 to 4 and `rc_debug.c`'s `rc_pat` moves from `.pool` to `.bss` (both measurement-only; no
+user-facing buffer was cut). `TAKE_MAX_EVENTS`, the perform history and the delay line are
+unchanged.

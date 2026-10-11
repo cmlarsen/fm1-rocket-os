@@ -37,6 +37,7 @@ static uint8_t g_bar_identity;                        /* the arm-to-start bar fu
 static uint32_t g_take_block_base;                    /* the block base the sink's offsets add to */
 static uint8_t g_take_live;                           /* T9i: LIVE is active: the take may record */
 static volatile uint8_t g_take_end_req;               /* the ISR's natural take end, polled by the main loop */
+static uint8_t g_take_reload_req;                     /* an arm was cancelled: reload the song's take (NIT) */
 #ifdef X0X_HOST
 /* T9i r1: the host test traps a main-loop ring push from the audio-ISR side (the take sink). */
 volatile int live_bridge_isr;
@@ -428,6 +429,7 @@ void live_bridge_take_init(void)
     g_take_arm_at_start = 0;
     g_take_live = 0;
     g_take_end_req = 0;
+    g_take_reload_req = 0;
     tp_h = tp_t = 0;
 }
 
@@ -510,7 +512,7 @@ void live_bridge_take_arm(void)
     if (!g_take_live)
         return;
     if (take_recording(&g_take) || take_armed(&g_take)) {
-        take_stop(&g_take, engine_sample_now());          /* the second tap ends it at the next bar */
+        live_bridge_take_stop();                          /* the second tap ends it at the next bar */
         return;
     }
     if (take_playing(&g_take))
@@ -534,10 +536,24 @@ void live_bridge_take_stop(void)
 {
     if (g_take_arm_at_start) {                            /* armed for the next PLAY: cancel it */
         g_take_arm_at_start = 0;
+        g_take_reload_req = 1;                            /* NIT: restore the song's take */
         return;
     }
-    if (take_recording(&g_take) || take_armed(&g_take))
+    if (take_recording(&g_take) || take_armed(&g_take)) {
+        int was_armed = take_armed(&g_take) && !take_recording(&g_take);
         take_stop(&g_take, engine_sample_now());
+        if (was_armed && !take_has(&g_take))
+            g_take_reload_req = 1;                        /* NIT: an arm that never started emptied the RAM */
+    }
+}
+
+/* NIT: the UI polls this after an arm-then-cancel and reloads the song's stored take, so the
+ * in-RAM take is not left empty. Clears the request. */
+int live_bridge_take_reload_pending(void)
+{
+    int r = g_take_reload_req != 0;
+    g_take_reload_req = 0;
+    return r;
 }
 
 /* B2: leaving LIVE closes the take at once (the store write is queued by the UI's tick), so the
@@ -910,7 +926,7 @@ void live_bridge_transport_stop(void)
     if (take_playing(&g_take))
         live_bridge_take_stop_play();                    /* S7: MIDI Stop stops take playback too */
     else if (take_recording(&g_take) || take_armed(&g_take))
-        take_stop(&g_take, engine_sample_now());         /* a hard stop ends the take at the next bar */
+        live_bridge_take_stop();                         /* a hard stop ends the take (NIT: reload on cancel) */
 }
 int live_bridge_transport_playing(void) { return g_eng.playing != 0; }
 

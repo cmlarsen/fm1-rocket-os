@@ -167,6 +167,7 @@ void live_bridge_take_stop_play(void);
 void live_bridge_take_stage(void);          /* T9i/B1: main loop: stage the queued launches' copies */
 void live_bridge_take_live(int on);         /* T9i/B2: enter (1) / leave (0) LIVE's take scope */
 int  live_bridge_take_end_pending(void);    /* T9i/B1: the ISR's natural end, polled by the main loop */
+int  live_bridge_take_reload_pending(void); /* T9i NIT: an arm was cancelled; reload the song's take */
 void live_bridge_take_clear_ram(void);      /* the clear gesture: the in-RAM take is gone */
 void live_bridge_take_loaded(int nevents, uint32_t length_samples, uint16_t bpm_x10);
 
