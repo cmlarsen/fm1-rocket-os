@@ -693,7 +693,7 @@ static void studio_draw_header(void)
             st_name(st_cursor_clip(), nm);
             layer = nm;
         } else {
-            layer = st.copy_src != 0xFF ? "COPY" : "SONG";
+            layer = help_shift_active() ? "SHIFT" : st.copy_src != 0xFF ? "COPY" : "SONG";
         }
         cv_text(lx, vc(&AF_S, 3, 14), &AF_S, layer, TOK_MID);
         x = lx + tw(&AF_S, layer) + 2;               /* T7a D6: 2 px clearance from the transport */
