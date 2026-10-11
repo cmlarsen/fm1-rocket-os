@@ -189,3 +189,13 @@ unit-store:
 	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/song_fuzz_san \
 	    tests/host/song_fuzz.c core/model/song_store.c
 	build/host/song_fuzz_san
+
+.PHONY: unit-take
+unit-take:
+	@mkdir -p build/host
+	$(HOST_CC) $(CORE_CFLAGS) -Werror -I. -o build/host/take_test \
+	    tests/host/take_test.c core/seq/take.c core/seq/clip_engine.c
+	build/host/take_test
+	$(HOST_CC) $(SAN_CFLAGS) -I. -o build/host/take_test_san \
+	    tests/host/take_test.c core/seq/take.c core/seq/clip_engine.c
+	build/host/take_test_san
