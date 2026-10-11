@@ -42,7 +42,6 @@ The newest version first. Install it with the [web installer](../install/); the
 - Up to 64 steps per part and 32 patterns
 - Per-step p-locks (on EDIT, hold a step and turn a knob) and probability (hold a step and turn SELECT)
 - A drum mixer with per-track mutes, sends and hit meters
-- A new [break tool](../breaks/): load and manage your own loops from the browser (BR1, BR2…)
 
 ![HOME: a line per part in every pattern with notes](img/new/1.0-home.png)
 ![The 303's steps on SEQ, two ties as one long note](img/new/1.0-303-steps.png)
@@ -56,8 +55,6 @@ The newest version first. Install it with the [web installer](../install/); the
 - New 303 note entry: REC turns the keys into a keyboard, ties show as one long note, and holding a step + OCT moves it an octave
 - Copy and paste whole patterns: hold SAVE, then press a white key
 - Song bars can repeat, ×1 to ×8
-- A break step can have its own slice: hold the step and press black keys 1–8
-- The break's COMPLEXITY now eases ROLL and FILL in gently
 
 ### Sound and mix
 - Reverb and delay sends on both kicks
@@ -134,7 +131,6 @@ Projects saved with 0.10 load as they were.
 
 - Knob acceleration by speed: turn slowly for single steps, quickly to sweep (a fast half turn covers the whole range).
 - GLO > BRIGHTNESS: the screen's brightness, 1 to 8.
-- tools/upload_breaks.py: no longer crashes when given more loops than fit; retries a write the USB link lost.
 
 </details>
 
@@ -152,7 +148,6 @@ Projects saved with 0.10 load as they were.
 - Safe mode: after two failed starts X0X starts with no sound and USB on, so the web installer can always reach it (it used to drop into the chip's update mode, which no installer can see). PLAY tries again.
 - After a crash, the next start says so and shows where.
 - The web installer can put M-VAVE's stock firmware (FM-1 V15) back.
-- The browser version can load your own breaks.
 
 </details>
 
@@ -185,7 +180,7 @@ Projects saved with 0.10 load as they were.
 
 Changes since 0.1-beta:
 - PERFORMANCE page: clock, audio load and peak, dropouts, each part's share of the CPU; RUN PERF TEST
-- Big-beat factory mix (break up front, 909 kick under it, RAT 303s into tape delay, a pumping master)
+- Big-beat factory mix (909 kick up front, RAT 303s into tape delay, a pumping master)
 - No clicks on the kick: the 909 kick's attack back to 9W9's, the pump eases in, a look-ahead limiter
 - Cheaper engines: silent parts skipped, lighter master, faster tanh, a RAT clipper without square roots or divides
 - The manual rewritten in plain sentences, with a Getting started tour
@@ -202,7 +197,6 @@ First public build. **Not yet run on a real FM-1**: the first people to install 
 What's in it:
 - A 909 (from 9W9 / ER-99) and an 808 (from 8W8), eleven tracks each
 - Two 303s (from schwung-303 / Open303), each with a TB-3PO line generator
-- A breakbeat generator (from BB Gen); load your own breaks with `tools/upload_breaks.py`
 - 16 patterns, each part on its own pattern; a song mode; recorded knob moves
 - Reverb and tape delay sends on every part; a master compressor with kick-keyed pump, a filter and a limiter
 - A big-beat factory mix

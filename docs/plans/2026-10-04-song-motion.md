@@ -15,8 +15,8 @@ pattern, a song arranges them bar by bar, and knob moves are recorded. This adds
 
 ## Part patterns
 
-`seq.ppat[5]`: the pattern each part plays (tracks and parts share an index: 909, 808,
-303A, 303B, BREAK). `seq.pcue[5]`: each part's cue. `seq.cur` / `seq.cue` go.
+`seq.ppat[4]`: the pattern each part plays (tracks and parts share an index: 909, 808,
+303A, 303B). `seq.pcue[4]`: each part's cue. `seq.cur` / `seq.cue` go.
 
 - All cues land at the bar (the 909 wrapping), as before. A part whose pattern changed
   restarts on step 1; the others keep running, so polymeter survives a part change.
@@ -58,7 +58,7 @@ lane_t { used, gen, pat, part, t, v, i, rsv; uint8_t val[32]; }   40 B; val 0xFF
 A pool of 160 lanes (6400 B) shared by all patterns, stored with the song across OBJ_SONG and
 OBJ_MOTION (1156 + 6400 = 7556 of 7672 B).
 
-- Owner part: 909/808 sounds -> that kit; 303 -> its part; BREAK -> BREAK; a mixer strip -> its
+- Owner part: 909/808 sounds -> that kit; 303 -> its part; a mixer strip -> its
   part; FX and master -> the 909 (the bar).
 - REC + playing + turn a sound knob: the next step takes the knob's value, so the lane holds
   the steps the knob MOVED on. A gap of up to 4 steps between two written steps is filled in a

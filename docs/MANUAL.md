@@ -1,6 +1,6 @@
 # X0X
 
-X0X turns the M-VAVE FM-1 into a groovebox: a 909, an 808, two 303s and a breakbeat player,
+X0X turns the M-VAVE FM-1 into a groovebox: a 909, an 808 and two 303s,
 all playing at once, in stereo. Each part can play its own pattern, you can arrange patterns
 into a song, record knob moves, and give single steps a sound and a chance of their own.
 
@@ -19,18 +19,17 @@ New in this version: see [What's new](https://charlesvestal.github.io/fm1-x0x/ne
 5. 909 and 808
 6. 303A and 303B
 7. TB-3PO
-8. Break
-9. Patterns
-10. Recording
-11. Knob motion, p-locks and probability
-12. Song
-13. Effects
-14. Mix and master
-15. Settings and saving
-16. MIDI and USB audio
-17. Troubleshooting
-18. Parameters
-19. Credits
+8. Patterns
+9. Recording
+10. Knob motion, p-locks and probability
+11. Song
+12. Effects
+13. Mix and master
+14. Settings and saving
+15. MIDI and USB audio
+16. Troubleshooting
+17. Parameters
+18. Credits
 
 ---
 
@@ -81,17 +80,12 @@ shows the 909 and every part is empty.
    each press writes a new line. Keep going until you like one.
 6. **Shape the 303.** Press EDIT. The knobs are now the 303's filter: KNOB 1 opens and closes it,
    KNOB 2 sets the resonance.
-7. **Add the break.** Turn ALGORITHM two more clicks to BREAK and press all 16 white keys, so the
-   break plays the whole bar.
-8. **Mute a part.** Press HOME, then black key 5 to mute the break. Press it again to bring it
-   back.
-9. **Record a filter sweep.** Turn ALGORITHM back to 303A and press EDIT. Press REC, slowly turn
-   KNOB 1 for a bar or two, then press REC again. The sweep now plays every time the pattern
-   comes round.
-10. **Save.** Press PLAY to stop, then SAVE. Everything is kept when you switch off. (X0X also
-    saves by itself a few seconds after you stop; see section 15.)
+7. **Record a filter sweep.** Press EDIT. Press REC, slowly turn KNOB 1 for a bar or two, then
+   press REC again. The sweep now plays every time the pattern comes round.
+8. **Save.** Press PLAY to stop, then SAVE. Everything is kept when you switch off. (X0X also
+   saves by itself a few seconds after you stop; see section 14.)
 
-Next: section 9 shows how to make more patterns and switch between them, and section 12 how to
+Next: section 8 shows how to make more patterns and switch between them, and section 11 how to
 arrange them into a song.
 
 ---
@@ -106,9 +100,9 @@ page. SEQ, EDIT and ARP show the part you choose with ALGORITHM.
 | Control | What it does |
 |---|---|
 | MASTER | Volume. |
-| SELECT | The previous or next page. In a list, up and down. Hold a step and turn it for the step's chance (section 11). |
-| PRESETS | The next pattern: on a part's screen for that part only, on HOME for all five. |
-| ALGORITHM | The part: 909, 808, 303A, 303B or BREAK. In a list, it changes the value. |
+| SELECT | The previous or next page. In a list, up and down. Hold a step and turn it for the step's chance (section 10). |
+| PRESETS | The next pattern: on a part's screen for that part only, on HOME for all four. |
+| ALGORITHM | The part: 909, 808, 303A or 303B. In a list, it changes the value. |
 | OCT-, OCT+ | The steps, 16 at a time (1–16 … 49–64). On HOME and SONG, patterns 1–16 or 17–32. On the 303 keyboard, the octave. On TB-3PO, mutate the line or write a new one. |
 | KNOB 1–4 | The four values at the bottom of the screen. Each click is one step, however quickly you turn a few; spin and they speed up. |
 | FX | The reverb and the delay. |
@@ -117,14 +111,14 @@ page. SEQ, EDIT and ARP show the part you choose with ALGORITHM.
 | LFO | The mixer and the master. Hold while pressing keys: a slide. |
 | EDIT | The selected part's sound. The keys still write its steps. |
 | GLO | The settings. Press again to close. |
-| HOME | The pattern: all five parts, which pattern they play, mutes. Again: the song, and again back. In a list, back; in a question, no. |
+| HOME | The pattern: all four parts, which pattern they play, mutes. Again: the song, and again back. In a list, back; in a question, no. |
 | SAVE | Save everything (while playing: when you stop). Hold it to copy the pattern; then a white key pastes it. |
 | ARP | TB-3PO, the 303 line generator (on a 303). |
 | SEQ | The selected part's steps, with its LENGTH and RATE (on a 303 also DIRECTION and TRANSPOSE). |
 | PLAY | Start and stop. |
 | REC | Record on and off: drum hits, 303 notes, knob moves, and in SONG mode the song. On a 303 the keys become a keyboard while it's on. |
 | White keys | Steps. On HOME, patterns. On MASTER and FX they do nothing. |
-| Black keys | Drum tracks, or the break's slices. On HOME they mute parts; on the mixer they pick a channel. |
+| Black keys | Drum tracks. On HOME they mute parts; on the mixer they pick a channel. |
 
 **Hold HOME** for these: + REC undoes, + PLAY redoes, + SELECT sets the tempo, + a white key picks
 a pattern from any screen, and + a black key mutes a drum track (on the 909 or 808 screen) or a
@@ -172,7 +166,6 @@ choose.
 | 909 / 808 | the track's hits; the track | the other tracks with hits |
 | 303 | notes | ties |
 | 303 with REC on | the keys you hold | the Cs, to find your place |
-| BREAK | the steps it plays | the slice pads 1–8 |
 | Mixer (PARTS, 909 MIX, 808 MIX) | the channel the knobs set (blinking while muted) | the other channels |
 
 </details>
@@ -185,7 +178,7 @@ choose.
 
 The **top line** shows, from left to right:
 
-- the part, in its colour (909 orange, 808 red, 303A green, 303B blue, BREAK violet), and the
+- the part, in its colour (909 orange, 808 red, 303A green, 303B blue), and the
   screen if it isn't the sound: SEQ, TB-3PO, or KEYS while the 303 keyboard is on;
 - the pattern playing, such as P3. P3 >5 means pattern 5 is coming up next. On a part longer
   than 16 steps, the steps the white keys show follow (33-48);
@@ -312,74 +305,11 @@ To edit the line by hand, press SEQ; to shape its sound, EDIT.
 
 ---
 
-## 8. Break
-
-The break is a drum loop cut into eight slices, which X0X rearranges as it plays.
-
-![The break, slice 5 playing](img/screen-break.png)
-
-**Steps.** The white keys are the bar's 16 steps: press one to let the break play there, tap it
-again to stop it.
-
-**Playing slices.** Hold black keys 1–8 to play those slices yourself; let go and the generator
-takes over again. Hold key 9 to play backwards, key 10 for half speed, key 11 to stutter.
-
-**A step's own slice.** Hold a white key and press black key 1–8: that step now always plays
-that slice of loop A, from its start, and its box shows the slice's number. Press the same black
-key again (holding the step) to give it back to the generator. This way you can fix the kick and
-snare where you want them and let the generator play with the rest.
-
-**The generator.** SEQ has its two pages, GROOVE and RETRIG:
-
-- COMPLEXITY: how often it jumps to a different slice instead of playing the next one. This is
-  the amount: at 0 the loop plays straight, and ROLL and FILL come in with it, at full effect
-  from 25%, so low settings stay close to the loop.
-- ANCHOR: how strongly it keeps the kick and snare slices on beats 1 and 3.
-- ROLL: how often it repeats a slice or moves to the one next to it.
-- FILL: how much the last bar of a phrase breaks these rules.
-- RETRIG 2X, 3X, 4X and 8X: the chance in each bar of stuttering a beat at that rate.
-
-In SEL's list: PHRASE, the length of a phrase (2, 4, 8 or 16 bars, or off), and A LENGTH and B
-LENGTH, how often a new slice is chosen (every 1/4 bar to every 8 bars).
-
-**The loops.** EDIT has LOOP A, LOOP B, B CHANCE (the chance of switching to loop B in the last
-bar of a phrase; with PHRASE off, in any bar) and PITCH; LEVEL is in SEL's list. Loops follow the
-tempo by playing faster or slower, so their pitch follows it too, as on a sampler; PITCH shifts it
-on top. X0X comes with two loops of its own, 909 GR and 909 FL, played by its 909; loops you
-upload come after them.
-
-All of these, the steps, slices and loops, are saved with the pattern. The break's level, pan
-and sends are on the mixer's PARTS page (LFO, black key 5).
-
-### Your own breaks
-
-Load your own loops with the [break loops page](https://charlesvestal.github.io/fm1-x0x/breaks/), in
-Chrome or Edge with the FM-1 connected. They appear after X0X's own loops as BR1, BR2 and so on.
-There's room for about 21 seconds in all: around nine one-bar loops.
-
-<details><summary>From the command line</summary>
-
-With the FM-1 connected, run:
-
-```
-python3 tools/upload_breaks.py --bars amen.wav think.wav funky.wav ...
-```
-
-`--bars` keeps one bar of each file; without it, each file is sent whole. This replaces all your
-loops. `--dry-run FOLDER` shows what would fit without the FM-1. If you have schwung-breakbeat next
-to X0X, `--bbgen` sends BB Gen's classic breaks. To build loops into the firmware itself, see
-BUILDING.md.
-
-</details>
-
----
-
-## 9. Patterns
+## 8. Patterns
 
 ![HOME](img/screen-home.png)
 
-There are 32 patterns. A pattern holds each part's steps, length and rate, the break's settings,
-the swing, and any knob motion, p-locks and probabilities. Sounds, effects and master settings
+There are 32 patterns. A pattern holds each part's steps, length and rate, the swing, and any knob motion, p-locks and probabilities. Sounds, effects and master settings
 are not part of a pattern and don't change when the pattern does.
 
 Each part plays its own pattern, so the 303s can play pattern 3 while the drums play pattern 7.
@@ -390,24 +320,24 @@ with notes in that pattern: bright where that part is playing it now, dim otherw
 
 **Choosing patterns**
 
-- **All five parts:** on HOME, press a white key or turn PRESETS. From any other screen, hold
+- **All four parts:** on HOME, press a white key or turn PRESETS. From any other screen, hold
   HOME and press a white key.
 - **One part:** on that part's screen (SEQ, EDIT, TB-3PO), turn PRESETS.
-- **A chain:** on HOME, hold two white keys at once. All five parts play each pattern from the
+- **A chain:** on HOME, hold two white keys at once. All four parts play each pattern from the
   first to the second, a bar each, then start again. Choosing a single pattern ends the chain.
 
 While playing, the new pattern starts when the current bar ends; stopped, it takes over at once.
 A part that changes pattern starts again from step 1; the others carry on.
 
 **Copy and paste.** Hold SAVE: the top line says P1 COPIED. Press a white key to paste onto that
-pattern (P1 PASTED TO P2): all five parts, as they're playing now. If the pattern you paste onto
+pattern (P1 PASTED TO P2): all four parts, as they're playing now. If the pattern you paste onto
 has notes, X0X asks first. While holding SAVE, OCT- and OCT+ switch between patterns 1–16 and
 17–32.
 
 **Clearing.** Hold SAVE and press REC to clear the selected part in its pattern. GLO > CLEAR
-PATTERN clears all five.
+PATTERN clears all four.
 
-**Muting.** On HOME, black keys 1–5 mute and unmute the parts. Mutes aren't saved, except inside
+**Muting.** On HOME, black keys 1–4 mute and unmute the parts. Mutes aren't saved, except inside
 a song.
 
 **Lengths and swing.** Parts can have different lengths, so they drift against each other. The
@@ -418,7 +348,7 @@ HOME's knobs are for playing live: TEMPO, SWING, and the master's FILTER and PUM
 
 ---
 
-## 10. Recording
+## 9. Recording
 
 Press REC to turn recording on, and again to turn it off.
 
@@ -428,12 +358,12 @@ Press REC to turn recording on, and again to turn it off.
 - **303, step by step:** with REC on and the pattern stopped, each key you press fills the next
   step, from step 1. Hold ENV while pressing a key for an accent, or LFO for a slide. For a rest,
   hold ENV and press OCT- or OCT+; for a tie, hold LFO and press OCT- or OCT+.
-- **Knob moves:** with REC on and the pattern playing, turn any sound knob (section 11).
-- **The song:** in SONG mode (section 12).
+- **Knob moves:** with REC on and the pattern playing, turn any sound knob (section 10).
+- **The song:** in SONG mode (section 11).
 
 ---
 
-## 11. Knob motion, p-locks and probability
+## 10. Knob motion, p-locks and probability
 
 All three give steps values of their own, and all three are saved with the pattern.
 
@@ -455,8 +385,7 @@ it, fills in short pauses so a slow sweep has no gaps, and on playback glides fr
 
 ### P-locks
 
-A step can have a sound of its own: a higher tune on one kick, an open filter on one 303 note,
-the break pitched up for one step.
+A step can have a sound of its own: a higher tune on one kick, an open filter on one 303 note.
 
 - On EDIT, hold a step that's on and turn a sound knob. That step plays the new value; the
   others keep the knob's. While you hold the step, the knob row says P-LOCK STEP 5, the knobs
@@ -479,7 +408,7 @@ Each part counts its own passes, from 1 again whenever you press PLAY or it chan
 
 - On the 909 and 808 the chance belongs to the selected track's step, so the kick and the hats
   on one step can each have their own.
-- On a 303 a skipped step is a rest; on the break, a skipped step doesn't fire.
+- On a 303 a skipped step is a rest.
 - A skipped drum hit sends no MIDI note.
 
 ### Good to know
@@ -492,18 +421,18 @@ Each part counts its own passes, from 1 again whenever you press PLAY or it chan
 
 ---
 
-## 12. Song
+## 11. Song
 
 ![SONG](img/screen-song.png)
 
 A song is a list of up to 192 bars. Each bar says which pattern each part plays and which
 parts are muted. To open the song, press HOME twice (HOME again comes back to the pattern).
 
-- **Write bars:** press a white key. The selected bar gets that pattern for all five parts,
+- **Write bars:** press a white key. The selected bar gets that pattern for all four parts,
   and the next bar is selected. Pressing keys at the end of the song adds new bars.
 - **Edit a bar:** turn KNOB 1 to select the bar, then use the other knobs to set each part's
   pattern for that bar.
-- **Mute parts in a bar:** press black keys 1–5.
+- **Mute parts in a bar:** press black keys 1–4.
 - **Repeat a bar:** on the SONG screen's second page (turn SELECT), REPEAT plays the selected bar
   up to 8 times (x2 … x8 shows at the end of its row), so four bars of the same pattern are one
   row.
@@ -518,7 +447,7 @@ Press SEL on the SONG screen for LENGTH, INSERT BAR, DELETE BAR and CLEAR SONG.
 
 ---
 
-## 13. Effects
+## 12. Effects
 
 ![FX](img/screen-fx.png)
 
@@ -536,15 +465,15 @@ the echoes between left and right.
 
 ---
 
-## 14. Mix and master
+## 13. Mix and master
 
 ![MIX, with the compressor pumping](img/screen-mix.png)
 
 Press LFO to open the mixer; press it again (or turn SELECT) for its four pages. The red bar on
 the right is the compressor's gain reduction.
 
-- **PARTS**: a level and a meter for each part. Press black keys 1-5 to pick the 909, 808,
-  303A, 303B or the break; the knobs are its LEVEL, PAN, REV and DLY.
+- **PARTS**: a level and a meter for each part. Press black keys 1-4 to pick the 909, 808,
+  303A or 303B; the knobs are its LEVEL, PAN, REV and DLY.
 - **909 MIX** and **808 MIX**: each drum machine's own mixer, every track's level at a glance;
   the black keys pick a track, and the knobs set its LEVEL, PAN, REV and DLY.
 - **MASTER**: four knobs over the whole mix. The screen shows the output level over the last
@@ -555,7 +484,7 @@ part on PARTS, a track on the drum pages). The key lights show it: the channel t
 bright (blinking while muted), the others dim, muted ones dark.
 
 Turning ALGORITHM on the mixer goes to that part's page: 909 MIX or 808 MIX for the drum
-machines, PARTS (with the part picked) for the 303s and the break.
+machines, PARTS (with the part picked) for the 303s.
 
 | MASTER | What it does |
 |---|---|
@@ -566,8 +495,8 @@ machines, PARTS (with the part picked) for the 303s and the break.
 
 FILTER and PUMP are also on HOME's PERFORM page, for playing live.
 
-> **The factory mix is set up for big beat:** the break up front with the 909 kick under it, the
-> 303s through RAT distortion into a tape delay, reverb on the clap. For a clean mix, set COMP and
+> **The factory mix is set up for big beat:** the 909 kick up front, the 303s through RAT
+> distortion into a tape delay, reverb on the clap. For a clean mix, set COMP and
 > PUMP to 0.
 
 <details><summary>The master in detail</summary>
@@ -582,7 +511,7 @@ GLUE compressor and VOLUME. Turning COMP or FILTER sets their details again.
 
 ---
 
-## 15. Settings and saving
+## 14. Settings and saving
 
 ![GLOBAL](img/screen-global.png)
 
@@ -592,7 +521,7 @@ Press GLO for these settings:
 |---|---|
 | CLOCK OUT | Sends MIDI clock and start/stop messages. |
 | NOTES OUT | Sends the patterns out as MIDI notes. |
-| 909 … BREAK MIDI CH | Each part's MIDI channel, for notes in and out: 1–16, or OFF to ignore incoming notes for that part (and send none). |
+| 909 … 303B MIDI CH | Each part's MIDI channel, for notes in and out: 1–16, or OFF to ignore incoming notes for that part (and send none). |
 | OUTPUT | NORMAL, or LOUD: 6 dB more at the headphones and line out (and USB audio), for headphones that need it. The master's LIMIT (on by default) keeps it from clipping. |
 | LIGHTS | ON: the key lights show the steps, and the unlit buttons glow dimly so they can be read. KEYS: the key lights only. OFF: neither. |
 | KEY SOUND | STOPPED (the default): picking a drum or editing a 303 step is silent while the pattern plays, unless REC is on. ALWAYS: you always hear it. The 303 keyboard always plays either way. |
@@ -600,7 +529,7 @@ Press GLO for these settings:
 | MODE | PATTERN, or SONG to play the song. |
 | SAVE PROJECT | Saves everything. |
 | AUTOSAVE | ON (the default): while the pattern is stopped, changes are saved by themselves once nothing has been touched for four seconds. OFF: only SAVE saves. |
-| CLEAR PATTERN | Clears all five parts of the current pattern. |
+| CLEAR PATTERN | Clears all four parts of the current pattern. |
 | FACTORY RESET | Goes back to the factory sounds and empty patterns, with no song and no knob motion. Your saved project is kept until you save over it. |
 | PERFORMANCE | Opens the performance page (below). |
 | ABOUT X0X | Shows the version, how full the memory for patterns is (MEM), and the audio load. |
@@ -638,8 +567,8 @@ For a proper measurement, press SEL and choose RUN PERF TEST. X0X plays three pa
 own for about 15 seconds, from a simple loop up to everything as busy as it gets, then puts your
 project back exactly as it was and shows the results. HOME or PLAY stops the test early.
 
-X0X uses both of the FM-1's processor cores: the 808 and the break run on the second, so the 808's
-share on the performance page is the time the first core waits for them, and the whole load is lower: on
+X0X uses both of the FM-1's processor cores: the 808 runs on the second, so the 808's
+share on the performance page is the time the first core waits for it, and the whole load is lower: on
 one FM-1 the test's three patterns went from 43%, 83% and 115% on one core to 39%, 54% and 68%,
 and the busiest moment of the worst case from over the limit to 84%.
 
@@ -663,7 +592,7 @@ on, switch it off and on again.
 
 ---
 
-## 16. MIDI and USB audio
+## 15. MIDI and USB audio
 
 When connected over USB, the FM-1 shows up as a MIDI device called "X0X FM-1".
 
@@ -676,7 +605,6 @@ listens on its own channel; these are the defaults:
 | Channel 11 | The 808, with the same notes, plus 56 for the cowbell and 49 for the cymbal. |
 | Channel 2 | 303A. Overlapping notes slide, and a velocity of 100 or more plays an accent. |
 | Channel 3 | 303B, in the same way. |
-| Channel 4 | Notes 36–43 play break slices 1–8. |
 | Clock | X0X follows an incoming MIDI clock automatically, and returns to its own tempo half a second after the clock stops. Start, Stop and Continue start and stop the patterns. |
 
 GLO sets each part's channel (909 MIDI CH and so on), or OFF to ignore its notes, for example when
@@ -699,7 +627,7 @@ app opens the input can click while the FM-1 settles.
 
 ---
 
-## 17. Troubleshooting
+## 16. Troubleshooting
 
 **Update mode:** hold OCT- and OCT+ together for five seconds. A countdown appears; let go
 before it ends to cancel.
@@ -759,7 +687,7 @@ RP2040 board wired to the USB lines) can still reach it.
 
 ---
 
-## 18. Parameters
+## 17. Parameters
 
 Drum settings range from 0 to 127. DIST, the distortion type, can be DIODE, CLIP, SAT, BFZ,
 PDIST, FOLD or CRUSH. PAN goes from L64 through C (the middle) to R63.
@@ -813,20 +741,6 @@ in SEL's list; the rest are its sound pages.
 
 </details>
 
-<details><summary>Break</summary>
-
-| Break setting | Range |
-|---|---|
-| Complexity, Anchor, Roll, Fill | 0–100 |
-| Retrig 2x, 3x, 4x, 8x | 0–100 |
-| Phrase | Off, 2, 4, 8 or 16 bars |
-| B chance | 0–100 |
-| A length, B length | 1/4, 1/2, 1, 2, 4 or 8 bars |
-| Level | 0–127 |
-| Pitch | -12 to +12 semitones |
-
-</details>
-
 <details><summary>Effects and master</summary>
 
 | Effect page | Settings |
@@ -844,7 +758,7 @@ second play in the middle instead.
 
 ---
 
-## 19. Credits
+## 18. Credits
 
 X0X is free software under the GNU General Public License, version 3. If you share the
 firmware, you must also share its source code.
@@ -857,7 +771,6 @@ firmware, you must also share its source code.
 - The 303 is from **schwung-303**, built on Open303 by Robin Schmidt (MIT licence), with
   extensions based on jc303 and dm-Rat.
 - TB-3PO is from **schwung-tb3po**, which comes from the Phazerville Hemisphere Suite.
-- The break generator is from **BB Gen** by mestela, used with permission.
 - The fonts are Barlow Semi Condensed and Terminus (SIL Open Font License).
 
 M-VAVE and FM-1 are trademarks of their owners, and TR-808, TR-909 and TB-303 are Roland
