@@ -175,6 +175,15 @@ Deferred: HOME+SAVE capture, OCT± clip banks, and the Gate clip mode.
 - Notes on the live channel play the focused role.
 - Program Change launches clips, quantized.
 - Clock comes in over USB or TRS. Clock out over USB comes after v1 if it's easy.
+- T11i: the live channel and Program Change are per song (`song.live_channel`, `song.pc_launch`);
+  their LIVE SETUP rows are a follow-up, so the defaults are **omni** and **PC launch off**.
+- T11i: **CC 120 and CC 123** release everything external MIDI holds, plus the engine's all-off.
+- T11i: **CLOCK IN**, a GLOBAL row, is **Auto** (follow the incoming clock when present) or
+  **Internal** (ignore it). With Auto, F8 ticks set the tempo, Start / Continue / Stop drive the
+  transport, and a small **EXT** indicator shows while the clock is being followed; when the clock
+  stops the transport keeps playing at the last tempo and EXT goes away.
+- T11i: external MIDI notes, Program Change and the clock reach the app in **STUDIO and LIVE**;
+  in **Classic** X0X's own per-part MIDI channels and clock keep working instead.
 
 ## Open
 - Which inherited X0X views survive.

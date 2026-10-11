@@ -97,6 +97,7 @@ Owner-visible effect: the longest delay time is 1.0 s (it was 2.0 s). Every new 
 ## Invariant: no hung notes (2026-10-11)
 Reviews found hung notes in T3, T7a and T7a's re-review, each through a different view or mode change. The rule:
 - **Every note a key starts lives in one held-note table.** Releasing the key releases that note, whatever view is showing.
+- **External MIDI's held notes (T11i) are released the same way:** a view, layer or mode change, a panic (CC 120/123) or the note-off releases them, and they keep the role they were played on even if the focus moved.
 - **Every view, layer or mode change releases what is still held.**
 - **Every audio-source handoff calls `engine_all_off`.**
 
