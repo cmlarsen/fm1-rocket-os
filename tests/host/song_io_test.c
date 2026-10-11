@@ -148,7 +148,14 @@ static void reset_flash(void)
 }
 static void boot(void)
 {
-    song_io_boot(0, 1250u, 0);                  /* pats is unused by the stub; T8i: no preferred slot */
+    song_io_boot(1250u, 0);                     /* TCLS: no pattern arg; T8i: no preferred slot */
+}
+/* TCLS: the boot song is the Starter template, which has clips. The clip-edit tests want a blank
+ * slate, so they wipe the live song's clips after boot. */
+static void wipe_clips(void)
+{
+    song_t *s = (song_t *)live_bridge_song();
+    memset(s->clip, 0, sizeof s->clip);
 }
 
 /* ---- tests ---- */
@@ -160,9 +167,9 @@ static void test_boot_empty_builds(void)
     g_proj_hash = 0x1111u;
     boot();
     CHECK(song_io_loaded() == 0);
-    CHECK(song_io_dirty() == 1);                /* built from the project: write it back */
-    CHECK(g_rebuilds == 1);
-    CHECK(((song_t *)live_bridge_song())->name[0] == 'P');
+    CHECK(song_io_dirty() == 1);                /* built from the template: write it back */
+    CHECK(g_rebuilds == 0);                     /* TCLS: no project mapping any more */
+    CHECK(strcmp(((song_t *)live_bridge_song())->name, "STARTER") == 0);
 }
 
 static void test_save_reload(void)
@@ -212,6 +219,7 @@ static void test_clip_edits(void)
     reset_flash();
     g_proj_hash = 0x1111u;
     boot();
+    wipe_clips();
     CHECK(song_io_clip_used(0) == 0);
     song_io_clip_create(0, 16, 0, 0);
     CHECK(song_io_clip_used(0) == 1);
@@ -246,6 +254,7 @@ static void test_clip_editor_ops(void)
     reset_flash();
     g_proj_hash = 0x1111u;
     boot();
+    wipe_clips();
     /* a DRUMS clip: the session (three edits) is one undo entry */
     song_io_clip_create(0, 16, 0, 0);
     CHECK(song_io_clip_is_drum(0) == 1);
@@ -301,6 +310,7 @@ static void test_clip_create_undo(void)
     reset_flash();
     g_proj_hash = 0x1111u;
     boot();
+    wipe_clips();
     CHECK(song_io_clip_used(7) == 0);
     song_io_edit_begin(7);
     song_io_clip_create_undoable(7, 16, 0, 0);
@@ -321,6 +331,7 @@ static void test_undo_stages_not_reloads(void)
     reset_flash();
     g_proj_hash = 0x1111u;
     boot();
+    wipe_clips();
     song_io_clip_create(7, 16, 0, 0);
     song_io_edit_begin(7);
     song_io_note_add(7, 0, 60, 100, 1);
@@ -419,9 +430,9 @@ static void test_corrupt_record_falls_back(void)
     }
     g_rebuilds = g_baselines = 0;
     boot();
-    CHECK(song_io_loaded() == 0);               /* nothing valid: the project mapping */
+    CHECK(song_io_loaded() == 0);               /* nothing valid: the Starter template */
     CHECK(song_io_dirty() == 1);
-    CHECK(g_rebuilds == 1);
+    CHECK(strcmp(((song_t *)live_bridge_song())->name, "STARTER") == 0);
 }
 
 int main(void)

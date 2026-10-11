@@ -21,13 +21,13 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
 [HELP_CTX_STUDIO] = {
     [B_FX]   = {{"the FX page", "tap again: next page", "HOME+FX: reset all FX"}},
     [B_SEL]  = {{"launch the cursor clip", "hold 1.5 s: clear it", "in a list: run the row"}},
-    [B_ENV]  = {{"no action here", "the sound lives on EDIT", "Classic: hold+key accent"}},
+    [B_ENV]  = {{"no action here", "the sound lives on EDIT"}},
     [B_LFO]  = {{"the mixer and master", "tap again: next page"}},
     [B_EDIT] = {{"the cursor role's sound", "drums 909, bass 303,", "chords FM6, FX NOISE"}},
-    [B_GLO]  = {{"settings and the classic", "pages; tap again: close", "GLO + a button: its card"}},
+    [B_GLO]  = {{"settings; tap again:", "close", "GLO + a button: its card"}},
     [B_HOME] = {{"the song home (root)", "HOME + pad: clear the clip", "HOME+REC undo +PLAY redo", "hold: the cheat sheet"}},
     [B_SAVE] = {{"save now", "hold 0.6 s: the songs", "stopped: it autosaves"}},
-    [B_ARP]  = {{"TB-3PO is a classic page", "GLO: classic patterns"}},
+    [B_ARP]  = {{"no action here", "TB-3PO is gone"}},
     [B_SEQ]  = {{"new clip: REC, or step it", "the cursor clip's settings", "tap again: next page"}},
     [B_PLAY] = {{"start / stop the clips", "hold 0.6 s: enter LIVE", "HOME+PLAY: redo"}},
     [B_REC]  = {{"records the cursor clip", "from the next bar", "HOME+REC: undo"}},
@@ -107,8 +107,8 @@ static help_ui_t hlp;
 
 int help_ctx(void)
 {
-    if (ui.classic || ui.overlay == O_ASK || perf_testing())
-        return -1;                         /* Classic keeps X0X's own help */
+    if (ui.overlay == O_ASK || perf_testing())
+        return -1;                         /* a question or the perf test: no overlay */
     if (ui.view == V_SONGS)
         return HELP_CTX_SONGS;
     if (ui.view == V_LIVE)
@@ -300,7 +300,7 @@ int help_footer(const char **a, const char **b, const char **c)
 #ifdef X0X_HOST
 #include <stdio.h>
 /* every card is 1..HELP_CARD_LINES lines of at most 224 px, and every cheat-sheet row fits: a
- * backstop for hand-written text, like help_fits() is for the classic cards. */
+ * backstop for hand-written text, like ui.c's help_fits() is for the inherited cards. */
 int help_cards_fit(void)
 {
     int ctx, b, i, n, ok = 1;

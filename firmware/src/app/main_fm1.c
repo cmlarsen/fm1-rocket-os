@@ -313,7 +313,7 @@ static void fm1_main(void)
     panel_init();
     led_pos_init();
     plat_perf_init();
-    engine_init(proj.pat, &proj.arr.song, proj.arr.lane, &proj.sound);
+    engine_init(project_pat(0), &proj.arr.song, proj.arr.lane, &proj.sound);
     if (project_load() != 0)
         project_defaults();                         /* nothing saved yet (or another format) */
     midi_live_set_clock(proj.set.rsv[1]);           /* T11i: the GLOBAL clock source (0 = AUTO) */
@@ -342,7 +342,7 @@ static void fm1_main(void)
     fm1_delay_ms(300);
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui_init();
-    song_io_boot(&proj.pat[0], proj.set.bpm_x10, proj.set.rsv[0]);   /* T6i/T8i: the current song, from flash or the project */
+    song_io_boot(proj.set.bpm_x10, proj.set.rsv[0]);   /* T6i/T8i: the current song, from flash or the Starter template */
 
     for (;;) {
         fm1_wdt_feed();

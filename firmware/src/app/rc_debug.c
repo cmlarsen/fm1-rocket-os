@@ -99,14 +99,13 @@ static const uint8_t RC_CHORD[8] = {48, 52, 55, 59, 62, 65, 69, 72};
  * project. The UI switches to V_LIVE so the LEDs, the header and autosave behave as in LIVE. */
 static void rc_live_enter(void)
 {
-    uint16_t bpm = (uint16_t)(seq.bpm * 10.0f + 0.5f);
     live.back = ui.view;
     live.layer = LIVE_PADS;
     live.focus = LIVE_BASS;
     live.octv = 0;
     note_release_all();
     live_bridge_rebuild_n(&rc_pat, 1);     /* T7a/T10i: map the one stress pattern (no auto-remap) */
-    live_bridge_enter(&rc_pat, bpm ? bpm : 1200u);
+    live_bridge_enter();                   /* TCLS: no pattern/bpm args */
     set_view(V_LIVE);
     say("LIVE", 0);
 }

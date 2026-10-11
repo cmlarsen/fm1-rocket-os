@@ -259,9 +259,9 @@ void live_bridge_map_n(const pattern_t *pats, int npats, void *songp)
 
 void live_bridge_init(void)
 {
-    g_active = 1;                                     /* T7a: the clip engine is the audio source in
-                                                       * every normal view, from power-on. Classic
-                                                       * mode (live_bridge_exit) hands it to X0X. */
+    g_active = 1;                                     /* TCLS: the clip engine is the audio source in
+                                                       * every view, from power-on; there is no second
+                                                       * owner to hand it to. */
     g_song_ready = 0;                                 /* T6i: nothing mapped or loaded yet */
     clip_engine_init(&g_eng, &g_song);
     g_eng_ready = 1;
@@ -353,20 +353,17 @@ void live_bridge_song_baseline(uint32_t pat_hash)
     g_song_ready = 1;
 }
 
-/* T7a: hand the audio to the clip engine (the song is the edited object; X0X's pattern-hash remap
- * is gone). The song's own tempo is kept — the argument is the project's tempo, which the song
- * overrides (decision 4). Only the first call with nothing built seeds from the project. The clip
- * engine is not re-initialised, so clips keep playing across the STUDIO <-> LIVE switch. */
-int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10)
+/* TCLS: make the clip engine the audio source (the song is the edited object; there is no X0X
+ * pattern-hash remap and no project seed any more — song_io_boot builds the song from
+ * song_templates.c). The clip engine is not re-initialised, so clips keep playing across the
+ * STUDIO <-> LIVE switch. rc_debug keeps the exit/enter pair for its stress teardown. */
+int live_bridge_enter(void)
 {
-    (void)bpm_x10;
-    if (!g_song_ready)
-        live_bridge_rebuild(pats);                     /* one-time seed, when no stored song existed */
     if (!g_eng_ready)
         live_bridge_song_reload();                     /* a caller (a unit test) that skipped init */
     if (!g_active) {
         g_active = 1;
-        engine_all_off();                              /* stop X0X's sequencer and release its voices */
+        engine_all_off();                              /* release every other sound before the clip engine */
     }
     sync_seq_tempo();
     return 0;

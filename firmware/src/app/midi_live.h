@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 /* The main loop: drain the shared TRS/USB ring, feed the parser, follow the clock. `sample` is the
- * audio sample counter's value now. Returns the packets taken. Does nothing in Classic. */
+ * audio sample counter's value now. Returns the packets taken. */
 int midi_live_poll(uint32_t sample);
 
 /* One ring packet at its sample timestamp (also what the runner's synthetic MIDI uses). */
@@ -29,7 +29,7 @@ void midi_live_set_clock(int internal);
 /* Release every note external MIDI is holding; a view/mode change and the panic path call it. */
 void midi_live_note_all_off(void);
 
-/* Drop held notes without sounding them (entering Classic: X0X owns the voices). */
+/* Drop held notes without sounding them (a mode/view change that must not leave a note held). */
 void midi_live_reset(void);
 
 /* 1 while an external clock is being followed (the header's EXT chip). */

@@ -60,30 +60,29 @@ typedef struct {
 void live_bridge_init(void);
 
 /* T6i: the current song. `song_io` reads and edits it (a model.h `song_t *`, void here so this
- * header keeps X0X's own `song_t` out), re-inits the clip engine after a change, and keeps a hash
- * of the project's patterns the song's clips were derived from, so LIVE (and a boot) can rebuild
- * them when the project changed. */
+ * header keeps X0X's own `song_t` out) and re-inits the clip engine after a change. */
 void *live_bridge_song(void);
 void  live_bridge_song_reload(void);
 void  live_bridge_sync_tempo(void);                      /* T7a: X0X's sequencer follows the song's bpm */
-uint32_t live_bridge_pats_hash(const pattern_t *pats);   /* FNV-1a over proj.pat */
+uint32_t live_bridge_pats_hash(const pattern_t *pats);   /* FNV-1a; rc_debug/boot bookkeeping */
 uint32_t live_bridge_song_hash(void);                    /* the hash the current clips match */
-/* Re-derive the clips from the project, keeping the song's own fields (key map, LIVE SETUP, tempo,
- * name); returns the new hash. `song_baseline` says a loaded song's clips match this hash. */
+/* TCLS: the X0X-project -> song mapping is no longer on the app's boot path (song_io_boot builds
+ * from song_templates.c). It stays for rc_debug's stress content and the mapping unit test. */
 uint32_t live_bridge_rebuild(const pattern_t *pats);
 uint32_t live_bridge_rebuild_n(const pattern_t *pats, int npats);   /* T10i: the first npats */
 void     live_bridge_song_baseline(uint32_t pat_hash);
 
-/* T7a: make the bridge the audio source (the clip engine). The clip transport is not reset, so
- * clips keep playing across a mode change. `pats` is proj.pat, used only to seed the song when
- * nothing has been built or loaded yet. `bpm_x10` is ignored: the song's own tempo is authoritative.
- * Returns 0 (the T6i pattern-hash rebuild is gone). */
-int live_bridge_enter(const pattern_t *pats, uint16_t bpm_x10);
+/* TCLS: make the bridge the audio source (the clip engine). The clip transport is not reset, so
+ * clips keep playing across a mode change. There is no pattern seed and no bpm argument any more
+ * (song_io_boot builds the song from song_templates.c; the song's own tempo is authoritative).
+ * Returns 0. */
+int live_bridge_enter(void);
 
-/* Stop the clip transport, release every sounding note and hand the audio back to X0X. */
+/* Stop the clip transport, release every sounding note and hand the audio back (rc_debug's stress
+ * teardown; the app never leaves the clip engine). */
 void live_bridge_exit(void);
 
-/* 1 while LIVE owns the audio path (between enter and exit). */
+/* 1 while the clip engine owns the audio path. */
 int live_bridge_active(void);
 
 /* One audio block: advance the clip engine and hand each event to `sink` at its exact sample
