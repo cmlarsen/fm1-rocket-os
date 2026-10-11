@@ -26,6 +26,30 @@ expect sound1.0.0 100
 expect sound1.0.9 20
 expect sound1.0.7 0
 expect sound1.0.8 0
+# T5i (rev 5): the two new parts (FM6, NOISE) get the other parts' level (the BASS strip 74), centred,
+# no sends, and the adapter defaults: FM6's macros at their 0 offset, NOISE at its init values
+expect sound5.4.0 74
+expect sound5.4.1 0
+expect sound5.4.2 0
+expect sound5.4.3 64
+expect sound5.5.0 74
+expect sound5.5.3 64
+expect sound3.0.0 0
+expect sound3.0.1 7
+expect sound3.0.2 64
+expect sound3.0.3 16
+expect sound3.0.4 64
+expect sound3.0.5 7
+expect sound3.0.6 0
+expect sound3.0.7 0
+expect sound3.1.0 0
+expect sound3.1.1 64
+expect sound3.1.2 70
+expect sound3.1.3 100
+expect sound3.1.4 127
+expect sound3.1.5 0
+expect sound3.1.6 70
+expect sound3.1.7 0
 # the master: COMP and FILTER from the details (ratio on: COMP > 0; low-pass: FILTER < 60)
 expect sound6.0.0 40
 expect sound6.0.12 >0
@@ -43,6 +67,9 @@ wait 300
 expect sound0.0.10 30
 expect sound0.1.4 70
 expect sound1.0.9 20
+expect sound5.4.0 74
+expect sound3.0.1 7
+expect sound3.1.4 127
 expect songlen 2
 expect lanes 1
 expect hit0.1.12 1
