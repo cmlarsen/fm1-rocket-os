@@ -261,6 +261,14 @@ static void case_record_replay(void)
     dump_replay();
     putf("# replay_events=%d\n", rp_n);
     replay_matches(t);
+    /* take_play resets the cursor: a second pass produces the identical stream */
+    {
+        int r1 = rp_n;
+        replay_random(t, 0xC0FFEEu);
+        if (rp_n != r1 || !replay_matches(t))
+            failf("the second replay pass differed");
+        putf("# replay_pass2=%d\n", rp_n);
+    }
     expect_golden("record_replay");
 }
 
@@ -312,6 +320,45 @@ static void case_bar_boundaries(void)
     expect_golden("bar_boundaries");
 }
 
+/* ---- case: events stamped before the take's start are dropped --------------- */
+
+static void case_prestart_drop(void)
+{
+    take_t *t = &tk;
+    int i, ok = 1;
+
+    outn = 0;
+    putf("# case prestart_drop\n");
+    take_init(t);
+    take_arm(t, 1000u);                        /* no bar fn: start = 1000, recording at once */
+    take_feed(t, 990u,  TAKE_FX(9u, TAKE_FX_ON));    /* before start: dropped */
+    take_feed(t, 1000u, TAKE_MUTE(ROLE_DRUMS, 1u));  /* offset 0 */
+    take_feed(t, 999u,  TAKE_FX(8u, TAKE_FX_ON));    /* before start: dropped */
+    take_feed(t, 1010u, TAKE_FX(1u, TAKE_FX_ON));    /* offset 10 */
+    take_feed(t, 1015u, TAKE_FX(2u, TAKE_FX_ON));    /* offset 15 */
+    take_stop(t, 1015u);
+    take_tick(t, 1015u);
+
+    putf("nevents=%u length=%u\n",
+         (unsigned)take_nevents(t), (unsigned)t->hdr.length_samples);
+    dump_log(t);
+
+    if (take_nevents(t) != 5u)                 /* start + 3 events + end */
+        ok = 0;
+    if (t->ev[0].cmd != TAKE_MARK_START ||
+        t->ev[1].sample != 0u || t->ev[1].cmd != TAKE_MUTE(ROLE_DRUMS, 1u) ||
+        t->ev[2].sample != 10u || t->ev[3].sample != 15u)
+        ok = 0;
+    /* the log is sorted by offset */
+    for (i = 1; i < (int)take_nevents(t); i++)
+        if ((int32_t)(t->ev[i].sample - t->ev[i - 1u].sample) < 0)
+            ok = 0;
+    if (!ok)
+        failf("a pre-start event was not dropped or the log was unsorted");
+    putf("# ok=%d\n", ok);
+    expect_golden("prestart_drop");
+}
+
 /* ---- case: the prelude restores the state ----------------------------------- */
 
 typedef struct {
@@ -323,6 +370,10 @@ typedef struct {
 
 static st_t src_state, dst_state;
 
+/* When set, the prelude tries to feed the take mid-build: it must be ignored (state == IDLE),
+ * and no prelude event may be lost. */
+static uint32_t prelude_bad_cmd;
+
 static void prelude_fn(void *ctx, take_t *t)
 {
     st_t *s = (st_t *)ctx;
@@ -330,6 +381,8 @@ static void prelude_fn(void *ctx, take_t *t)
     for (r = 0; r < NROLES; r++)
         if (s->clip[r] != CLIP_NONE)
             take_setup_event(t, TAKE_LAUNCH(s->clip[r], TAKE_LAUNCH_NOW, (uint32_t)r));
+    if (prelude_bad_cmd)
+        take_feed(t, 0u, prelude_bad_cmd);     /* an ISR feed during the build: ignored */
     for (r = 0; r < NROLES; r++)
         take_setup_event(t, TAKE_MUTE((uint32_t)r, s->mute[r]));
     take_setup_event(t, TAKE_MARK_TEMPO(s->bpm));
@@ -386,13 +439,27 @@ static void case_prelude_restore(void)
     take_init(t);
     take_set_bpm(t, 1200u);
     take_set_prelude(t, prelude_fn, &src_state);
+    prelude_bad_cmd = TAKE_CMD(0u, 0xAAu, 0xBBu, 0xCCCu);   /* must be dropped mid-build */
     take_arm(t, 0u);
-    take_stop(t, 0u);                         /* no bar fn: end at offset 0 */
+    take_stop(t, 0u);                         /* request the end at offset 0 */
+    take_tick(t, 0u);                         /* the ISR path writes the END mark */
 
     putf("header nevents=%u bpm=%u length=%u\n",
          (unsigned)take_nevents(t), (unsigned)t->hdr.bpm_x10,
          (unsigned)t->hdr.length_samples);
     dump_log(t);
+
+    /* the mid-build feed must not appear, and every prelude event must be present */
+    {
+        int bad = 0;
+        for (i = 0; i < (int)take_nevents(t); i++)
+            if (t->ev[i].cmd == prelude_bad_cmd)
+                bad = 1;
+        putf("bad_feed_present=%d\n", bad);
+        if (bad)
+            ok = 0;
+    }
+    prelude_bad_cmd = 0u;
 
     take_play(t, 100u);
     take_render(t, 1000u, &DRSINK);
@@ -495,43 +562,98 @@ static void case_counter_wrap(void)
     expect_golden("counter_wrap");
 }
 
-/* ---- case: a dense take at the 2,048-event cap ------------------------------ */
+/* ---- case: a dense take replayed in one-frame windows ----------------------- */
+
+#define DENSE_N 1000u
 
 static void case_dense_window(void)
 {
     take_t *t = &tk;
     uint32_t i;
-    int ok;
+    int ok, per_window_max = 0, cur = 0;
 
     outn = 0;
     putf("# case dense_window\n");
     take_init(t);
     take_arm(t, 0u);
-    /* one event on every sample of the window, until the buffer fills */
-    for (i = 0; i < TAKE_MAX_EVENTS + 10u; i++)
+    /* one event on every sample of the take */
+    for (i = 0; i < DENSE_N; i++)
         take_feed(t, i, TAKE_FX(i & 0xFFu, TAKE_FX_ON));
+    take_stop(t, DENSE_N);                     /* no bar fn: end at offset DENSE_N */
+    take_tick(t, DENSE_N);
 
-    /* replay it all in a single window the size of the buffer */
+    /* replay it in one-frame windows: every event must fire on its own sample */
     rp_n = 0;
     rp_base = 0;
     take_play(t, 0u);
-    take_render(t, TAKE_MAX_EVENTS, &RSINK);
+    for (i = 0; i <= DENSE_N + 1u; i++) {
+        int before = rp_n;
+        take_render(t, 1u, &RSINK);
+        rp_base += 1u;
+        cur = rp_n - before;
+        if (cur > per_window_max)
+            per_window_max = cur;
+    }
 
     putf("nevents=%u full=%d replay_events=%d\n",
          (unsigned)take_nevents(t), take_full(t), rp_n);
-    putf("first_off=%u last_off=%u\n",
-         (unsigned)t->ev[1].sample, (unsigned)t->ev[t->n - 1].sample);
+    putf("first_off=%u last_off=%u per_window_max=%d\n",
+         (unsigned)t->ev[1].sample, (unsigned)t->ev[t->n - 1].sample, per_window_max);
     ok = replay_matches(t);
-    /* the window emitted every event, and they are dense */
-    if (rp_n != (int)take_nevents(t))
-        ok = 0;
+    /* one event per sample: the window offsets are dense and in order */
     for (i = 1; i + 1u < take_nevents(t); i++)
         if (t->ev[i].sample != i - 1u)
             ok = 0;
+    /* the start mark and the first event share sample 0, so at most 2 fire in one frame */
+    if (per_window_max > 2)
+        ok = 0;
     if (!ok)
-        failf("the dense take did not replay exactly");
+        failf("the dense take did not replay exactly in one-frame windows");
     putf("# ok=%d\n", ok);
     expect_golden("dense_window");
+}
+
+/* ---- case: a main-loop stop writes exactly one END -------------------------- */
+
+static void case_stop_once(void)
+{
+    clock_t clk = { 0u, 96000u };
+    take_t *t = &tk;
+    int i, ends = 0, ok = 1;
+
+    outn = 0;
+    putf("# case stop_once\n");
+    take_init(t);
+    take_set_bar_fn(t, bar_next, &clk);
+    take_arm(t, 0u);                           /* start = 0: recording at once */
+    take_feed(t, 0u, TAKE_FX(0u, TAKE_FX_ON));
+    take_stop(t, 1000u);                       /* the main loop only requests: stop_at = 96000 */
+    putf("after_request state=%d nevents=%u stop_at=%u\n",
+         take_state(t), (unsigned)take_nevents(t), (unsigned)t->stop_at);
+
+    /* feeds keep coming; the take stays open until the boundary */
+    for (i = 1000; i < 96000; i += 1000)
+        take_feed(t, (uint32_t)i, TAKE_FX((uint32_t)(i / 1000) & 0xFFu, TAKE_FX_ON));
+    take_tick(t, 95000u);
+    putf("pre_end state=%d nevents=%u\n", take_state(t), (unsigned)take_nevents(t));
+
+    take_tick(t, 96000u);                      /* the ISR path writes the END */
+    take_feed(t, 96000u, TAKE_FX(7u, TAKE_FX_ON));   /* after the END: ignored */
+    take_tick(t, 200000u);
+
+    for (i = 0; i < (int)take_nevents(t); i++)
+        if (t->ev[i].cmd == TAKE_MARK_END)
+            ends++;
+    putf("ended state=%d nevents=%u ends=%d length=%u\n",
+         take_state(t), (unsigned)take_nevents(t), ends, (unsigned)t->hdr.length_samples);
+    dump_log(t);
+
+    if (ends != 1 || take_state(t) != TAKE_IDLE || t->hdr.length_samples != 96000u)
+        ok = 0;
+    if (!ok)
+        failf("a main-loop stop did not write exactly one END");
+    putf("# ok=%d\n", ok);
+    expect_golden("stop_once");
 }
 
 /* ---- case: replay through a real clip_engine -------------------------------- */
@@ -760,10 +882,12 @@ int main(void)
 
     case_record_replay();
     case_bar_boundaries();
+    case_prestart_drop();
     case_prelude_restore();
     case_full_buffer();
     case_counter_wrap();
     case_dense_window();
+    case_stop_once();
     case_clip_engine_parity();
 
     if (fails) {

@@ -18,6 +18,7 @@ log 0 0x0030001f param t=0 a=3 b=0 c=31
 log 0 0x00400026 param t=0 a=4 b=0 c=38
 log 0 0x0050002d param t=0 a=5 b=0 c=45
 log 0 0xf0100000 mark end
+bad_feed_present=0
 role 0 clip=0 mute=0
 role 1 clip=7 mute=1
 role 2 clip=12 mute=0

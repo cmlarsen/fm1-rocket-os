@@ -13,3 +13,4 @@ play 5 0xd0101000 mute role=1 on=1
 play 40000 0xe0001000 fx id=0 on
 play 96000 0xf0100000 mark end
 # replay_events=6
+# replay_pass2=6
