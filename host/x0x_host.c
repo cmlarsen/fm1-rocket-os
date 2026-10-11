@@ -1109,7 +1109,19 @@ int main(int argc, char **argv)
             load_force = atoi(a);
         else if (!strcmp(cmd, "peakreset"))
             peak_out = 0.0f;
-        else if (!strcmp(cmd, "wavstop"))
+        else if (!strcmp(cmd, "silence")) {              /* silence MS [DB]: the next MS ms stay quiet */
+            uint32_t ms = (uint32_t)atoi(a);
+            double lim = b[0] ? atof(b) : -40.0;
+            double db;
+            peak_out = 0.0f;
+            run_ms(ms);
+            db = 20.0 * log10(peak_out > 1e-9f ? peak_out : 1e-9f);
+            if (db > lim) {
+                printf("FAIL silence %s: %.1f dBFS > %.1f\n", a, db, lim);
+                fails++;
+            } else
+                printf("  ok silence %s (%.1f dBFS)\n", a, db);
+        } else if (!strcmp(cmd, "wavstop"))
             wav_close();
         else if (!strcmp(cmd, "shot")) {
             snprintf(out, sizeof out, "%s/%s", dir, a);

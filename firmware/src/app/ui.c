@@ -476,6 +476,16 @@ static const char *pref_name(pref_t r)
     static const char *const CHN[MX_NPARAMS] = {"LEVEL", "REV", "DLY", "PAN"};
     const x0x_param_t *d = pref_desc(r);
     static const char *const SEQN[6] = {"LENGTH", "RATE", "LENGTH", "RATE", "DIRECT", "TRANSP"};
+    if (ui.view == V_LIVE && r.kind == R_ENG) {       /* T3: the LIVE performance knobs' design labels */
+        if (r.a == T_MST && r.c == MST_DJF)
+            return "FILTER";
+        if (r.a == T_FX && r.c == FX_RV_LEVEL)
+            return "SPACE";
+        if (r.a == T_FX && r.c == FX_DL_LEVEL)
+            return "ECHO";
+        if (r.a == T_FX && r.c == FX_DRIVE)
+            return "DRIVE";
+    }
     if (r.kind >= R_DLEN && r.kind <= R_BTRANS)       /* SEQ: the part's own; a list elsewhere: whose */
         return ui.view == V_SEQ ? SEQN[r.kind - R_DLEN] : PATN[r.kind - R_DLEN][r.a & 1];
     if (r.kind == R_ENG && r.a == T_MIX && ui.view == V_MIX && r.c < MX_NPARAMS)
@@ -732,6 +742,10 @@ static void build_pages(void)
     pg.n = pg.nmore = 0;
     pg_grp = GR_NONE;
     switch (ui.view) {
+    case V_LIVE:                                       /* T3: the LIVE performance knobs (design: FILTER/SPACE/ECHO/DRIVE) */
+        add_page("PERFORM", PR(R_ENG, T_MST, 0, MST_DJF), PR(R_ENG, T_FX, 0, FX_RV_LEVEL),
+                 PR(R_ENG, T_FX, 0, FX_DL_LEVEL), PR(R_ENG, T_FX, 0, FX_DRIVE));
+        break;
     case V_HOME:                                       /* the pattern: how the parts run through it */
     case V_GLO:
         add_page("PERFORM", PR(R_TEMPO, 0, 0, 0), PR(R_SWING, 0, 0, 0), PR(R_ENG, T_MST, 0, MST_DJF),
@@ -3934,6 +3948,8 @@ void ui_init(void)
 static void autosave(void)
 {
     uint32_t now = plat_ms();
+    if (live_mode() || live_bridge_active())         /* T3: never write flash while LIVE is active */
+        return;
     if (save_wait && !seq.playing && !seq.req_stop) { /* SAVE pressed while playing: now */
         save_project();
         return;

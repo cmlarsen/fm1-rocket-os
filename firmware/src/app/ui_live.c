@@ -9,7 +9,7 @@
 #define LIVE_HOLD_MS 600u                 /* the interaction model's ring: ~600 ms */
 
 static const uint16_t LV_COL[LIVE_NROLES] = {TOK_DRUM, TOK_BASS, TOK_LEAD, TOK_CHORD, TOK_FX};
-static const char *const LV_ROLE[LIVE_NROLES] = {"DRUM", "BASS", "LEAD", "CHRD", "FX"};
+static const char *const LV_ROLE[LIVE_NROLES] = {"DR", "BA", "LE", "CH", "FX"};   /* 2 letters: clears the first cell */
 static const char *const LV_ROLE_L[LIVE_NROLES] = {"DRUMS", "BASS", "LEAD", "CHORDS", "FX"};
 static const char *const LV_SOUND[LIVE_NROLES] = {"909", "303 A", "303 B", "FM6", "NOISE"};
 
@@ -30,6 +30,16 @@ static int live_holding(void) { return live.holding != 0; }
 int live_layer(void) { return live.layer; }
 int live_focus(void) { return live.focus; }
 
+/* T3 review: a key's note is tracked per key, whatever the layer/focus/octave does while it is
+ * held. A release always releases the note that key started (never the current focus's). */
+static uint8_t held_role[NKEYS], held_note[NKEYS], held_on[NKEYS];
+static void live_clear_held(void)
+{
+    int k;
+    for (k = 0; k < NKEYS; k++)
+        held_on[k] = 0;
+}
+
 /* ---- mode in and out ---- */
 
 static void live_enter(void)
@@ -39,8 +49,8 @@ static void live_enter(void)
     live.layer = LIVE_PADS;               /* the PADS layer is the default on entry */
     live.focus = LIVE_BASS;               /* ... or whichever role launched most recently */
     live.octv = 0;
-    seq_stop(&seq);                       /* LIVE takes the transport; the clip engine drives it */
-    live_bridge_enter(&proj.pat[0], bpm);
+    live_clear_held();
+    live_bridge_enter(&proj.pat[0], bpm); /* stops X0X's transport and releases its voices (engine_all_off) */
     set_view(V_LIVE);
     say("LIVE", 0);
 }
@@ -48,39 +58,42 @@ static void live_enter(void)
 static void live_leave(void)
 {
     live_bridge_exit();                   /* stops the clip transport and releases any held note */
+    live_clear_held();
     set_view(live.back == V_LIVE ? V_HOME : live.back);
     say("STUDIO", 0);
 }
 
-/* ---- the PLAY button: short = transport, long = enter / leave LIVE ---- */
+/* ---- the PLAY button: short press on release (< 600 ms) = transport; the long press switches
+ * the mode and never starts or stops either transport. ---- */
 
 static void live_play_tick(uint32_t btn)
 {
     uint32_t now = plat_ms();
     int down = (int)((btn >> B_PLAY) & 1u);
     if (down && !live.play_down) {
-        /* act on the press, exactly as X0X always did, so a tap's timing is unchanged */
         live.play_down = 1;
         live.long_done = 0;
         live.holding = 1;
         live.t0 = now;
         live.to_live = (uint8_t)!live_mode();
         any_button = 1;
-        if (live_mode())
-            live_handle_button(B_PLAY);
-        else
-            button_tap(B_PLAY);           /* transport, or HOME+PLAY redo */
     } else if (down && live.holding && !live.long_done && (now - live.t0) >= LIVE_HOLD_MS) {
         live.long_done = 1;               /* the hold reached 600 ms: in or out of LIVE */
         live.holding = 0;
         ui.btn_used |= 1u << B_PLAY;
         if (live.to_live)
-            live_enter();                 /* live_enter stops the transport it just started */
+            live_enter();
         else
-            live_leave();                 /* live_leave stops the clip engine */
+            live_leave();
     } else if (!down && live.play_down) {
         live.play_down = 0;
         live.holding = 0;
+        if (!live.long_done) {            /* a short press: the transport, only on release */
+            if (live_mode())
+                live_handle_button(B_PLAY);
+            else
+                button_tap(B_PLAY);       /* transport, or HOME+PLAY redo */
+        }
         live.long_done = 0;
     }
 }
@@ -89,19 +102,29 @@ static void live_play_tick(uint32_t btn)
 
 static int live_handle_key(int k, int down)
 {
+    if (!down) {                          /* a release always releases the note this key started */
+        if (held_on[k]) {
+            live_bridge_play_key(held_role[k], held_note[k], 0, 0);
+            held_on[k] = 0;
+        }
+        return 1;
+    }
     if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, chromatically */
         int note = 41 + k + 12 * live.octv;
         if (note < 0)
             note = 0;
         if (note > 127)
             note = 127;
-        live_bridge_play_key(live.focus, (uint8_t)note, down, 88);
+        held_role[k] = live.focus;        /* the layer/focus/octave may change while it is held */
+        held_note[k] = (uint8_t)note;
+        held_on[k] = 1;
+        live_bridge_play_key(held_role[k], held_note[k], 1, 88);
         return 1;
     }
-    {                                     /* PADS: each key is a clip in its zone */
+    {                                     /* PADS: each key is a clip in its zone (press only) */
         int clip = live_bridge_key_clip(k);
         int role = live_bridge_role_of(clip);
-        if (!down || clip < 0 || role < 0)
+        if (clip < 0 || role < 0)
             return 1;
         live.focus = (uint8_t)role;        /* the focused role is the last one launched */
         if (live_bridge_playing_clip((uint8_t)role) == (uint8_t)clip)
@@ -144,16 +167,20 @@ static int live_handle_button(int b)
     return 1;
 }
 
-/* ---- the encoders: only ALGORITHM steps the focused role ---- */
+/* ---- the encoders: ALGORITHM steps the focused role; K1-K4 are the LIVE performance knobs ---- */
 
 static void live_input(void)
 {
-    int i, e;
+    int i, e, pgi = cur_page();
     for (i = 0; i < NE; i++) {
         e = (int)enc(i);
         if (i == EN_ALGO && e) {
             int f = live.focus + (e > 0 ? 1 : -1);
             live.focus = (uint8_t)((f + LIVE_NROLES) % LIVE_NROLES);
+        } else if (i >= EN_K1 && i <= EN_K4 && e) {
+            turn_ref(pg.r[pgi][i - EN_K1], e, i);     /* FILTER / SPACE / ECHO / DRIVE */
+            ui.touched = (int8_t)(i - EN_K1);
+            ui.touch_until = plat_ms() + 900u;
         }
     }
 }
@@ -326,10 +353,10 @@ static void live_draw_play(int band)
         text_r(232, vc(&AF_S, 8, 14), &AF_S, "ALGO: role", TOK_MID);
         q = put_s(t, "ENGINE ");
         put_s(q, LV_SOUND[r]);
-        cv_text(8, vc(&AF_M, 40, 18), &AF_M, t, TOK_TEXT);
+        cv_text(8, vc(&AF_M, 36, 18), &AF_M, t, TOK_TEXT);
         q = put_s(t, "octave ");
         put_i(q, live.octv);
-        cv_text(8, vc(&AF_S, 62, 14), &AF_S, t, TOK_MID);
+        cv_text(8, vc(&AF_S, 54, 14), &AF_S, t, TOK_MID);   /* fully inside the band */
     } else {
         int i;
         for (i = 0; i < LIVE_NROLES; i++) {                /* the clip-status strip */
