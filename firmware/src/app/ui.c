@@ -3970,6 +3970,7 @@ static void autosave(void)
         say("MEMORY FULL: NOT SAVED", 0);
         break;
     default:
+        say("SAVE FAILED", 0);
         break;
     }
 }
