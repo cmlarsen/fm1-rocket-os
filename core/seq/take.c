@@ -20,7 +20,6 @@
  * by offset, any window size produces the same absolute firing times.
  */
 #include "take.h"
-#include <string.h>                 /* r1/S2: memmove the tail in the rare prelude-shape fallback */
 
 /* `full` is a byte in the struct; keep the model header honest about the array it sizes. */
 _Static_assert(sizeof(take_event_t) == 8, "take_event_t");
@@ -328,7 +327,9 @@ void take_refresh_setup(take_t *t)
          * move the remainder down when the new state is shorter; an overrun is unrecoverable. */
         if (t->n < old_state_n) {
             uint32_t rest = (uint32_t)old_n - old_state_n;
-            memmove(t->ev + t->n, t->ev + old_state_n, rest * sizeof t->ev[0]);
+            uint32_t k;
+            for (k = 0; k < rest; k++)
+                t->ev[t->n + k] = t->ev[old_state_n + k];  /* dest < src: a forward copy is safe */
             old_n = (uint16_t)(t->n + rest);
         } else {
             old_n = t->n;
