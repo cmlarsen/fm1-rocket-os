@@ -1,0 +1,4 @@
+# Actual engine: a two-bar clip launched on global step 3, REC starts on step 16.
+# Compare its note stream over the half-open take interval, with real DSP dispatch.
+tfixaphase
+eventscmp phase_record.txt phase_replay.txt

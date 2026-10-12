@@ -164,7 +164,7 @@ screens: host
 parity:
 	@sh tests/parity.sh
 
-check: fw host
+check: no-64-div fw host
 	@echo "check: forbidden symbols (heap, 64-bit division, soft-double)"
 	@$(SSH) 'cd $(REMOTE_DIR) && sh tools/check_symbols.sh build'
 	@echo "check: the flash write path refuses the protected regions"
@@ -427,3 +427,7 @@ unit-stack:
 unit-save-ui:
 	@X0X_HOST_SRC=tests/host/save_failure_ui_test.c X0X_HOST_OUT=build/host/save_failure_ui_test sh host/build_host.sh
 	@build/host/save_failure_ui_test
+.PHONY: no-64-div
+no-64-div:
+	@python3 tests/lint/no_64_div_test.py
+	@python3 tools/check_no_64_div.py

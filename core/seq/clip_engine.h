@@ -77,6 +77,9 @@ typedef struct {
     uint8_t  pos[NROLES];    /* step inside each role's clip */
     uint8_t  cur[NROLES];    /* playing clip, or CLIP_NONE */
     uint8_t  que[NROLES];    /* target clip of the pending action, or CLIP_NONE */
+    uint8_t que_phase[NROLES]; /* take prelude: first step of a queued launch */
+    void (*step_hook)(void *ctx, uint32_t offset); /* ISR, after role advance, before note-ons */
+    void *step_hook_ctx;
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
     uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
@@ -95,6 +98,8 @@ typedef struct {
     uint32_t s_elapsed, s_step_sample, s_step_frac, s_global;
 
     /* Single-producer / single-consumer command ring (UI writer, ISR reader). */
+    uint32_t cmd_drops;
+    volatile uint8_t safety_pending; /* full-ring transport/role Stops and mute-clear, after older entries */
     clip_cmd_t cmd[CLIP_CMD_RING];
     volatile uint8_t cmd_head;   /* producer writes here */
     volatile uint8_t cmd_tail;   /* consumer reads here */
@@ -129,42 +134,48 @@ typedef struct {
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
 
+/* r1/N1: install the platform's short interrupt-masking pair so push_cmd's safety-latch
+ * read-modify-write cannot race the ISR's clear. Optional; null disables it (host units). */
+void clip_engine_set_crit(uint32_t (*enter)(void), void (*exit)(uint32_t));
+
+/* Ring APIs return 0 on admission, -1 on refusal; cmd_drops counts refused pushes.
+ * Two slots are reserved for safety; an overflow safety latch blocks later ordinary pushes. */
 /* Transport. Tempo and swing come from the song (or a tempo command).
  * start() plays (resetting to bar 1, step 0 when it was stopped); restart() (T11i) forces the reset
  * and relaunches what was playing (MIDI Start); continue() (T11i) resumes from where
  * transport_stop() left it. restart() and continue() reach the engine through its command ring, so
  * `playing` changes only in the ISR. */
-void clip_engine_start(clip_engine_t *e);
-void clip_engine_restart(clip_engine_t *e);
-void clip_engine_continue(clip_engine_t *e);
-void clip_engine_transport_stop(clip_engine_t *e);
+int clip_engine_start(clip_engine_t *e);
+int clip_engine_restart(clip_engine_t *e);
+int clip_engine_continue(clip_engine_t *e);
+int clip_engine_transport_stop(clip_engine_t *e);
 
 /* Queue the clip on its role (clip_role()) at the clip's own quantize; a second launch of
  * the clip that is already queued cancels the queue. clip_engine_launch_quant uses an
  * explicit quantize. */
-void clip_engine_launch(clip_engine_t *e, uint8_t clip);
-void clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant);
+int clip_engine_launch(clip_engine_t *e, uint8_t clip);
+int clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant);
 
 /* Queue a stop on a role, at that role's current clip quantize (the next bar if it is idle).
  * A second stop cancels the queued one. */
-void clip_engine_stop(clip_engine_t *e, uint8_t role);
+int clip_engine_stop(clip_engine_t *e, uint8_t role);
 
 /* HOME + pad: switch at the next step, whatever the clip's quantize says. It does not cancel
  * a queued clip; it launches the new one now. */
-void clip_engine_launch_now(clip_engine_t *e, uint8_t clip);
+int clip_engine_launch_now(clip_engine_t *e, uint8_t clip);
 
 /* T7b: launch so the clip starts on exactly global step `at_step` (the recorded clip's close
  * boundary). Armed before the boundary is reached, so there is no gap. */
-void clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step);
+int clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step);
 
 /* Tempo change from the main loop, through the ring. It is applied at the next render and is
  * the one source of truth (it also writes song->bpm_x10). */
-void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
+int clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10);
 
 /* T11i: a live/transient tempo (the external clock). It sets the running tempo but does NOT write
  * song->bpm_x10, so switching the clock source back to Internal restores the song's own tempo.
  * A later clip_engine_queue_bpm (or the song's own change) cancels it. */
-void clip_engine_queue_bpm_soft(clip_engine_t *e, uint16_t bpm_x10);
+int clip_engine_queue_bpm_soft(clip_engine_t *e, uint16_t bpm_x10);
 
 /* T7b: after an edit to `clip`, the main loop writes the song's clip into the engine's play[] (when
  * it is the role's playing clip) and next[] (when a launch of it is staged), with the audio IRQs
@@ -184,14 +195,14 @@ uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role);
  * notes immediately (note-offs at the window start) and suppresses new note-ons; the transport
  * and the role's position keep running, so unmuting rejoins the clip in time. `song->role[role].muted`
  * is updated, but the caller does not mark the song dirty for a live mute. */
-void clip_engine_mute(clip_engine_t *e, uint8_t role, int on);
+int clip_engine_mute(clip_engine_t *e, uint8_t role, int on);
 int  clip_engine_muted(const clip_engine_t *e, uint8_t role);
 
 /* Clear every role mute. It zeroes the bits immediately (a caller that stops the engine, e.g.
  * leaving LIVE, has no later drain) AND queues CLIP_CMD_MUTE_CLEAR, which drains after any mute
  * command already in the ring, so a pending CLIP_CMD_MUTE cannot re-apply. The mute is performance
  * state, never song state; live_enter also clears. */
-void clip_engine_mute_clear(clip_engine_t *e);
+int clip_engine_mute_clear(clip_engine_t *e);
 
 /* T9i: the take player's ISR-side entry points. A take replays launches/mutes/tempo sample-exactly
  * from the audio ISR, but it must not push onto the command ring (that is the main loop's) or read
@@ -234,3 +245,5 @@ uint8_t clip_engine_playing_clip(const clip_engine_t *e, uint8_t role); /* CLIP_
 uint8_t clip_engine_queued_clip(const clip_engine_t *e, uint8_t role);  /* CLIP_NONE = none  */
 uint8_t clip_engine_progress(const clip_engine_t *e, uint8_t role);     /* 0..255 through the clip */
 void    clip_engine_pos(const clip_engine_t *e, uint8_t *bar, uint8_t *beat, uint8_t *step);
+
+void clip_engine_take_phase(clip_engine_t *e, uint8_t role, uint8_t phase);

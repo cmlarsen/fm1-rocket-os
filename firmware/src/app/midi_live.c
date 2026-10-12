@@ -167,8 +167,10 @@ int midi_live_poll(uint32_t sample)
         midi_live_feed(pkt, ts);
         n++;
     }
-    if (plat_midi_overflow())                       /* a dropped packet may have been a note-off */
+    if (plat_midi_overflow()) {                     /* a dropped packet may have been a note-off */
         midi_live_note_all_off();
+        engine_all_off();
+    }
     midi_live_tick(sample);
     return n;
 }

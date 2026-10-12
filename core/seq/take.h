@@ -49,11 +49,14 @@
 /* TAKE_LAUNCH: a = clip, b = how, c = role. TAKE_LAUNCH_STOP ignores a.
  * TAKE_LAUNCH_QUANT (S1): a Program Change launch, b = how, c = role | (quant << 8), so the replay
  * uses the recorded quantize rather than the clip's own. */
-enum { TAKE_LAUNCH_QUEUE, TAKE_LAUNCH_NOW, TAKE_LAUNCH_STOP, TAKE_LAUNCH_QUANT };
+enum { TAKE_LAUNCH_QUEUE, TAKE_LAUNCH_NOW, TAKE_LAUNCH_STOP, TAKE_LAUNCH_QUANT, TAKE_LAUNCH_PHASE };
 #define TAKE_LAUNCH(clip, how, role) TAKE_CMD(TAKE_T_LAUNCH, (clip), (how), (role))
 #define TAKE_LAUNCH_Q(clip, quant, role) \
     TAKE_CMD(TAKE_T_LAUNCH, (clip), TAKE_LAUNCH_QUANT, \
              ((uint32_t)(role) & 0xFFu) | (((uint32_t)(quant) & 3u) << 8))
+#define TAKE_LAUNCH_AT_PHASE(clip, role, phase) \
+    TAKE_CMD(TAKE_T_LAUNCH, (clip), TAKE_LAUNCH_PHASE, ((role) & 7u) | (((phase) & 63u) << 3))
+#define TAKE_LAUNCH_ROLE(cmd) (TAKE_CMD_B(cmd) == TAKE_LAUNCH_PHASE ? (TAKE_CMD_C(cmd) & 7u) : (TAKE_CMD_C(cmd) & 0xFFu))
 /* TAKE_MUTE: a = role, b = 0/1 */
 #define TAKE_MUTE(role, on)          TAKE_CMD(TAKE_T_MUTE, (role), (on), 0)
 /* TAKE_FX: a = punch FX id, b = 0 off / 1 on / 2 latch */
@@ -78,7 +81,12 @@ enum { TAKE_IDLE, TAKE_ARMED, TAKE_REC, TAKE_PLAY };
 typedef uint32_t (*take_bar_fn)(void *ctx, uint32_t sample);
 
 /* Called once inside take_arm (main-loop context, before a note of the take records) to write
- * the offset-0 setup events. Use take_setup_event() for each one. */
+ * the offset-0 setup events. Use take_setup_event() for each one.
+ *
+ * T9i r1/S2: the prelude is split in two so the ISR baseline is cheap. `pre` writes the DYNAMIC
+ * state (clip/phase per role, mutes, tempo, FX); it runs at arm AND again from take_refresh_setup
+ * at the real recording boundary, overwriting its own earlier copy in place. `pre_params` writes
+ * the (large) parameter mirror once, at arm, on the main loop. */
 struct take;
 typedef void (*take_prelude_fn)(void *ctx, struct take *t);
 
@@ -96,10 +104,14 @@ typedef struct take {
     uint32_t     stop_at;                     /* absolute boundary take_stop() ends on */
     uint32_t     play_pos;                    /* samples replayed so far */
     uint16_t     play_i;                      /* next event to replay */
+    uint16_t     state_n;                     /* r1/S2: events through the dynamic state prelude */
+    uint16_t     pre_n;                       /* r1/S2: events through the whole arm prelude */
     take_bar_fn     bar;
     void           *bar_ctx;
-    take_prelude_fn pre;
+    take_prelude_fn pre;                      /* r1/S2: dynamic state, run at arm and at the boundary */
     void           *pre_ctx;
+    take_prelude_fn pre_params;               /* r1/S2: the parameter mirror, arm only */
+    void           *params_ctx;
 } take_t;
 
 /* Playback sink: `sample` is the offset into the window passed to take_render(). */
@@ -113,6 +125,7 @@ typedef struct {
 void take_init(take_t *t);
 void take_set_bar_fn(take_t *t, take_bar_fn fn, void *ctx);
 void take_set_prelude(take_t *t, take_prelude_fn fn, void *ctx);
+void take_set_prelude_params(take_t *t, take_prelude_fn fn, void *ctx); /* r1/S2: arm-only mirror */
 void take_set_bpm(take_t *t, uint16_t bpm_x10);          /* the take's tempo, into the header */
 void take_setup_event(take_t *t, uint32_t cmd);          /* offset-0 event, from the prelude */
 
@@ -141,3 +154,11 @@ int         take_has(const take_t *t);                   /* a take was recorded 
 uint16_t    take_nevents(const take_t *t);
 const take_hdr_t *take_header(const take_t *t);
 const take_event_t *take_events(const take_t *t);
+
+/* ISR recording-start snapshot (r1/S2): recapture the offset-0 dynamic state in place. Cheap and
+ * bounded by NROLES; the parameter mirror written by the arm prelude and any events already
+ * appended at offset 0 are preserved. */
+void take_refresh_setup(take_t *t);
+
+/* ISR: incomplete recording (ingress overflow), closed with an END and full indication. */
+void take_overflow(take_t *t, uint32_t now);

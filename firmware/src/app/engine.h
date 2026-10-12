@@ -97,19 +97,22 @@ int engine_nparams(int target, int voice);
 const x0x_param_t *engine_param(int target, int voice, int i);
 const char *engine_voice_name(int target, int voice);
 
+/* Main-loop queue APIs return 0 on admission, -1 on refusal. Releases use reserved
+ * headroom and a guaranteed panic if safety traffic itself fills the ring. */
+extern volatile uint32_t engine_command_drops;
 /* main loop -> ISR */
-void engine_set(int target, int voice, int i, int value);   /* queued; the sound_t mirror is the caller's */
+int engine_set(int target, int voice, int i, int value);   /* queued; the sound_t mirror is the caller's */
 void engine_out_loud(int on);          /* 1: the output at the codec's full scale (6 dB hotter than Felucca's) */
 void engine_apply_sound(const sound_t *s);                  /* queue every value (load, init) */
 void engine_sound_defaults(sound_t *s);                     /* each engine's power-on values */
 void engine_sound_centre_drum_pans(sound_t *s);             /* every drum voice's PAN (its last pot) to centre */
-void engine_drum(int kit, int voice, float vel);            /* play now (keys) */
-void engine_bass_on(int part, int note, int accent, int slide);
-void engine_bass_off(int part);
+int engine_drum(int kit, int voice, float vel);            /* play now (keys) */
+int engine_bass_on(int part, int note, int accent, int slide);
+int engine_bass_off(int part);
 /* T5i: the engine-only parts' notes, through the same C_BON / C_BOFF commands (no new command type).
  * part is PART_FM6 or PART_NOISE; on C_BON the command's c field carries velocity 0..127. */
-void engine_note_on(int part, int note, int vel);
-void engine_note_off(int part, int note);
+int engine_note_on(int part, int note, int vel);
+int engine_note_off(int part, int note);
 /* T5i: queue an FM6 preset (SLOT) load: 0..7 a ROM factory voice, 8 the own patch, 9..40 a bank voice.
  * A bank voice that is not there (no bank, or an erased / corrupt sector) falls back to a ROM voice. */
 void engine_fm6_preset(int n);

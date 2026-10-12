@@ -1989,6 +1989,28 @@ int main(int argc, char **argv)
                 else
                     fails++;
             }
+        } else if (!strcmp(cmd, "tfixapanel")) {
+            extern int engine_test_bass_gate(int part);
+            int32_t audio[512];
+            note_key_down(20, LIVE_BASS, 60);
+            note_key_down(10, LIVE_BASS, 64);
+            note_key_up(10); note_key_up(20);
+            engine_render(audio, 256);
+            if (engine_test_bass_gate(0)) {
+                puts("FAIL TFIXA panel newest-first release left a held gate"); fails++;
+            }
+        } else if (!strcmp(cmd, "tfixamidimono")) {
+            extern int engine_test_tfixa_midi(int part);
+            live.focus = LIVE_BASS; fails += engine_test_tfixa_midi(0);
+            live.focus = LIVE_LEAD; fails += engine_test_tfixa_midi(1);
+        } else if (!strcmp(cmd, "tfixaphase")) {
+            extern int engine_test_tfixa_phase(const char *dir);
+            fails += engine_test_tfixa_phase(dir);
+        } else if (!strcmp(cmd, "tfixaengine")) {
+            extern int engine_test_tfixa(void);
+            int nfail = engine_test_tfixa();
+            printf("TFIXA engine failures: %d\n", nfail);
+            fails += nfail;
         } else if (!strcmp(cmd, "takefill")) {           /* T9i: feed N FM6 notes to fill the buffer */
             int n = atoi(a), k;
             for (k = 0; k < n; k++) {

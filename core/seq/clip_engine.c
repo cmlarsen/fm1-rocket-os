@@ -30,7 +30,10 @@
 #define CLIP_ENGINE_FS 48000u
 #endif
 #define CLIP_STEP_NUM ((uint32_t)CLIP_ENGINE_FS * 150u)
-#define NEVER32 0xFFFFFFFFu
+/* At supported rates, phase and new_l are <= 36000, so their product fits u32. */
+#if CLIP_ENGINE_FS > 48000u
+#error "tempo phase arithmetic requires CLIP_ENGINE_FS <= 48000"
+#endif
 /* publish we have written the slot / read the head before the slot */
 #define CLIP_BARRIER() __asm__ volatile("" ::: "memory")
 
@@ -39,6 +42,18 @@
  * the test around the ISR-side call; never set on the device (the guard compiles out). */
 volatile int clip_engine_isr;
 #endif
+
+/* r1/N1: the app installs an interrupt mask so push_cmd's safety-latch update is atomic against the
+ * ISR's clear. Null (the default) is a no-op, so the standalone host units that link this file
+ * alone still build. */
+static uint32_t (*clip_crit_enter)(void);
+static void (*clip_crit_exit)(uint32_t);
+
+void clip_engine_set_crit(uint32_t (*enter)(void), void (*exit)(uint32_t))
+{
+    clip_crit_enter = enter;
+    clip_crit_exit = exit;
+}
 
 /* ---- tempo --------------------------------------------------------------- */
 
@@ -64,7 +79,7 @@ static void set_bpm(clip_engine_t *e, uint16_t bpm_x10)
         if (phase > e->step_L)
             phase = e->step_L;
         /* keep the same fraction of the step, so the next boundary is exactly one step away */
-        scaled = (uint32_t)((uint64_t)phase * new_l / e->step_L);
+        scaled = phase * new_l / e->step_L;
         e->step_sample = e->elapsed - scaled;
         e->step_frac = 0;
     } else {
@@ -171,13 +186,17 @@ static int note_set(clip_engine_t *e, uint8_t role, uint8_t note, uint32_t end)
     return 0;                          /* full: drop the note rather than leave it stuck on */
 }
 
-static uint32_t note_next(const clip_engine_t *e)
+static int note_next(const clip_engine_t *e, uint32_t *deadline)
 {
-    uint32_t i, m = NEVER32;
+    uint32_t i, m = 0;
+    int found = 0;
     for (i = 0; i < CLIP_ENGINE_MAX_VOICES; i++)
-        if (e->note[i].used && (m == NEVER32 || (int32_t)(e->note[i].end - m) < 0))
+        if (e->note[i].used && (!found || (int32_t)(e->note[i].end - m) < 0)) {
             m = e->note[i].end;
-    return m;
+            found = 1;
+        }
+    *deadline = m;
+    return found;
 }
 
 /* release every note whose end is on or before upto; emit at window offset off */
@@ -256,7 +275,7 @@ static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t st
             if (nt->len == 0 || nt->step != step)
                 continue;
             release_pitch(e, role, nt->note, off, sink);   /* a retrigger cuts the old one */
-            dur = (uint32_t)((uint64_t)nt->len * e->step_L);
+            dur = (uint32_t)nt->len * e->step_L;
             if (dur == 0)
                 dur = 1;
             end = abs + dur;
@@ -315,11 +334,12 @@ void clip_engine_init(clip_engine_t *e, song_t *song)
 /* T11i: the PLAY button's start. `playing` is set here for the UI and the tests, and a ring
  * command is pushed after it, so a transport Stop queued earlier (e.g. leaving LIVE) cannot stop
  * this start: the ISR applies Stop then Start, in order. */
-void clip_engine_start(clip_engine_t *e)
+int clip_engine_start(clip_engine_t *e)
 {
+    if (push_cmd(e, CLIP_CMD_START, 0, 0, 0, 0)) return -1;
     e->playing = 1;
     e->resume = 0;
-    push_cmd(e, CLIP_CMD_START, 0, 0, 0, 0);
+    return 0;
 }
 
 /* T11i: stage the copy a MIDI Start/Continue will relaunch, the same main-loop staging a launch
@@ -332,7 +352,7 @@ static void relaunch_stage(clip_engine_t *e)
         return;
     for (r = 0; r < NROLES; r++) {
         uint8_t clip;
-        if (e->que_set[r])
+        if (e->que_set[r] || e->next_set[r])
             continue;                 /* a launch is already staged for this role: it wins */
         clip = e->cur[r] != CLIP_NONE ? e->cur[r] : e->s_cur[r];
         if (clip != CLIP_NONE && clip < NCLIPS) {
@@ -343,16 +363,16 @@ static void relaunch_stage(clip_engine_t *e)
     }
 }
 
-void clip_engine_restart(clip_engine_t *e) { relaunch_stage(e); push_cmd(e, CLIP_CMD_RESTART, 0, 0, 0, 0); }
-void clip_engine_continue(clip_engine_t *e) { relaunch_stage(e); push_cmd(e, CLIP_CMD_CONTINUE, 0, 0, 0, 0); }
+int clip_engine_restart(clip_engine_t *e) { if (push_cmd(e, CLIP_CMD_RESTART, 0, 0, 0, 0)) return -1; relaunch_stage(e); return 0; }
+int clip_engine_continue(clip_engine_t *e) { if (push_cmd(e, CLIP_CMD_CONTINUE, 0, 0, 0, 0)) return -1; relaunch_stage(e); return 0; }
 
 /* T11i: the transport stop is a ring command too, so a Start and a Stop in the same main-loop poll
  * apply in order (the Stop wins). `playing` is also cleared here, so leaving LIVE — where the clip
  * engine stops rendering — still reads as stopped. */
-void clip_engine_transport_stop(clip_engine_t *e)
+int clip_engine_transport_stop(clip_engine_t *e)
 {
     e->playing = 0;
-    push_cmd(e, CLIP_CMD_TRANSPORT_STOP, 0, 0, 0, 0);
+    return push_cmd(e, CLIP_CMD_TRANSPORT_STOP, 0, 0, 0, 0);
 }
 
 /* ---- UI entry points ----------------------------------------------------- */
@@ -360,12 +380,29 @@ void clip_engine_transport_stop(clip_engine_t *e)
 static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm, uint32_t at)
 {
     uint8_t head = e->cmd_head, next = (uint8_t)((head + 1u) % CLIP_CMD_RING);
+    uint32_t crit;
 #ifdef X0X_HOST
     if (clip_engine_isr)               /* T9i r1: an ISR-side path must never push onto this ring */
         __builtin_trap();
 #endif
-    if (next == e->cmd_tail)
-        return -1;                        /* full: the UI may retry */
+    uint8_t safety = cmd == CLIP_CMD_TRANSPORT_STOP ? 1u : cmd == CLIP_CMD_MUTE_CLEAR ? 2u : cmd == CLIP_CMD_STOP ? (uint8_t)(4u << clip) : 0u;
+    uint8_t used = (uint8_t)((head + CLIP_CMD_RING - e->cmd_tail) % CLIP_CMD_RING);
+    /* r1/N1: safety_pending is shared with the ISR, which clears bits as it consumes them. The
+     * read-modify-write below must not race that clear, so it runs inside the platform's short
+     * interrupt mask (a no-op when no hook is installed). */
+    crit = clip_crit_enter ? clip_crit_enter() : 0u;
+    if (!safety && (used >= CLIP_CMD_RING - 3u || e->safety_pending)) {
+        e->cmd_drops++;
+        if (clip_crit_exit) clip_crit_exit(crit);
+        return -1;
+    }
+    if (next == e->cmd_tail || e->safety_pending) {
+        if (cmd == CLIP_CMD_STOP) e->safety_pending ^= safety; /* two role stops cancel */
+        else e->safety_pending |= safety;
+        if (clip_crit_exit) clip_crit_exit(crit);
+        return 0;
+    }
+    if (clip_crit_exit) clip_crit_exit(crit);
     e->cmd[head].cmd = cmd;
     e->cmd[head].clip = clip;
     e->cmd[head].quant = quant;
@@ -397,38 +434,38 @@ static int launch_cmd(clip_engine_t *e, uint8_t clip, uint8_t cmd, uint8_t quant
     return 0;
 }
 
-void clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant)
+int clip_engine_launch_quant(clip_engine_t *e, uint8_t clip, uint8_t quant)
 {
-    launch_cmd(e, clip, CLIP_CMD_LAUNCH, (uint8_t)(quant & 3u), 0);
+    return launch_cmd(e, clip, CLIP_CMD_LAUNCH, (uint8_t)(quant & 3u), 0);
 }
 
-void clip_engine_launch(clip_engine_t *e, uint8_t clip)
+int clip_engine_launch(clip_engine_t *e, uint8_t clip)
 {
     if (clip >= NCLIPS || !e->song)
-        return;
-    launch_cmd(e, clip, CLIP_CMD_LAUNCH, (uint8_t)(e->song->clip[clip].quant & 3u), 0);
+        return -1;
+    return launch_cmd(e, clip, CLIP_CMD_LAUNCH, (uint8_t)(e->song->clip[clip].quant & 3u), 0);
 }
 
-void clip_engine_launch_now(clip_engine_t *e, uint8_t clip)
+int clip_engine_launch_now(clip_engine_t *e, uint8_t clip)
 {
-    launch_cmd(e, clip, CLIP_CMD_LAUNCH_NOW, 0, 0);
+    return launch_cmd(e, clip, CLIP_CMD_LAUNCH_NOW, 0, 0);
 }
 
-void clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step)
+int clip_engine_launch_at(clip_engine_t *e, uint8_t clip, uint32_t at_step)
 {
-    launch_cmd(e, clip, CLIP_CMD_LAUNCH_AT, 0, at_step);
+    return launch_cmd(e, clip, CLIP_CMD_LAUNCH_AT, 0, at_step);
 }
 
-void clip_engine_stop(clip_engine_t *e, uint8_t role)
+int clip_engine_stop(clip_engine_t *e, uint8_t role)
 {
     if (role >= NROLES)
-        return;
-    push_cmd(e, CLIP_CMD_STOP, role, Q_END, 0, 0);
+        return -1;
+    return push_cmd(e, CLIP_CMD_STOP, role, Q_END, 0, 0);
 }
 
-void clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10)
+int clip_engine_queue_bpm(clip_engine_t *e, uint16_t bpm_x10)
 {
-    push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10, 0);
+    return push_cmd(e, CLIP_CMD_SET_BPM, 0, 0, bpm_x10, 0);
 }
 
 void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
@@ -452,17 +489,17 @@ void clip_engine_clip_changed(clip_engine_t *e, uint8_t clip)
 }
 
 /* T11i: the external clock's tempo: the running tempo only, never the song's */
-void clip_engine_queue_bpm_soft(clip_engine_t *e, uint16_t bpm_x10)
+int clip_engine_queue_bpm_soft(clip_engine_t *e, uint16_t bpm_x10)
 {
-    push_cmd(e, CLIP_CMD_SET_BPM_SOFT, 0, 0, bpm_x10, 0);
+    return push_cmd(e, CLIP_CMD_SET_BPM_SOFT, 0, 0, bpm_x10, 0);
 }
 
 /* T10i: mute / unmute a role, through the ring. */
-void clip_engine_mute(clip_engine_t *e, uint8_t role, int on)
+int clip_engine_mute(clip_engine_t *e, uint8_t role, int on)
 {
     if (role >= NROLES)
-        return;
-    push_cmd(e, CLIP_CMD_MUTE, role, (uint8_t)(on ? 1 : 0), 0, 0);
+        return -1;
+    return push_cmd(e, CLIP_CMD_MUTE, role, (uint8_t)(on ? 1 : 0), 0, 0);
 }
 
 int clip_engine_muted(const clip_engine_t *e, uint8_t role)
@@ -470,14 +507,14 @@ int clip_engine_muted(const clip_engine_t *e, uint8_t role)
     return role < NROLES ? (int)e->muted[role] : 0;
 }
 
-void clip_engine_mute_clear(clip_engine_t *e)
+int clip_engine_mute_clear(clip_engine_t *e)
 {
     uint8_t r;
     for (r = 0; r < NROLES; r++)
         e->muted[r] = 0;                       /* immediate: the engine may stop rendering (classic) */
     /* ... and a ring command ordered AFTER any pending mute, so a queued CLIP_CMD_MUTE that drains
      * later cannot re-apply (T10i review). */
-    push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0, 0);
+    return push_cmd(e, CLIP_CMD_MUTE_CLEAR, 0, 0, 0, 0);
 }
 
 /* ---- T9i: the take player's ISR-side entry points ------------------------ *
@@ -492,6 +529,7 @@ int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t
     if (clip >= NCLIPS)
         return 0;
     role = clip_role(clip);
+    e->que_phase[role] = 0;
     /* Keep a queued launch's front copy until it applies or is superseded. Any other copy older
      * than this replayed event arrived too late; discard it before matching this event. */
     if (e->ts_queued[role]) {
@@ -694,7 +732,8 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
         }
         e->ts_queued[role] = 0u;
         e->cur[role] = target;
-        e->pos[role] = 0;
+        e->pos[role] = e->que_phase[role] < play_len(e, role) ? e->que_phase[role] : 0;
+        e->que_phase[role] = 0;
         ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
     } else if (e->next_set[role] && e->next_clip[role] == target) {
         /* T7b: a live (non-take) launch: next -> play swap */
@@ -745,6 +784,26 @@ static void advance_role(clip_engine_t *e, uint8_t role, uint32_t off, uint32_t 
     e->pos[role] = (uint8_t)next;
 }
 
+static void stop_now(clip_engine_t *e, const clip_sink_t *sink)
+{
+    uint32_t r;
+    if (e->was_playing) {
+        for (r = 0; r < NROLES; r++) {
+            release_role(e, r, 0, sink);
+            e->s_cur[r] = e->cur[r];
+            e->s_pos[r] = e->pos[r];
+            e->cur[r] = CLIP_NONE;
+            e->pos[r] = 0;
+        }
+        e->s_elapsed = e->elapsed;
+        e->s_step_sample = e->step_sample;
+        e->s_step_frac = e->step_frac;
+        e->s_global = e->global_step;
+        ev(sink, 0, CLIPEV_STOPPED, 0, 0, 0, 0);
+    }
+    e->playing = e->was_playing = 0;
+}
+
 static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
 {
     for (;;) {
@@ -752,10 +811,16 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         clip_cmd_t c;
         uint8_t role, target;
         CLIP_BARRIER();                       /* read the head before the slot */
-        if (e->cmd_tail == head)
-            break;
-        c = e->cmd[e->cmd_tail];
-        e->cmd_tail = (uint8_t)((e->cmd_tail + 1u) % CLIP_CMD_RING);
+        if (e->cmd_tail == head) {
+            uint8_t r;
+            if (!(e->safety_pending & 0x7Cu)) break;
+            for (r = 0; r < NROLES; r++) if (e->safety_pending & (4u << r)) break;
+            e->safety_pending &= (uint8_t)~(4u << r);
+            c.cmd = CLIP_CMD_STOP; c.clip = r; c.quant = Q_END; c.bpm_x10 = 0; c.at = 0;
+        } else {
+            c = e->cmd[e->cmd_tail];
+            e->cmd_tail = (uint8_t)((e->cmd_tail + 1u) % CLIP_CMD_RING);
+        }
 
         if (c.cmd == CLIP_CMD_SET_BPM) {
             if (e->song)
@@ -790,7 +855,7 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             continue;
         }
         if (c.cmd == CLIP_CMD_TRANSPORT_STOP) {   /* T11i: the transport stop, ring-ordered */
-            e->playing = 0;
+            stop_now(e, sink);
             continue;
         }
         if (c.cmd == CLIP_CMD_START) {            /* T11i: the PLAY button's start, ring-ordered */
@@ -848,6 +913,12 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         if (c.cmd == CLIP_CMD_LAUNCH && e->que_set[role] && e->que[role] == target) {
             e->que_set[role] = 0;             /* relaunching the queued clip cancels */
             e->que[role] = CLIP_NONE;
+            /* B1 r1: the cancel discards the staged copy too. Otherwise the stale next_set[role]
+             * makes relaunch_stage() skip the role on a later Start, and the relaunch is dropped
+             * (take_drop, the role goes silent). We are in the ISR; the main loop's staging that
+             * could set next_set[role] runs under engine_crit, so it cannot race this write. */
+            if (e->next_set[role] && e->next_clip[role] == target)
+                e->next_set[role] = 0;
             ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, target);
             continue;
         }
@@ -859,6 +930,15 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
             e->que_at[role] = e->global_step +
                 (c.cmd == CLIP_CMD_LAUNCH_NOW ? 1u : action_lead(e, role, c.quant));
         ev(sink, 0, CLIPEV_CLIP_QUEUED, role, 0, 0, target);
+    }
+    if (e->safety_pending) {
+        uint8_t safety = e->safety_pending;
+        e->safety_pending = 0;
+        if (safety & 1u) stop_now(e, sink);
+        if (safety & 2u) {
+            uint8_t r;
+            for (r = 0; r < NROLES; r++) e->muted[r] = 0;
+        }
     }
 }
 
@@ -878,6 +958,7 @@ static void do_step(clip_engine_t *e, uint32_t off, uint32_t abs, const clip_sin
         if (e->cur[r] != CLIP_NONE)
             advance_role(e, r, off, abs, sink);
     }
+    if (e->step_hook) e->step_hook(e->step_hook_ctx, off);
     for (r = 0; r < NROLES; r++) {
         if (e->cur[r] != CLIP_NONE)
             step_events(e, r, e->cur[r], e->pos[r], off, abs, sink);
@@ -1000,8 +1081,8 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
 
     end = base + nframes;
     while ((int32_t)(e->elapsed - end) < 0) {
-        uint32_t Tn;
-        if (note_next(e) != NEVER32 && (int32_t)(note_next(e) - e->elapsed) <= 0) {
+        uint32_t Tn, deadline;
+        if (note_next(e, &deadline) && (int32_t)(deadline - e->elapsed) <= 0) {
             note_due(e, e->elapsed, e->elapsed - base, sink);
             continue;
         }
@@ -1013,8 +1094,8 @@ void clip_engine_render(clip_engine_t *e, uint32_t nframes, const clip_sink_t *s
         }
         {
             uint32_t next = (int32_t)(Tn - end) < 0 ? Tn : end;
-            uint32_t no = note_next(e);
-            if (no != NEVER32 && (int32_t)(no - next) < 0 && (int32_t)(no - e->elapsed) > 0)
+            uint32_t no;
+            if (note_next(e, &no) && (int32_t)(no - next) < 0 && (int32_t)(no - e->elapsed) > 0)
                 next = no;
             if ((int32_t)(next - e->elapsed) <= 0)
                 next = end;
@@ -1094,4 +1175,9 @@ uint8_t clip_engine_step_phase(const clip_engine_t *e)
 uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role)
 {
     return role < NROLES ? e->pos[role] : 0;
+}
+
+void clip_engine_take_phase(clip_engine_t *e, uint8_t role, uint8_t phase)
+{
+    if (role < NROLES) e->que_phase[role] = (uint8_t)(phase & 63u);
 }

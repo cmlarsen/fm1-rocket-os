@@ -43,7 +43,7 @@ enum { LIVE_PADS, LIVE_PLAY };
  *   NOTE_ON:   a = note, b = velocity (bit 7 = slide), c = clip, role = the part
  *   NOTE_OFF:  a = note, role = the part
  *   MOTION:    a = index, b = (target << 4) | voice, c = value */
-enum { LIVE_EV_DRUM, LIVE_EV_NOTE_ON, LIVE_EV_NOTE_OFF, LIVE_EV_MOTION };
+enum { LIVE_EV_DRUM, LIVE_EV_NOTE_ON, LIVE_EV_NOTE_OFF, LIVE_EV_MOTION, LIVE_EV_ALL_OFF };
 typedef struct {
     uint32_t sample;      /* offset into the window passed to live_bridge_render() */
     uint8_t kind;         /* LIVE_EV_* */

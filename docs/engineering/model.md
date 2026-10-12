@@ -85,3 +85,19 @@ counting braced and single unbraced `[--sp] = r` pushes alike and failing on a
 callback target that is no longer linked (a stale allowlist); the SONGS, MIDI and
 flash callback tables are audited against their real initializers. See
 `tools/check_stack.py` and [TFIXS report](../../reports/TFIXS.md).
+
+### TFIXA take phase (2026-10-11)
+
+New take records use store envelope version 2; song records stay at version 1. Version 1 takes
+still load and their ordinary launch events start at clip step 0. Their pitchless monophonic
+releases migrate to the explicit all-pitches release marker (255), preserving the old release
+behavior. The payload size is unchanged.
+A phase-prelude launch uses `how = 4`, with role in `c[2:0]` and clip step in `c[8:3]`.
+The validator checks the role, clip zone, phase encoding and envelope version.
+
+When REC is armed during playback, the audio ISR captures the baseline at the actual recording
+bar, after advancing the roles and before firing that step's notes. Replay starts each playing
+clip at its captured step, including clips launched mid-bar and multi-bar clips. The snapshot
+uses only ISR-owned clip state and never reads editable song clips or pushes a main-loop ring.
+Notes that started before the recording boundary are not reconstructed; their remaining sustain
+is accepted as lost on replay. Notes beginning at or after the captured step play normally.

@@ -28,6 +28,12 @@ _Static_assert(TAKE_MAX_EVENTS <= 0xFFFFu, "take_hdr_t.nevents is uint16_t");
 /* publish we have written the data / read the flag before the data */
 #define TAKE_BARRIER() __asm__ volatile("" ::: "memory")
 
+#ifdef X0X_HOST
+/* r1/S2: the host test counts take_put() calls while take_refresh_setup runs in the ISR, to prove
+ * the baseline no longer writes the parameter mirror. Null on the device (compiled out). */
+void (*take_test_put_hook)(void);
+#endif
+
 /* ---- helpers ------------------------------------------------------------- */
 
 static uint32_t bar_of(const take_t *t, uint32_t sample)
@@ -58,6 +64,10 @@ static void take_end(take_t *t, uint32_t off, int full)
  * itself cleanly instead of overflowing. Returns 0 once the take has closed. */
 static int take_put(take_t *t, uint32_t off, uint32_t cmd)
 {
+#ifdef X0X_HOST
+    if (take_test_put_hook)
+        take_test_put_hook();
+#endif
     if (t->n + 1u >= TAKE_MAX_EVENTS) {
         take_end(t, off, 1);
         return 0;
@@ -77,6 +87,8 @@ static void take_clear(take_t *t)
     t->stop_set = 0;
     t->arming = 0;
     t->ended = 0;
+    t->state_n = 0;
+    t->pre_n = 0;
     t->hdr.nevents = 0;
     t->hdr.length_samples = 0;
 }
@@ -97,6 +109,8 @@ void take_init(take_t *t)
     t->bar_ctx = 0;
     t->pre = 0;
     t->pre_ctx = 0;
+    t->pre_params = 0;
+    t->params_ctx = 0;
 }
 
 void take_set_bar_fn(take_t *t, take_bar_fn fn, void *ctx)
@@ -113,6 +127,15 @@ void take_set_prelude(take_t *t, take_prelude_fn fn, void *ctx)
         return;
     t->pre = fn;
     t->pre_ctx = ctx;
+}
+
+/* r1/S2: the main-loop parameter mirror, written once at arm (never in the ISR baseline). */
+void take_set_prelude_params(take_t *t, take_prelude_fn fn, void *ctx)
+{
+    if (!t)
+        return;
+    t->pre_params = fn;
+    t->params_ctx = ctx;
 }
 
 void take_set_bpm(take_t *t, uint16_t bpm_x10)
@@ -143,12 +166,18 @@ void take_arm(take_t *t, uint32_t now)
     t->full = 0;
     t->stop_set = 0;
     t->n = 0;
+    t->state_n = 0;
+    t->pre_n = 0;
     t->hdr.nevents = 0;
     t->hdr.length_samples = 0;
 
     take_put(t, 0, TAKE_MARK_START);
     if (!t->ended && t->pre)
-        t->pre(t->pre_ctx, t);
+        t->pre(t->pre_ctx, t);            /* r1/S2: the dynamic state (also the ISR baseline) */
+    t->state_n = t->n;
+    if (!t->ended && t->pre_params)
+        t->pre_params(t->params_ctx, t);  /* r1/S2: the parameter mirror, main loop only */
+    t->pre_n = t->n;
 
     /* if the prelude wrote a tempo MARK, the header follows it: one source of truth */
     {
@@ -272,3 +301,56 @@ int take_has(const take_t *t)        { return t && t->n > 0; }
 uint16_t take_nevents(const take_t *t) { return t ? t->n : 0; }
 const take_hdr_t *take_header(const take_t *t) { return t ? &t->hdr : 0; }
 const take_event_t *take_events(const take_t *t) { return t ? t->ev : 0; }
+
+void take_refresh_setup(take_t *t)
+{
+    uint16_t old_n, old_state_n;
+    if (!t || (t->state != TAKE_ARMED && t->state != TAKE_REC)) return;
+    if (t->ended) return;
+
+    /* r1/S1+S2: recapture only the offset-0 DYNAMIC state, in place. The arm log is
+     *   [START][state][params][tail]
+     * so overwriting [1, state_n) leaves the parameter mirror take_arm() built on the main loop
+     * untouched, and leaves `tail` — events already appended at offset 0 by the boundary block
+     * (a drained Stop / launch) — intact. The ISR work is therefore the fixed state prelude only
+     * (one launch/stop and one mute per role, tempo and six FX), never the ~300-event mirror. */
+    old_n = t->n;
+    old_state_n = t->state_n;
+    t->n = 1;
+    t->arming = 1;
+    if (t->pre) t->pre(t->pre_ctx, t);
+    t->arming = 0;
+    if (t->ended)
+        return;                            /* the state prelude cannot fill the buffer from n = 1 */
+    if (t->n != old_state_n) {
+        /* The dynamic prelude must emit a fixed event count. If a future change breaks that,
+         * move the remainder down when the new state is shorter; an overrun is unrecoverable. */
+        if (t->n < old_state_n) {
+            uint32_t rest = (uint32_t)old_n - old_state_n;
+            uint32_t k;
+            for (k = 0; k < rest; k++)
+                t->ev[t->n + k] = t->ev[old_state_n + k];  /* dest < src: a forward copy is safe */
+            old_n = (uint16_t)(t->n + rest);
+        } else {
+            old_n = t->n;
+        }
+    }
+    t->state_n = t->n;
+    t->n = old_n;
+    t->hdr.nevents = t->n;
+    /* the state prelude may have rewritten the tempo mark: keep the header in step (bounded). */
+    {
+        uint16_t i;
+        for (i = 0; i < t->n; i++)
+            if (TAKE_CMD_TYPE(t->ev[i].cmd) == TAKE_T_MARK && TAKE_CMD_A(t->ev[i].cmd) == 2u)
+                t->hdr.bpm_x10 = (uint16_t)TAKE_MARK_TEMPO_GET(TAKE_CMD_B(t->ev[i].cmd),
+                                                              TAKE_CMD_C(t->ev[i].cmd));
+    }
+    t->state = TAKE_REC;
+}
+
+void take_overflow(take_t *t, uint32_t now)
+{
+    if (t && t->state == TAKE_REC) take_end(t, now - t->start, 1);
+    else if (t && t->state == TAKE_ARMED) take_clear(t);
+}

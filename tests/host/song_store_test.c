@@ -113,6 +113,17 @@ typedef struct {
     uint32_t hcrc;
 } hdrv_t;
 
+static uint32_t fixture_crc(const void *data, uint32_t n)
+{
+    const uint8_t *p = data;
+    uint32_t crc = 0xFFFFFFFFu, i;
+    while (n--) {
+        crc ^= *p++;
+        for (i=0;i<8;i++) crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
+    }
+    return ~crc;
+}
+
 static uint32_t song_ext_off(int i)
 {
     return SONG_STORE_BASE + (uint32_t)i * SONG_STORE_SONG_SECTORS * SONG_STORE_SECTOR;
@@ -562,6 +573,18 @@ int main(void)
         check("list: has_take", info.has_take == 1u);
         check("take load 1", song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 &&
               hg.nevents == 3 && eg[2].cmd == 0x102u);
+        /* Rewrite only the test fixture envelope to v1 and recompute its CRC. */
+        for (k=0;k<(int)SONG_STORE_TAKE_EXTENTS;k++) {
+            hdrv_t hv;
+            memcpy(&hv, nor + take_ext_off(k), sizeof hv);
+            if (hv.magic == 0x31545353u && hv.kind == 2u && hv.slot == 1u) {
+                hv.version = 1;
+                hv.hcrc = fixture_crc(&hv, sizeof hv - 4u);
+                memcpy(nor + take_ext_off(k), &hv, sizeof hv);
+            }
+        }
+        song_store_init(&store, &FLASH);
+        check("v1 take remains readable", song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 && eg[2].cmd == 0x102u);
         check("take replace 2", song_store_take_save(&store, 1, &h2, e2) == 0);
         check("take load 2", song_store_take_load(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0 && hg.nevents == 5);
         check("take restore (undo)", song_store_take_restore(&store, 1, &hg, eg, TAKE_MAX_EVENTS) == 0);
@@ -583,6 +606,41 @@ int main(void)
             }
             check("take record sits in the take extent area", found >= 0);
         }
+    }
+
+    /* TFIXA: the new phase launch must be versioned and validated. */
+    {
+        take_hdr_t h = {1, 1200, 1000}, got;
+        take_event_t ev = {0, 0xC0C0406Au}, out;
+        int j, found = 0;
+        check("phase take save", song_store_take_save(&store, 0, &h, &ev) == 0);
+        for (j=0;j<(int)SONG_STORE_TAKE_EXTENTS;j++) {
+            hdrv_t hv;
+            memcpy(&hv, nor + take_ext_off(j), sizeof hv);
+            if (hv.magic == 0x31545353u && hv.kind == 2u && hv.slot == 0u && hv.version == 2u) found++;
+        }
+        check("phase take envelope version 2", found > 0);
+        check("phase take roundtrip", song_store_take_load(&store, 0, &got, &out, 1) == 0 && out.cmd == ev.cmd);
+        ev.cmd = 0xC0C0406Fu; /* encoded role 7 is invalid */
+        check("invalid phase role refused", song_store_take_save(&store, 0, &h, &ev) != 0);
+    }
+
+    /* Legacy mono releases had no pitch; migrate them to the explicit all-pitches marker. */
+    {
+        take_hdr_t h = {1, 1200, 1000}, got;
+        take_event_t ev = {0, 0xA0000000u}, out;
+        int j;
+        check("legacy release fixture save", song_store_take_save(&store, 2, &h, &ev) == 0);
+        for (j=0;j<(int)SONG_STORE_TAKE_EXTENTS;j++) {
+            hdrv_t hv;
+            memcpy(&hv, nor + take_ext_off(j), sizeof hv);
+            if (hv.magic == 0x31545353u && hv.kind == 2u && hv.slot == 2u) {
+                hv.version = 1; hv.hcrc = fixture_crc(&hv, sizeof hv - 4u);
+                memcpy(nor + take_ext_off(j), &hv, sizeof hv);
+            }
+        }
+        song_store_init(&store, &FLASH);
+        check("legacy mono release upgraded", song_store_take_load(&store, 2, &got, &out, 1) == 0 && out.cmd == 0xA00FF000u);
     }
 
     /* all writes stayed inside the region */

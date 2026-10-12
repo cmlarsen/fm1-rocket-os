@@ -76,13 +76,17 @@ static uint8_t echo_applied;                 /* the throw is engaged in the engi
 
 void engine_perform_engage(int fx, int latch)
 {
+    uint32_t f = engine_crit_enter();
     perform_engage(&perf, fx, latch);
     live_bridge_take_fx(fx, latch ? 2 : 1);              /* T9i: record the punch FX (recording only) */
+    engine_crit_exit(f);
 }
 void engine_perform_release(int fx)
 {
+    uint32_t f = engine_crit_enter();
     perform_release(&perf, fx);
     live_bridge_take_fx(fx, 0);
+    engine_crit_exit(f);
 }
 void engine_perform_reset(void) { perform_reset(&perf); }
 void engine_perform_echo_throw(int on) { perform_echo_throw(&perf, on); }
@@ -212,6 +216,10 @@ enum { C_PARAM_T0 = 0, C_DRUM = 8, C_BON, C_BOFF, C_NOP };
 #define CQ 1024u
 static uint32_t cq[CQ];
 static volatile uint32_t cq_w, cq_r;
+volatile uint32_t engine_command_drops;
+static volatile uint8_t cq_panic;
+static uint8_t bass_pitch[NBASS];
+static void all_off_now(void);
 #ifdef X0X_HOST
 static volatile int in_isr;             /* T3: traps a cq_put from the audio path (engine_render) */
 #endif
@@ -219,18 +227,25 @@ static volatile int in_isr;             /* T3: traps a cq_put from the audio pat
 /* T2a event tap: see engine.h. The host runner sets it for `events`; T9 will set it on the device */
 void (*engine_tap)(uint32_t sample, uint32_t cmd);
 
-static void cq_put(uint32_t type, uint32_t a, uint32_t b, uint32_t c)
+static int cq_put(uint32_t type, uint32_t a, uint32_t b, uint32_t c)
 {
     uint32_t w = cq_w;
 #ifdef X0X_HOST
     if (in_isr)                         /* T3: the ISR calls the voices directly, never cq_put */
         __builtin_trap();
 #endif
-    if (w - cq_r >= CQ)
-        return;                        /* full: drop (a param flood; the mirror still has it) */
+    if (type != C_BOFF && (w - cq_r >= CQ - 256u || cq_panic)) {
+        engine_command_drops++;
+        return -1;
+    }
+    if (w - cq_r >= CQ || cq_panic) {
+        cq_panic = 1; /* safety after all older commands; refuse new notes until drained */
+        return 0;
+    }
     cq[w % CQ] = (type << 28) | ((a & 0xFFu) << 20) | ((b & 0xFFu) << 12) | (c & 0xFFFu);
     __asm__ volatile("" ::: "memory");
     cq_w = w + 1;
+    return 0;
 }
 
 /* ------------------------------------------------------------ params --- */
@@ -330,7 +345,7 @@ static void apply_param(int t, int v, int i, int val)    /* ISR */
     }
 }
 
-void engine_set(int t, int v, int i, int val) { cq_put((uint32_t)t, (uint32_t)v, (uint32_t)i, (uint32_t)val); }
+int engine_set(int t, int v, int i, int val) { return cq_put((uint32_t)t, (uint32_t)v, (uint32_t)i, (uint32_t)val); }
 
 /* the output's scale: Felucca's -6 dBFS ceiling of the 24-bit codec (2^22), or its full scale (LOUD); the
  * clamp keeps an over from wrapping (normal: the codec's own full scale, as before) */
@@ -415,29 +430,29 @@ void engine_apply_sound(const sound_t *s)
                     engine_set(t, v, i, s->v[t][v][i]);
 }
 
-void engine_drum(int kit, int voice, float vel)
+int engine_drum(int kit, int voice, float vel)
 {
-    cq_put(C_DRUM, (uint32_t)kit, (uint32_t)voice, (uint32_t)(vel * 4095.0f));
+    return cq_put(C_DRUM, (uint32_t)kit, (uint32_t)voice, (uint32_t)(vel * 4095.0f));
 }
-void engine_bass_on(int part, int note, int accent, int slide)
+int engine_bass_on(int part, int note, int accent, int slide)
 {
-    cq_put(C_BON, (uint32_t)part, (uint32_t)note, (uint32_t)((accent ? 1 : 0) | (slide ? 2 : 0)));
+    return cq_put(C_BON, (uint32_t)part, (uint32_t)note, (uint32_t)((accent ? 1 : 0) | (slide ? 2 : 0)));
 }
-void engine_bass_off(int part) { cq_put(C_BOFF, (uint32_t)part, 0, 0); }
+int engine_bass_off(int part) { return cq_put(C_BOFF, (uint32_t)part, 255u, 0); }
 
 /* T5i: the engine-only parts' notes. C_BON's c field carries velocity 0..127 for them (the 303s keep
  * accent|slide there); C_BOFF's b carries the note. No new command type. The note is clamped to
  * 0..127 here, so an out-of-range note can never leave a voice stuck (its note-off would miss it). */
 static int note_clamp(int note) { return note < 0 ? 0 : note > 127 ? 127 : note; }
-void engine_note_on(int part, int note, int vel)
+int engine_note_on(int part, int note, int vel)
 {
     if (vel < 0)
         vel = 0;
     if (vel > 127)
         vel = 127;
-    cq_put(C_BON, (uint32_t)part, (uint32_t)note_clamp(note), (uint32_t)vel);
+    return cq_put(C_BON, (uint32_t)part, (uint32_t)note_clamp(note), (uint32_t)vel);
 }
-void engine_note_off(int part, int note) { cq_put(C_BOFF, (uint32_t)part, (uint32_t)note_clamp(note), 0); }
+int engine_note_off(int part, int note) { return cq_put(C_BOFF, (uint32_t)part, (uint32_t)note_clamp(note), 0); }
 void engine_fm6_preset(int n) { engine_set(T_RSV, 0, E_FM6_SLOT, n); }
 
 /* ------------------------------------------------------- sequencer sink --- */
@@ -485,8 +500,10 @@ static void s_bon(void *x, int p, int note, int acc, int sl)
     (void)x;
     if (prob_skip(PART_303A + p, 0))                  /* skipped: a rest */
         bass303_note_off(&b303[p]);
-    else
+    else {
+        bass_pitch[p] = (uint8_t)note;
         bass303_note_on(&b303[p], note, acc, sl);
+    }
 }
 static void s_boff(void *x, int p) { (void)x; bass303_note_off(&b303[p]); }
 static void s_midi(void *x, uint8_t st, uint8_t d1, uint8_t d2)
@@ -546,14 +563,17 @@ static void apply_raw(uint32_t c)
         apply_param((int)type, (int)a, (int)b, (int)v);
     else if (type == C_DRUM)
         s_drum(0, (int)a, (int)b, (float)v / 4095.0f);
-    else if (type == C_BON && a < NBASS)
+    else if (type == C_BON && a < NBASS) {
+        bass_pitch[a] = (uint8_t)b;
         bass303_note_on(&b303[a], (int)b, (int)(v & 1u), (int)((v >> 1) & 1u));
+    }
     else if (type == C_BON && a == PART_FM6)        /* T5i: c = velocity, b = note (clamped) */
         eng_fm6_note_on((int)(b > 127u ? 127u : b), (int)v);
     else if (type == C_BON && a == PART_NOISE)
         eng_noise_note_on((int)(b > 127u ? 127u : b), (int)v);
-    else if (type == C_BOFF && a < NBASS)
-        bass303_note_off(&b303[a]);
+    else if (type == C_BOFF && a < NBASS) {
+        if (b == 255u || b == bass_pitch[a]) bass303_note_off(&b303[a]);
+    }
     else if (type == C_BOFF && a == PART_FM6)
         eng_fm6_note_off((int)(b > 127u ? 127u : b));
     else if (type == C_BOFF && a == PART_NOISE)
@@ -575,6 +595,10 @@ static void drain(uint32_t base)
         apply_raw(c);
     }
     cq_r = r;
+    if (cq_panic) {
+        cq_panic = 0;
+        all_off_now();
+    }
     /* TCLS: the main loop's midi_live_poll() owns the TRS/USB ring in every view; the ISR no
      * longer drains it (X0X's per-part MIDI-in was the Classic path). */
 }
@@ -903,8 +927,8 @@ static void live_apply(const live_ev_t *e, live_ctx_t *c)
     case LIVE_EV_NOTE_OFF: {
         int part = e->role == LIVE_BASS ? 0 : e->role == LIVE_LEAD ? 1 : -1;
         if (part >= 0) {
-            s_boff(0, part);
-            live_tap(abs, (C_BOFF << 28) | ((uint32_t)part << 20));
+            if (e->a == bass_pitch[part]) s_boff(0, part);
+            live_tap(abs, (C_BOFF << 28) | ((uint32_t)part << 20) | ((uint32_t)e->a << 12));
         } else if (e->role == LIVE_CHORDS) {
             eng_fm6_note_off(e->a);
             live_tap(abs, (C_BOFF << 28) | ((uint32_t)PART_FM6 << 20) | ((uint32_t)e->a << 12));
@@ -914,6 +938,9 @@ static void live_apply(const live_ev_t *e, live_ctx_t *c)
         }
         break;
     }
+    case LIVE_EV_ALL_OFF:
+        all_off_now();
+        break;
     case LIVE_EV_MOTION:
         apply_param((int)(e->b >> 4), (int)(e->b & 15u), (int)e->a, (int)e->c);
         live_tap(abs, ((uint32_t)(e->b >> 4) << 28) | ((uint32_t)(e->b & 15u) << 20) |
@@ -1093,3 +1120,7 @@ void engine_init(pattern_t *patterns, song_t *song, lane_t *lanes, const sound_t
             mix_glide[p][k].cur = -1.0f;
     }
 }
+
+#ifdef X0X_HOST
+#include "tests/host/tfixa_engine_checks.h"
+#endif
