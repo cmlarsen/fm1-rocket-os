@@ -2077,6 +2077,29 @@ int main(int argc, char **argv)
             plat_cpu2_set(atoi(a));
         } else if (!strcmp(cmd, "assignkey")) {         /* T6i: T10's assign-keys, through song_io */
             song_io_set_key_clip(atoi(a), atoi(b));
+        } else if (!strcmp(cmd, "songkeyscale")) {      /* r1: test setup: the song's key (0..11) and scale */
+            song_io_set_key_scale(atoi(a), b[0] ? atoi(b) : 0);
+        } else if (!strcmp(cmd, "scalecheck")) {        /* r1: every key of every scale folds in range */
+            int sc, kk, om, bad = 0, folds = 0;
+            for (sc = 0; sc < 5; sc++)
+                for (kk = 0; kk < 12; kk++)
+                    for (om = -3; om <= 4; om++) {
+                        int j;
+                        for (j = 0; j < 27; j++) {
+                            int raw = 12 * (3 + om) + kk + live_scale_step(j, sc);
+                            int n = live_play_note_scale(j, om, kk, sc);
+                            if (n < 0 || n > 127 || ((raw - n) % 12) != 0)
+                                bad++;
+                            if (raw != n)
+                                folds++;
+                        }
+                    }
+            if (bad || !folds) {
+                printf("FAIL scalecheck: %d out-of-range/non-octave folds (%d folded)\n", bad, folds);
+                fails++;
+            } else {
+                printf("  ok scalecheck (%d notes folded by octaves)\n", folds);
+            }
         } else if (!strcmp(cmd, "songseed")) {          /* TCLS: test setup; the boot song is already the
                                                          * Starter template, so this only marks it dirty */
             song_io_mark_dirty();

@@ -326,6 +326,16 @@ void song_io_name(char *out, int n)
 }
 int song_io_key(void) { return (int)song()->key; }
 int song_io_scale(void) { return (int)song()->scale; }
+void song_io_set_key_scale(int key, int scale)      /* r1: the host's songkeyscale setup */
+{
+    if (key < 0) key = 0;
+    if (key > 11) key = 11;
+    if (scale < 0) scale = 0;
+    if (scale > (int)NSCALES - 1) scale = (int)NSCALES - 1;
+    song()->key = (uint8_t)key;
+    song()->scale = (uint8_t)scale;
+    edited();
+}
 
 /* ---- T7b: the clip editor's edits ---------------------------------------- */
 

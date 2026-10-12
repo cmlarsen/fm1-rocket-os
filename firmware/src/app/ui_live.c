@@ -382,15 +382,22 @@ static int live_song_scale(void)
     int s = song_io_scale();
     return s < 0 ? 0 : s > 4 ? 4 : s;
 }
+/* key k's note at octave octv in `key`/`scale` (live_play_note_for's core; the host test reads
+ * it too). r1: a note above 127 (or below 0) folds by whole octaves, so a high octave keeps
+ * every key on its own in-range pitch instead of piling the top keys onto 127. */
+int live_play_note_scale(int k, int octv, int key, int scale)
+{
+    int note = 12 * (3 + octv) + key + live_scale_step(k, scale);
+    while (note > 127)
+        note -= 12;
+    while (note < 0)
+        note += 12;
+    return note;
+}
 /* key k at the current octave, in the song's key/scale (the host test reads this too) */
 int live_play_note_for(int k, int octv)
 {
-    int note = 12 * (3 + octv) + song_io_key() + live_scale_step(k, live_song_scale());
-    if (note < 0)
-        note = 0;
-    if (note > 127)
-        note = 127;
-    return note;
+    return live_play_note_scale(k, octv, song_io_key(), live_song_scale());
 }
 
 static int live_handle_key(int k, int down)
@@ -547,7 +554,7 @@ static void live_fx_button(void)
         if (fx_press) {                            /* the FX release */
             uint32_t dt = now - fx_press_t;
             int consumed = fx_consumed;
-            fx_press = consumed = 0;
+            fx_press = fx_consumed = 0;                /* r1: clear the static too, not just the local */
             if (fx_held) {                         /* a press that opened the layer */
                 fx_held = 0;
                 live_fx_release_held();            /* a held (momentary) effect ends with the layer */
@@ -574,10 +581,21 @@ static void live_fx_button(void)
         return;
     }
     if (ui.btn & (1u << B_HOME)) {                 /* HOME + FX: every effect and every mute off */
+        int i;
         ui.btn_used |= 1u << B_FX;
         ui.btn_used |= 1u << B_HOME;
+        /* r1: the reset must be recorded in the take. Release every active effect and unmute
+         * every muted role through the recorded paths (engine_perform_release ->
+         * live_bridge_take_fx, live_bridge_mute), so a replay ends as silent as the reset left
+         * it. engine_perform_reset() then sweeps any state a release does not cover (a filter
+         * still sweeping back, the echo base). */
+        for (i = 0; i < 6; i++)
+            if (engine_perform_latched(i) || engine_perform_active(i))
+                engine_perform_release(i);
+        for (i = 0; i < LIVE_NROLES; i++)
+            if (live_bridge_muted((uint8_t)i))
+                live_bridge_mute((uint8_t)i, 0);
         engine_perform_reset();
-        live_bridge_mute_all(0);                   /* TFIXU 5: ... role mutes too */
         fx_consumed = 1;                           /* the reset press is not a layer press */
         say("FX RESET", 0);
         return;

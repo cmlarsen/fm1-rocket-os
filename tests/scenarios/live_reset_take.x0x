@@ -1,0 +1,38 @@
+# TFIXU r1 #2: HOME + FX clears every mute through the recorded path, so a take played back ends
+# unmuted after the reset point. Before the fix ui_live.c called live_bridge_mute_all(0), which
+# posted no TP_MUTE, so the replay never saw the unmute (the final expect got 1).
+wait 300
+press PLAY
+wait 700
+release PLAY
+wait 50
+tap REC
+tap PLAY
+wait-bar 1
+expect takerec 1
+press FX
+wait 30
+tapkey b0                           # mute DRUMS
+release FX
+wait 40
+expect fxmute0 1
+wait-bar 1
+press HOME
+press FX
+wait 100
+release FX
+release HOME
+wait 40
+expect fxmute0 0                    # live: the reset unmutes now
+wait-bar 2
+tap REC
+wait-bar 2
+expect takehas 1
+takedump take.txt
+tap PLAY
+wait 400
+takeplay
+wait-bar 1
+wait-bar 1
+wait-bar 1
+expect fxmute0 0                    # the replay records the unmute, so it stays off

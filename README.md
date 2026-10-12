@@ -102,7 +102,8 @@ returns to PADS.
 
 **Punch FX.** Hold (or double-tap) **FX** to turn the first six keys into repeat 1/8, repeat 1/16,
 tape stop, filter dive, echo throw and freeze. **Tap latches**, **hold is momentary**. The upper
-keys mute roles. **HOME + FX** resets every effect. Effects and mutes reset when you leave LIVE.
+keys mute roles. **HOME + FX** resets every effect and clears every mute (both are recorded in the
+take, so a replay follows the reset). Effects and mutes reset when you leave LIVE.
 
 ![The punch FX layer](docs/img/readme/live-fx.png)
 

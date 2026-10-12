@@ -121,6 +121,13 @@ shot s13_live_pads.png
 tap SEL
 wait 150
 shot s14_live_play.png
+# r1: the widest PLAY card text, "octave -3 - C# chromatic", must lint clean at 1:1
+songkeyscale 1 4
+tap OCT-
+tap OCT-
+tap OCT-
+wait 80
+shot s14b_live_play_wide.png
 press FX
 wait 100
 shot s15_live_fx.png

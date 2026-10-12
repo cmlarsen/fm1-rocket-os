@@ -30,3 +30,14 @@ wait 700
 release PLAY
 wait 60
 expect mode 0
+# r1 #3: the top of the range folds down by octaves instead of piling the high keys onto 127.
+songkeyscale 0 0                    # C major
+expect playnote26.4 117             # raw 129 -> 117 (the old code clamped to 127)
+songkeyscale 11 0                   # B major
+expect playnote26.4 116             # raw 140 -> 116
+songkeyscale 11 3                   # B penta
+expect playnote26.4 121             # raw 157 -> 121
+songkeyscale 1 4                    # C# chromatic
+expect playnote26.4 111             # raw 111: already in range, unchanged
+# every key of every scale, folded by whole octaves and in range (throws the scale table at it)
+scalecheck

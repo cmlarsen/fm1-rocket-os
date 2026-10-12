@@ -69,6 +69,7 @@ void song_io_set_bpm(int bpm_x10);
 void song_io_name(char *out, int n);      /* the song's name, NUL-terminated */
 int  song_io_key(void);                   /* 0..11 (C..B) */
 int  song_io_scale(void);                 /* model.h's SCALE_* */
+void song_io_set_key_scale(int key, int scale);   /* r1: test/owner setup; marks the song dirty */
 
 /* ---- T7b: the clip editor's edits ---------------------------------------- */
 /* Each editor session and each record pass is one undo entry: edit_begin when the editor opens,

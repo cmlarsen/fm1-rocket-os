@@ -34,15 +34,21 @@ let capturing = false;
 let heldBtn = 0, heldKeys = 0;
 const apply = () => { ex.web_buttons(heldBtn); ex.web_keys(heldKeys); };
 
-// Advance the device n frames (web_render runs it until they exist, exactly as the host's wait).
+// The host's own audio schedule (host/x0x_host.c run_ms): a 1 ms clock that renders one 256-frame
+// half buffer each time the audio deadline passes (256 frames = 5.805 ms), as the I2S DMA does.
+// Mirroring it exactly makes the WASM capture the same frames the native WAV holds, so the two
+// lengths are equal, not merely close.
+let nowMs = 0, audioDueMs = 0;
 const render = (ms) => {
-  const n = Math.max(0, Math.round(ms * 44.1));
-  for (let d = 0; d < n; d += 128) {
-    const k = Math.min(128, n - d);
-    ex.web_render(k);
-    if (capturing) {
-      outL.push(...new Float32Array(mem.buffer, ex.web_out_l(), k));
-      outR.push(...new Float32Array(mem.buffer, ex.web_out_r(), k));
+  for (let i = 0; i < ms; i++) {
+    nowMs++;
+    while (audioDueMs <= nowMs) {
+      ex.web_render(256);
+      if (capturing) {
+        outL.push(...new Float32Array(mem.buffer, ex.web_out_l(), 256));
+        outR.push(...new Float32Array(mem.buffer, ex.web_out_r(), 256));
+      }
+      audioDueMs += 256.0 * 1000.0 / 44100.0;
     }
   }
 };
@@ -111,6 +117,8 @@ const fb = new Uint16Array(mem.buffer, ex.web_fb(), 240 * 240);
 const drawn = fb.some((p) => p !== 0), lit = ex.web_lit_keys() !== 0;
 console.log(`emu: ${n} samples, peak ${peak.toFixed(3)}, max diff ${(maxd / 32768).toExponential(2)} ` +
             `(${maxd.toFixed(1)} LSB), length delta ${lenDiff}, screen ${drawn}, lights ${lit}`);
-// 1 LSB (1/32768); the tiny margin absorbs the host's float32 rounding of (l*32767).
-const ok = n > 0 && lenDiff <= 256 && peak > 0.05 && maxd <= 1.01 && drawn && lit;
+// r1: the WASM renders exactly the host's frame count (equal lengths), the run must be long enough
+// to be a real comparison (160000 frames), both channels within 1 LSB (the tiny margin absorbs the
+// host's float32 rounding of l*32767), and the screen and the lights must be drawn.
+const ok = n > 160000 && lenDiff === 0 && peak > 0.05 && maxd <= 1.01 && drawn && lit;
 process.exit(ok ? 0 : 1);

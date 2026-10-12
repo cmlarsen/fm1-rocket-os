@@ -1551,6 +1551,10 @@ static void set_view(int v)
 {
     note_release_all();                           /* T7a r2: a view change releases every held note */
     studio_cancel_pending();                      /* TFIXU 3: a view change cancels a pending clear/tap */
+    ui.btn_used |= ui.btn;                         /* r1: a button held across the change belongs to the
+                                                   * old view; it must not act in the new one (a SEL
+                                                   * held while leaving LIVE once cleared a clip on
+                                                   * arrival, because studio_tick restarted its hold) */
     if (v != ui.view)
         ui.prev_view = ui.view;
     ui.view = (uint8_t)v;
