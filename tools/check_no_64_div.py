@@ -24,11 +24,21 @@ def violations(source):
         if not extra:
             break
         types += r'|\b(?:' + '|'.join(map(re.escape, extra)) + r')\b'
-    names = re.findall(r'(?:' + types + r')\s+(?:const\s+|volatile\s+)*([A-Za-z_]\w*)', source)
+    names = re.findall(r'(?:' + types + r')\s+(?:const\s+|volatile\s+|\*\s*)*([A-Za-z_]\w*)', source)
+    for declaration in re.findall(r'(?:' + types + r')\s+([^;(){}]+);', source):
+        for part in declaration.split(','):
+            name = re.match(r'\s*(?:const\s+|volatile\s+|\*\s*)*([A-Za-z_]\w*)', part)
+            if name:
+                names.append(name[1])
     wide = types + (r'|\b(?:' + '|'.join(map(re.escape, names)) + r')\b' if names else '')
     for statement in re.finditer(r'[^;{}]+', source):
         if re.search(r'[/%]', statement[0]):
-            if re.search(wide, statement[0]):
+            literals = re.findall(r'\b(0[xX][0-9a-fA-F]+|[0-9]+)([uUlL]*)\b', statement[0])
+            literal_wide = any('ll' in suffix.lower() or
+                               int(number, 16 if number.lower().startswith('0x') else 10) >
+                               (0xFFFFFFFF if 'u' in suffix.lower() or number.lower().startswith('0x') else 0x7FFFFFFF)
+                               for number, suffix in literals)
+            if re.search(wide, statement[0]) or literal_wide:
                 yield source.count('\n', 0, statement.start()) + 1, statement[0].strip()
 
 

@@ -10,6 +10,10 @@ for source in (
     'uint64_t n; x = n % d;',
     'typedef uint64_t wide_t; wide_t n; x = n / d;',
     'unsigned long long n; x = n / 2;',
+    'uint64_t *p; x = *p / d;',
+    'uint64_t a, b; x = b % d;',
+    'x = 1ULL / d;',
+    'x = 2147483648 / d;',
 ):
     assert list(lint.violations(source)), source
 for source in ('uint32_t x = p * n / d;', 'uint64_t n = a * b; x = p / d;',
