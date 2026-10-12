@@ -52,9 +52,9 @@ wait 100
 key w0 up
 wait 100
 expect fxlatch0 1
-key 16 down
+key b0 down
 wait 100
-key 16 up
+key b0 up
 wait 100
 expect fxmute0 1
 release FX

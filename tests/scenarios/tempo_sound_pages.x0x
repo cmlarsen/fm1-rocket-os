@@ -1,0 +1,12 @@
+# TFIXU 8 / ui 8: HOME + SELECT on a sound/FX/MIX page changes the SONG's tempo (through the
+# bridge), not the dead sequencer's seq.bpm.
+wait 300
+expect bpm 125
+tap EDIT
+expect view 1                      # the 909 sound page
+press HOME
+turn SELECT 5
+expect bpm 130
+release HOME
+wait 100
+dump tempo_sound_pages.json

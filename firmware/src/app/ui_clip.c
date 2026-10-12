@@ -367,11 +367,10 @@ static void cl_rec_close(void)
         bars = (int)((rec.close - rec.start + LIVE_STEPS_PER_BAR - 1u) / LIVE_STEPS_PER_BAR);
         if (bars < 1)
             bars = 1;
-        if (bars > 2 && bars <= 4)
-            bars = 4;
-        else if (bars > 1)
-            bars = 2;
-        if (bars > 4)
+        /* TFIXU 10: a pass longer than two bars clamps to the 4-bar cap. The old chain rounded 3-4
+         * to 4 but then let every value above four fall into the 2-bar branch, and the trailing
+         * (bars > 4) clamp could never catch what that had already shortened. */
+        if (bars > 2)
             bars = 4;
         len = bars * (int)LIVE_STEPS_PER_BAR;
         if (!song_io_clip_is_drum(rec.clip))

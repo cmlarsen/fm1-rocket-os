@@ -27,8 +27,8 @@ turn K1 8 20
 wait-bar 1
 press FX
 wait 30
-tapkey 0
-tapkey 16
+tapkey w0
+tapkey b0
 release FX
 wait-bar 2
 waitbarabs 7

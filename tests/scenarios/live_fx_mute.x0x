@@ -7,10 +7,10 @@ wait 700
 release PLAY
 wait 50
 expect mode 1
-# mute BASS in the FX layer
+# mute BASS in the FX layer (the second upper/black key, by position)
 press FX
 wait 30
-tapkey 17
+tapkey b1
 expect fxmute1 1
 expect songrolemute1 0         # the live mute never touches the song
 release FX

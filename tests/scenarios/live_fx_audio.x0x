@@ -18,40 +18,40 @@ expect fxlayer 1
 wav live_fx_audio.wav
 events live_fx_audio_events.txt
 
-# repeat 1/8: tap to latch, tap to release
-tapkey 0
+# repeat 1/8: tap to latch, tap to release (the first lower key)
+tapkey w0
 wait 400
-tapkey 0
+tapkey w0
 wait 120
-# repeat 1/16
-tapkey 1
+# repeat 1/16 (the second lower key)
+tapkey w1
 wait 300
-tapkey 1
+tapkey w1
 wait 120
 # filter dive: latch, then release
-tapkey 3
+tapkey w3
 wait 400
-tapkey 3
+tapkey w3
 wait 200
 # echo throw: it drives X0X's fxbus delay, so its engage/release show in the events
-tapkey 4
+tapkey w4
 wait 400
-tapkey 4
+tapkey w4
 wait 200
 
 # tape stop: hold it (momentary); it ends in silence, then the audio returns on release
-key 2 down
+key w2 down
 wait 750
 silence 150 -30
-key 2 up
+key w2 up
 peakreset
 wait 250
 expect peak_db_min -30
 
 # freeze: latch, then release
-tapkey 5
+tapkey w5
 wait 300
-tapkey 5
+tapkey w5
 wait 200
 wavstop
 eventsstop

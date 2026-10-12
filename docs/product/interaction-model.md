@@ -32,7 +32,7 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
   - the **pad map**
   - **one take**
 - **Clip:** notes or hits, plus knob motion. Each clip has:
-  - a length;
+  - a length; a recorded pass longer than four bars is capped at four (the 64-step maximum);
   - a mode: **Loop** or **Once** (Gate is deferred);
   - a launch quantize: **Bar** (default), **Beat** or **End of clip**.
 - **Take:** the most recent LIVE recording, stored as an event log. Recording again replaces it, and undo brings the old one back.
@@ -83,7 +83,7 @@ are still read at boot, and the inherited sound/FX/MIX/GLOBAL pages survive.
 | Layer | Keys do | Screen |
 |---|---|---|
 | **PADS** (the default) | Launch clips, laid out by the pad map | Role × clip grid with clip states |
-| **PLAY** | Play the **focused role** live, in the song's scale. OCT−/OCT+ transpose. | Role name, sound, scale, and a strip showing clip status |
+| **PLAY** | Play the **focused role** live. **OPEN/DEFERRED (owner decision):** the keys currently play chromatically from F3; how they map to the song's key and scale is not yet decided (see reports/TFIXU.md). OCT−/OCT+ transpose. | Role name, sound, scale, and a strip showing clip status |
 
 - The SEL LED shows the layer: off means PADS, lit means PLAY. A header badge says the same. Switching layers never changes what's playing.
 - **Focused role:** whichever role launched most recently. Turn ALGORITHM to step to another role.
@@ -149,9 +149,9 @@ Role mutes and punch FX are performance state (decided 2026-10-11). They reset w
 
 - **K1** is a bipolar filter: low-pass to the left, high-pass to the right.
 - **K2** is Space, **K3** is Echo and **K4** is Drive.
-- **FX held or double-tapped** turns the first six lower keys into punch FX: **repeat 1/8, repeat 1/16, tape stop, filter dive, echo throw, freeze**.
+- **FX held or double-tapped** turns the first six lower keys into punch FX: **repeat 1/8, repeat 1/16, tape stop, filter dive, echo throw, freeze**. The six are the first six **lower (white) keys by physical position** (F3, G3, A3, B3, C4, D4), and the role mutes are the first five **upper (black) keys** (F#3, G#3, A#3, C#4, D#4).
   - Tap to latch, hold for momentary.
-  - Upper keys mute roles, through the clip engine: a role muted mid-note releases its notes, and unmuting rejoins the clip in time.
+  - Upper keys mute roles, through the clip engine: a role muted mid-note releases its notes, and unmuting rejoins the clip in time. Opening or latching the FX layer releases every held PLAY note.
   - HOME+FX resets everything, and leaving LIVE releases every effect and clears every mute.
 - **K1–K4 changes you didn't record revert** when you leave LIVE.
 

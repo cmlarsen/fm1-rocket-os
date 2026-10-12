@@ -1,0 +1,13 @@
+# TFIXU 3 / ui 7: crossing the 250 ms threshold starts a SEL clear and consumes SEL. Releasing
+# before the 1.5 s ring fills keeps the clip AND must not fall through to the ordinary SEL tap,
+# which would queue a launch.
+wait 300
+expect clipused0 1
+press SEL
+wait 500                       # past the hold threshold, well under the clear
+release SEL
+wait 120
+expect clipused0 1
+expect liveque0 -1
+expect livestop0 0
+dump studio_clear_sel_abort.json

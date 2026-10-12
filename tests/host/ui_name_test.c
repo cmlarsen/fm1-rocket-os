@@ -303,6 +303,23 @@ static void test_random(void)
     }
 }
 
+/* TFIXU 13: the maximum-length NAME must fit on screen. */
+static void test_wide_field(void)
+{
+    name_edit_t n;
+    char w[NAME_BUF];
+    int i;
+    for (i = 0; i < (int)NAME_MAX; i++)
+        w[i] = 'W';
+    w[NAME_MAX] = 0;
+    name_edit_begin(&n, w);
+    CHECK(n.len == NAME_MAX);
+    CHECK(text_w(&AF_L, n.s) > NAME_FIELD_W);       /* the old face ran off the card */
+    CHECK(name_edit_width(&n) <= NAME_FIELD_W);     /* the chosen face keeps the whole name in frame */
+    name_edit_begin(&n, "SHORT");
+    CHECK(name_edit_width(&n) <= NAME_FIELD_W);     /* ordinary names are unaffected */
+}
+
 static void render(const name_edit_t *n, const char *file, uint32_t ms)
 {
     memset(fb, 0, sizeof fb);
@@ -320,6 +337,7 @@ int main(void)
     test_cursor_and_char();
     test_confirm_cancel_clear();
     test_random();
+    test_wide_field();
     if (fails) {
         printf("ui_name: %d FAILURES\n", fails);
         return 1;
@@ -336,6 +354,8 @@ int main(void)
     name_edit_begin(&n, "RANDOM");
     { name_event_t e = nevx(0, 0, 0, EN_K3, 1); name_edit_input(&n, &e); }
     render(&n, "build/host/ui_name/random.png", 0);
+    name_edit_begin(&n, "WWWWWWWWWWW");              /* TFIXU 13: the widest valid name */
+    render(&n, "build/host/ui_name/wide.png", 0);
     printf("ui_name: all passed\n");
     return 0;
 }

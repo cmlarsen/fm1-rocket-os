@@ -1,6 +1,7 @@
-# T10i: the LIVE punch FX layer. FX held (or double-tapped) turns the first six lower keys into
-# the six punches and the upper keys into role mutes; a tap latches, a hold is momentary; HOME+FX
-# resets every effect; leaving LIVE releases every effect and clears every mute.
+# T10i: the LIVE punch FX layer. FX held (or double-tapped) turns the first six lower (white) keys
+# into the six punches and the first five upper (black) keys into role mutes; a tap latches, a hold
+# is momentary; HOME+FX resets every effect and every mute; leaving LIVE releases them too. TFIXU 4:
+# the keys are named by physical position, not by the chromatic raw index.
 wait 300
 # TCLS: the boot song is the Starter template, so DRUMS and BASS have clips.
 # enter LIVE and start the transport with two clips playing.
@@ -21,31 +22,31 @@ expect liveclip1 7
 press FX
 wait 30
 expect fxlayer 1
-expect key 0 1
+expect key w0 1
 events live_fx_events.txt
 wav live_fx.wav
 
-# --- tap latches: repeat 1/8 ---
-tapkey 0
+# --- tap latches: repeat 1/8 (the first lower key) ---
+tapkey w0
 expect fxlatch0 1
-expect key 0 2
-# --- hold is momentary: tape stop (bright while held, dim after) ---
-key 2 down
+expect key w0 2
+# --- hold is momentary: tape stop (the third lower key; bright while held, dim after) ---
+key w2 down
 wait 350
-expect key 2 2
+expect key w2 2
 expect fxlatch2 0
 shot live_fx.png
-key 2 up
+key w2 up
 wait 40
 expect fxlatch2 0
-expect key 2 1
+expect key w2 1
 # --- releasing FX returns to the layer underneath; a latched effect stays on ---
 release FX
 wait 40
 expect fxlayer 0
 expect fxlatch0 1
 
-# --- HOME + FX resets every effect ---
+# --- HOME + FX resets every effect (and every mute) ---
 press HOME
 press FX
 wait 40
@@ -56,20 +57,20 @@ expect fxlatch0 0
 expect fxlatch1 0
 expect fxlatch2 0
 
-# --- the upper keys mute roles, through the clip engine ---
+# --- the first five upper keys mute roles, through the clip engine ---
 press FX
 wait 30
 expect fxlayer 1
-tapkey 17
+tapkey b1
 expect fxmute1 1
 expect songrolemute1 0
-expect key 17 2
-tapkey 17
+expect key b1 2
+tapkey b1
 expect fxmute1 0
-expect key 17 1
+expect key b1 1
 # --- leaving LIVE clears one latched effect and one mute ---
-tapkey 1
-tapkey 16
+tapkey w1
+tapkey b0
 expect fxlatch1 1
 expect fxmute0 1
 release FX

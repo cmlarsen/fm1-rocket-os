@@ -1,0 +1,21 @@
+# TFIXU 6 / ui 6: opening the FX layer changes what the keys do, so it must release every held
+# PLAY note, as SEL and setup entry already do.
+wait 300
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+tap SEL
+expect layer 1
+key 7 down
+expect heldnotes 1
+press FX
+wait 60
+expect fxlayer 1
+expect heldnotes 0
+key 7 up
+release FX
+wait 40
+expect heldnotes 0
+dump live_fx_note_release.json
