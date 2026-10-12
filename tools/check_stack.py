@@ -37,8 +37,12 @@ CALLBACKS = {
     'sst_wr_put': ('fb_program',),
     'midi_in_byte': MIDI, 'midi_in_tick': MIDI,
     'fm1_c1_main': ('core2_job',),  # plat_cpu2_run(core2_job, ...) in engine.c
-    # engine_tap is zero-initialized and never assigned in the device app.
-    'engine_render': (), 'live_sink': (), 'take_sink_ev': (),
+    # clip_engine_set_crit(engine_crit_enter, engine_crit_exit) in live_bridge.c (TFIXA r1/N1).
+    'push_cmd': ('engine_crit_enter', 'engine_crit_exit'),
+    'stop_now': ('engine_crit_enter', 'engine_crit_exit'),
+    'live_bridge_render': ('engine_crit_enter', 'engine_crit_exit'),
+    # engine_tap and the take/bridge test hooks are zero-initialized and never assigned in the device app.
+    'engine_render': (), 'live_sink': (), 'take_sink_ev': (), 'take_refresh_setup': (),
 }
 # Reads are narrowed separately from commit/write callbacks (the compiler
 # inlines sst_read / sst_erase / sst_program into these owners).
