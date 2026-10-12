@@ -13,7 +13,10 @@ This folder is the project's memory: linked markdown documents that are the sour
 - [Architecture](engineering/architecture.md): layers, the `plat.h` boundary, clip engine and memory budgets
 - [Agentic dev loop](engineering/agentic-dev.md): test pyramid, scenario scripts and the per-change loop
 - [Screen design workflow](engineering/screen-design.md): from mockup to golden PNG at 1:1 pixels
-- [Build plan](engineering/build-plan.md): orchestrated child-agent waves W0–W4 with owner gates (paused, not launched)
+- [Build plan](engineering/build-plan.md): orchestrated child-agent waves W0–W4 with owner gates (run 2026-10-10 to 2026-10-12)
+
+## Lessons
+- [FM-1 firmware playbook](fm1-firmware-playbook.md): what this project learned, for the next FM-1 firmware on any base (platform facts, safety gates, ladder, orchestration, starter kit)
 
 ## Decisions
 - [ADR-0001: Fork an existing GPL-3.0 firmware](decisions/0001-base-platform.md) (accepted; X0X proposed)
