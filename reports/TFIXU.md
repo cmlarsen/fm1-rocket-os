@@ -212,3 +212,118 @@ Extra, after the ladder:
 
 The explicit loader checks on both packages are the TFIXU Done-when's last item.
 No hardware was connected or flashed.
+
+---
+
+# TFIXU r1 — the Opus review findings
+
+Implemented 2026-10-12 on `cmlarsen/tfixu-ui`. Step 0 merged `integration`
+(`b5c9d48`; the only change was `tools/orca/health.py`), and `make unit` /
+`make unit-core` were rerun green before any fix. The reviewer's repros
+(`repro_r1/`) were run against the merged tree first: `repro_reset_take`,
+`repro_reset_take_fx`, `repro_sel_carry` and `scale_range.py` failed;
+`repro_after_help` already passed. Each failing repro became a scenario (or a
+host self-check) that failed before the fix, and `repro_r1/` was deleted.
+
+Commits: `0bd2769` (tooling), `a0b19e8` (UI, harness, tests).
+
+## SHOULD-FIX
+
+### 1. `--force` bypassed the loader gate — fixed
+`--force` no longer skips the approved-loader check for any well-formed package.
+It now accepts **only M-VAVE's FM-1 V15 package**, identified by its full
+sha256 — `STOCK_SHA256`, the constant `tools/fm1_rescue.py` already pins, now
+shared through `tools/fm1_install.py`. It also ignores `--yes`: the rescue path
+always asks for a typed confirmation before anything is sent. Because `--force`
+trusts that one pinned file by hash, **the stock-rescue path does not depend on
+the type-100 / AC791N / single-entry parse at all**: if V15's loader did not
+select the way `check_loader.py` expects, `--force` would still work. The
+identity check (`product_of`) still applies.
+
+- Tests (`tests/install_test.py`, no hardware): a tampered package plus
+  `--force` is refused with exit 2 and nothing sent; the V15 hash path is
+  accepted with a **stub hash injected** (`I.STOCK_SHA256` = the test package's
+  own sha256 — never a device); `--force --yes` with no confirmation cancels;
+  `--force` with the confirmation installs. Repro before the fix: the old test
+  asserted a tampered package *installs* with `--force`.
+- `loader_check.read_want` treats an empty/all-whitespace sha file as a clean
+  `ValueError` (installer `badpkg`, exit 2; `check_loader.py` CLI exit 2), not
+  an `IndexError`.
+
+### 2. HOME + FX's mute/FX reset was not recorded in the take — fixed
+`ui_live.c`'s HOME + FX handler cleared mutes with `live_bridge_mute_all(0)`
+(which posts no `TP_MUTE`) and reset the punch FX with `engine_perform_reset()`
+(which records nothing), so a take replay re-applied both. It now unmutes each
+muted role through `live_bridge_mute(r, 0)` and releases each active/latched FX
+through `engine_perform_release(f)` — both the recorded paths —
+before `engine_perform_reset()` (kept to sweep the rest: a filter still sweeping
+back, the echo base).
+
+- Tests: `tests/scenarios/live_reset_take.x0x` (mute) and
+  `live_reset_take_fx.x0x` (latched FX). Both failed before the fix (the final
+  `expect fxmute0 0` / `expect fxlatch0 0` after the replay got 1) and pass now.
+
+### 3. The scale keyboard clamped at note 127 — fixed
+`live_play_note_for` clamped to `[0, 127]`, so high octaves piled keys onto one
+held note (e.g. penta, B, octave +4: 13 of 27 keys on 127). It now folds by
+whole octaves: `live_play_note_scale` subtracts 12 while the note is > 127 and
+adds 12 while it is < 0, so every key keeps its own in-range pitch. The host
+gain `expect playnoteK.O` reads the same function.
+
+- Tests: `tests/scenarios/live_play_scale.x0x` pins the extremes (C major k26
+  oct+4 raw 129 → 117, was 127; B major → 116; B penta → 121; C# chromatic →
+  111) and a new host `scalecheck` command sweeps every scale × key × octave
+  (362 notes folded, all in range, all octave-related to the raw value). Repro
+  before the fix: `repro_r1/scale_range.py` listed 13 clamping combinations.
+
+### 4. SEL held while leaving LIVE started a clear on arrival — fixed
+`set_view` now marks every currently-held button used (`ui.btn_used |= ui.btn`),
+so a SEL held across a view change cannot act in the new view.
+`tests/scenarios/studio_sel_carry.x0x` reproduces it (before the fix the final
+`expect clipused0 1` got 0). The passing `repro_after_help` is folded in as
+`live_after_help.x0x` (a regression guard around the help-ownership fix).
+
+### 5. Parity length — fixed
+`tests/host/emu_test.mjs` allowed a ≤ 256-frame length difference and had
+dropped the 160000-frame minimum. It now drives the host's own 256-frame audio
+schedule (`run_ms`'s 1 ms clock with a 256-frame half buffer every ~5.805 ms),
+so the WASM renders **exactly** the host's frame count; the check requires equal
+lengths (`lenDiff === 0`) and `n > 160000` again. `make parity`:
+`emu: 160256 samples, peak 0.400, max diff 3.05e-5 (1.0 LSB), length delta 0,
+screen true, lights true` (was `length delta 173`).
+
+## NITs
+
+- `ui_live.c` FX release: `fx_press = consumed = 0;` → `fx_press = fx_consumed = 0;`
+  (the static is cleared, not just the local).
+- `loader_check.read_want`: an empty sha file is a clean `badpkg` (see #1).
+- `README.md`: "**HOME + FX** resets every effect **and clears every mute** (both
+  are recorded in the take, so a replay follows the reset)."
+- The widest PLAY card text is now linted: `tests/scenarios/screens_tour.x0x`
+  renders `"octave -3 - C# chromatic"` (a new host `songkeyscale` setup command
+  plus `song_io_set_key_scale`) as `s14b_live_play_wide.png`.
+  `make screens-lint`: 1605 frames, 3264 canvases, **0 findings**.
+
+## Ladder (r1, on the committed tree)
+
+`make unit unit-core scenarios screens-lint fuzz-ui check parity fw fw-debug`
+all passed; `tools/check_loader.sh` passed on both packages; the pool kept
+**42,124 B** spare (≥ 8,192). Details:
+
+| Goal | Result |
+|---|---|
+| `unit` | passed (incl. installer, check-loader, check-help, host-build) |
+| `unit-core` | passed (optimized + ASan/UBSan) |
+| `scenarios` | all 125 passed (121 + the 4 new; goldens compared) |
+| `screens-lint` | 1605 frames, 3264 canvases, 0 findings |
+| `fuzz-ui` | 200 seeds × 2000 events: all passed |
+| `check` | passed (remote `fw`; soft-double/size; loader; help cards; 20×500 fuzz) |
+| `parity` | length delta 0, 1.0 LSB, 160256 samples |
+| `fw` | built on deltron.local; pool 301940/344064 B (42,124 B spare) |
+| `fw-debug` | built (X0X_DEBUG=1) |
+| `check_loader.sh` | ok on `build/x0x.fwsc` and `build/debug/x0x.fwsc` |
+
+`python3 tests/install_test.py` (33 checks incl. the new force-gate and
+empty-sha cases) and `python3 tests/check_loader_test.py build/x0x.fwsc`
+passed. No hardware was connected or flashed; `fm1_install.py` was only ever run
+against the simulated FM-1.
