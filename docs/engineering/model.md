@@ -47,7 +47,9 @@ FM6 and NOISE (T5i) use the existing parameter-target and note-on/off types with
 ### TFIXA take phase (2026-10-11)
 
 New take records use store envelope version 2; song records stay at version 1. Version 1 takes
-still load and their ordinary launch events start at clip step 0. The payload size is unchanged.
+still load and their ordinary launch events start at clip step 0. Their pitchless monophonic
+releases migrate to the explicit all-pitches release marker (255), preserving the old release
+behavior. The payload size is unchanged.
 A phase-prelude launch uses `how = 4`, with role in `c[2:0]` and clip step in `c[8:3]`.
 The validator checks the role, clip zone, phase encoding and envelope version.
 

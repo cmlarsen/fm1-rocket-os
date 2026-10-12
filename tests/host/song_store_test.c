@@ -621,6 +621,24 @@ int main(void)
         check("invalid phase role refused", song_store_take_save(&store, 0, &h, &ev) != 0);
     }
 
+    /* Legacy mono releases had no pitch; migrate them to the explicit all-pitches marker. */
+    {
+        take_hdr_t h = {1, 1200, 1000}, got;
+        take_event_t ev = {0, 0xA0000000u}, out;
+        int j;
+        check("legacy release fixture save", song_store_take_save(&store, 2, &h, &ev) == 0);
+        for (j=0;j<(int)SONG_STORE_TAKE_EXTENTS;j++) {
+            hdrv_t hv;
+            memcpy(&hv, nor + take_ext_off(j), sizeof hv);
+            if (hv.magic == 0x31545353u && hv.kind == 2u && hv.slot == 2u) {
+                hv.version = 1; hv.hcrc = fixture_crc(&hv, sizeof hv - 4u);
+                memcpy(nor + take_ext_off(j), &hv, sizeof hv);
+            }
+        }
+        song_store_init(&store, &FLASH);
+        check("legacy mono release upgraded", song_store_take_load(&store, 2, &got, &out, 1) == 0 && out.cmd == 0xA00FF000u);
+    }
+
     /* all writes stayed inside the region */
     check("every erase/program inside 0xA0000..0xDC000",
           wrote_lo >= SONG_STORE_BASE && wrote_hi <= SONG_STORE_BASE + SONG_STORE_SECTORS * SONG_STORE_SECTOR);

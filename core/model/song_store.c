@@ -951,6 +951,9 @@ static int sst_try_take(const song_store_t *st, int ext, uint8_t slot, take_hdr_
         for (k = 0; k < nevents; k++) {
             if (!take_launch_valid(ev[k].cmd, h.version) ||
                 (k && (int32_t)(ev[k].sample - ev[k - 1u].sample) < 0)) return -1;
+            /* v1 mono releases were unconditional (b == 0); v2 carries the pitch. */
+            if (h.version == 1u && TAKE_CMD_TYPE(ev[k].cmd) == 10u && TAKE_CMD_A(ev[k].cmd) < 2u)
+                ev[k].cmd = (ev[k].cmd & ~0x000FF000u) | 0x000FF000u;
         }
     }
     return 0;
