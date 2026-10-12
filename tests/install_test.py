@@ -274,7 +274,8 @@ def errors():
 
 
 def loader_gate():
-    """the installer enforces the approved loader before any device is opened (tests.md #1)"""
+    """the installer enforces the approved loader before any device is opened (tests.md #1), and
+    --force is the stock-rescue path that accepts only M-VAVE's V15 package by full sha256 (r1)."""
     good = pkgfile("approved.fwsc", package(loader=APPROVED_LOADER))
     bad = pkgfile("tampered.fwsc", package(loader=TAMPERED_LOADER))
     good_image = I.logical_image(Path(good).read_bytes())
@@ -291,18 +292,42 @@ def loader_gate():
     ok(rc == 2 and dev.upgrades == 0 and dev.sent == [] and "not the approved X0X 1.0.5 loader" in err,
        "a different loader is refused before any MIDI (exit 2, nothing sent)")
 
+    # r1: --force is the stock-rescue path, not a bypass. Only M-VAVE's V15 (its full sha256) is
+    # accepted; any other package, however well-formed, is refused before a device is opened.
     dev = FakeFM1(bad_image)
     rc, out, err = cli([bad, "--yes", "--force"], dev)
-    ok(rc == 0 and dev.bad == 0 and "approved-loader" in err and "--force" in err,
-       "the same package installs with --force and a warning (stock-rescue path)")
+    ok(rc == 2 and dev.upgrades == 0 and dev.sent == [] and "stock FM-1 V15" in err,
+       "--force refuses a package that is not M-VAVE's V15 (exit 2, nothing sent)")
+
+    # The V15 path is exercised with a stub hash injected (never a device): the test package's own
+    # sha256 becomes STOCK_SHA256, so only the hash gate is under test.
+    v15 = pkgfile("v15.fwsc", package(loader=APPROVED_LOADER))
+    old_stock = I.STOCK_SHA256
+    I.STOCK_SHA256 = hashlib.sha256(Path(v15).read_bytes()).hexdigest()
+    dev = FakeFM1(good_image)
+    rc, out, err = cli([v15, "--yes", "--force"], dev, answer=False)
+    ok(rc == 1 and dev.upgrades == 0 and "cancelled" in out,
+       "--force ignores --yes and needs a typed confirmation (none -> cancelled)")
+    dev = FakeFM1(good_image)
+    rc, out, err = cli([v15, "--force"], dev, answer=True)
+    ok(rc == 0 and dev.bad == 0 and dev.upgrades == 2 and "done: the FM-1 runs FM-1_900" in out,
+       "--force installs the pinned V15 package once confirmed (stub hash, no device)")
+    I.STOCK_SHA256 = old_stock
 
     broken = bytearray(Path(bad).read_bytes())
     broken[16] ^= 0xFF                                     # corrupt the encrypted chip tag
     dev = FakeFM1(bad_image)
-    rc, out, err = cli([pkgfile("broken.fwsc", bytes(broken)), "--yes", "--force"], dev)
-    ok(rc == 2 and dev.sent == [] and "chip" in err, "a structurally broken package fails closed even with --force")
+    rc, out, err = cli([pkgfile("broken.fwsc", bytes(broken)), "--yes"], dev)
+    ok(rc == 2 and dev.sent == [] and "chip" in err, "a structurally broken package fails closed")
 
     old = I.X0X_LOADER_SHA
+    empty = TMP / "empty.sha256"
+    empty.write_text("\n")                                 # r1: an empty sha file must be a clean badpkg
+    I.X0X_LOADER_SHA = empty
+    dev = FakeFM1(good_image)
+    rc, out, err = cli([good, "--yes"], dev)
+    ok(rc == 2 and dev.sent == [] and "empty" in err, "an empty approved-loader sha file fails closed")
+
     I.X0X_LOADER_SHA = TMP / "missing.sha256"
     dev = FakeFM1(good_image)
     rc, out, err = cli([good, "--yes"], dev)

@@ -96,9 +96,15 @@ def loader_sha(loader):
 
 
 def read_want(sha_file):
-    """the approved loader's sha256: the first whitespace token of the sha file"""
+    """the approved loader's sha256: the first whitespace token of the sha file.
+
+    An empty (or all-whitespace) sha file is a clean ValueError, not an IndexError, so callers
+    fail closed with their own message (fm1_install.py's badpkg, the guard's exit 2)."""
     with open(sha_file) as f:
-        return f.read().split()[0]
+        toks = f.read().split()
+    if not toks:
+        raise ValueError(f"{sha_file}: the approved-loader sha file is empty")
+    return toks[0]
 
 
 class LoaderMismatch(ValueError):
@@ -138,7 +144,11 @@ def main(argv):
     0 match, 1 a well-formed package with a different loader, 2 a structural
     failure, a missing package or bad arguments."""
     sha_file, arg = argv[1], argv[2]
-    want = read_want(sha_file)
+    try:
+        want = read_want(sha_file)
+    except (OSError, ValueError) as e:
+        print(f"check_loader: {e}", file=sys.stderr)
+        return 2
     try:
         files = targets(arg)
     except (OSError, ValueError) as e:
