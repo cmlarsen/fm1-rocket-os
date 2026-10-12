@@ -257,10 +257,11 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
             } else {
                 int slot = u->row - 1;
                 if (u->rows[slot].used) {
-                    if (u->ops->open && u->ops->open(u->ops->ctx, slot) == 0)
+                    int rc = u->ops->open ? u->ops->open(u->ops->ctx, slot) : -1;
+                    if (rc == 0)
                         action = SONG_ACTION_OPENED;
                     else
-                        sr_say(u, "OPEN FAILED", ev->ms);
+                        sr_say(u, rc == -2 ? "SAVE FAILED" : "OPEN FAILED", ev->ms);
                 } else {
                     sr_say(u, "EMPTY SLOT", ev->ms);
                 }

@@ -131,7 +131,7 @@ int song_io_save(void)
 
 int song_io_flush(void)
 {
-    int rc = 0;
+    int rc = dirty && failed ? -1 : 0;
     if (dirty && !failed)
         rc = song_io_save();
     if (rc == 0)
@@ -646,13 +646,13 @@ int song_io_take_load(int slot, void *hdr, void *ev, uint32_t max_events)
 
 /* T9i: the take's deferred store write. A clear is stored as an empty take (0 events), which
  * supersedes the old record at boot and keeps the old one recoverable for one undo (prev_take). */
-static void take_store_empty(int slot)
+static int take_store_empty(int slot)
 {
     take_hdr_t h;
     h.nevents = 0;
     h.bpm_x10 = (uint16_t)(song()->bpm_x10 ? song()->bpm_x10 : 1200u);
     h.length_samples = 0;
-    song_store_take_save(&store, slot, &h, 0);
+    return song_store_take_save(&store, slot, &h, 0);
 }
 
 void song_io_take_request_save(void)
@@ -690,15 +690,16 @@ int song_io_take_flush(void)
         return -1;
     }
     if (take_pending == TAKE_CLEAR || live_bridge_take_nevents() == 0) {
-        take_store_empty(slot);
+        rc = take_store_empty(slot);
     } else {
         rc = song_store_take_save(&store, slot, (const take_hdr_t *)live_bridge_take_hdr(),
                                   (const take_event_t *)live_bridge_take_events());
-        if (rc != 0) {
-            failed = 1;
-            return -1;
-        }
     }
+    if (rc != 0) {
+        failed = 1;
+        return rc;
+    }
+    failed = 0;
     /* T9i r3/NIT: the durable take undo goes at the position it had when the take ended, not at
      * this deferred flush, so a clip edit made after the take is undone first. */
     undo_stack_push_take_at(&undo, &store, (uint8_t)slot, take_pending_ser);

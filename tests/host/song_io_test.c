@@ -419,8 +419,8 @@ static void test_failed_save_no_retry(void)
     CHECK(song_io_wants_save() == 0);           /* nothing to do until an edit */
     {
         long o = ops;
-        CHECK(song_io_flush() == 0);            /* the autosave path: a no-op, not a retry */
-        CHECK(song_io_flush() == 0);
+        CHECK(song_io_flush() < 0);             /* report failure without retrying */
+        CHECK(song_io_flush() < 0);
         CHECK(ops == o);                        /* no further erase/program happened */
     }
     song_io_set_key_clip(0, 11);                /* a new edit re-enables saving */
@@ -559,6 +559,29 @@ static void test_shorten_persistence(void)
     CHECK(song_validate(&g_song) == 0);
 }
 
+static void test_failed_take_clear(void)
+{
+    int depth;
+    reset_flash(); boot();
+    CHECK(song_io_save() == 0);
+    memset(&g_take_hdr, 0, sizeof g_take_hdr);
+    memset(g_take_ev, 0, sizeof g_take_ev);
+    live_bridge_take_loaded(2, 100u, 1200u);
+    song_io_take_request_save();
+    CHECK(song_io_flush() == 0);
+    depth = song_io_undo_depth();
+    song_io_take_request_clear();
+    CHECK(song_io_save() == 0); /* make the next injected failure the empty-take commit */
+    fail_prog_once = 1;
+    CHECK(song_io_take_flush() < 0);
+    CHECK(song_io_take_pending() && song_io_failed());
+    CHECK(song_io_undo_depth() == depth);
+    CHECK(song_io_take_flush() == 0); /* an explicit retry succeeds */
+    CHECK(!song_io_take_pending() && !song_io_failed());
+    boot();
+    CHECK(g_take_n == 0 && !g_song.has_take);
+}
+
 int main(void)
 {
     test_boot_empty_builds();
@@ -576,6 +599,7 @@ int main(void)
     test_take_undo_order_flush();
     test_motion_persistence();
     test_shorten_persistence();
+    test_failed_take_clear();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

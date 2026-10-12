@@ -2305,10 +2305,12 @@ static int songs_op_open(void *ctx, int slot)
     (void)ctx;
     if (!songs_stop_wait())
         return -1;                            /* the ISR did not settle: refuse the swap */
+    if (song_io_dirty() && song_io_failed())
+        return -2;                            /* preserve unsaved edits until an explicit retry */
     if (song_io_songs_current_slot(0) >= 0) {
         int fr = song_io_flush();             /* keep a stored song; never auto-save the project seed */
         if (fr < 0)
-            return -1;                        /* the flush failed: keep the edits, don't open */
+            return -2;                        /* the flush failed: keep the edits, don't open */
     }
     if (song_io_songs_open(0, slot) != 0)
         return -1;
