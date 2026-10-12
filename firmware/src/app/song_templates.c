@@ -164,14 +164,12 @@ static void tmpl_progression(clip_t *c, const tmpl_deg_t *p, int base, int inv)
 
 void song_template_empty(song_t *out, uint16_t bpm_x10, int key)
 {
-    song_t s;
-    song_store_empty(&s);
-    s.bpm_x10 = song_tmpl_bpm(bpm_x10);
-    s.key = (uint8_t)song_tmpl_key_root(key);
-    s.scale = song_tmpl_key_scale(key);
-    tmpl_name(&s, "NEW SONG");
-    tmpl_no_motion(&s);
-    *out = s;
+    song_store_empty(out);
+    out->bpm_x10 = song_tmpl_bpm(bpm_x10);
+    out->key = (uint8_t)song_tmpl_key_root(key);
+    out->scale = song_tmpl_key_scale(key);
+    tmpl_name(out, "NEW SONG");
+    tmpl_no_motion(out);
 }
 
 void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
@@ -182,7 +180,6 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     static const tmpl_deg_t MIN_A[4] = {{0, 1}, {8, 0}, {3, 0}, {10, 0}};   /* i  VI III VII */
     static const tmpl_deg_t MIN_B[4] = {{8, 0}, {10, 0}, {0, 1}, {10, 0}};  /* VI VII i  VII */
 
-    song_t s;
     int root = song_tmpl_key_root(key);
     int minor = song_tmpl_key_minor(key);
     int third = minor ? 3 : 4;
@@ -192,14 +189,14 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     int c = 60 + root;             /* CHORDS around MIDI 60 (C4) */
     clip_t *cl;
 
-    song_store_empty(&s);
-    s.bpm_x10 = song_tmpl_bpm(bpm_x10);
-    s.key = (uint8_t)root;
-    s.scale = song_tmpl_key_scale(key);
-    tmpl_name(&s, "STARTER");
+    song_store_empty(out);
+    out->bpm_x10 = song_tmpl_bpm(bpm_x10);
+    out->key = (uint8_t)root;
+    out->scale = song_tmpl_key_scale(key);
+    tmpl_name(out, "STARTER");
 
     /* --- DRUMS A-D: clips 0..3, one bar each, accented, with ghost hats --- */
-    cl = &s.clip[0];               /* A: a straight beat */
+    cl = &out->clip[0];               /* A: a straight beat */
     tmpl_clip(cl, 16);
     tmpl_hit(cl, TM_BD, 0); tmpl_hit(cl, TM_BD, 8);
     tmpl_hit(cl, TM_SD, 4); tmpl_hit(cl, TM_SD, 12);
@@ -207,7 +204,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_hit(cl, TM_CH, 3); tmpl_hit(cl, TM_CH, 7); tmpl_hit(cl, TM_CH, 11); tmpl_hit(cl, TM_CH, 15);  /* ghost hats */
     tmpl_acc(cl, 0); tmpl_acc(cl, 4); tmpl_acc(cl, 8); tmpl_acc(cl, 12);
 
-    cl = &s.clip[1];               /* B: the same beat, busier, with a clap */
+    cl = &out->clip[1];               /* B: the same beat, busier, with a clap */
     tmpl_clip(cl, 16);
     tmpl_hit(cl, TM_BD, 0); tmpl_hit(cl, TM_BD, 8);
     tmpl_hit(cl, TM_SD, 4); tmpl_hit(cl, TM_SD, 12);
@@ -218,7 +215,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_hit(cl, TM_OH, 14);
     tmpl_acc(cl, 0); tmpl_acc(cl, 4); tmpl_acc(cl, 8); tmpl_acc(cl, 12);
 
-    cl = &s.clip[2];               /* C: hats and a rim */
+    cl = &out->clip[2];               /* C: hats and a rim */
     tmpl_clip(cl, 16);
     tmpl_hit(cl, TM_BD, 0); tmpl_hit(cl, TM_BD, 8);
     tmpl_hit(cl, TM_RS, 4); tmpl_hit(cl, TM_RS, 12);
@@ -227,7 +224,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_hit(cl, TM_CH, 1); tmpl_hit(cl, TM_CH, 5); tmpl_hit(cl, TM_CH, 9); tmpl_hit(cl, TM_CH, 13);  /* ghost hats */
     tmpl_acc(cl, 0); tmpl_acc(cl, 8);
 
-    cl = &s.clip[3];               /* D: the fill, its crash on the downbeat */
+    cl = &out->clip[3];               /* D: the fill, its crash on the downbeat */
     tmpl_clip(cl, 16);
     tmpl_hit(cl, TM_CR, 0); tmpl_hit(cl, TM_BD, 0); tmpl_hit(cl, TM_BD, 8);
     tmpl_hit(cl, TM_SD, 4); tmpl_hit(cl, TM_SD, 12);
@@ -236,7 +233,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_acc(cl, 0); tmpl_acc(cl, 4); tmpl_acc(cl, 8); tmpl_acc(cl, 12); tmpl_acc(cl, 15);
 
     /* --- BASS A-C: clips 7..9 --- */
-    cl = &s.clip[7];               /* A: root, a fifth, the octave */
+    cl = &out->clip[7];               /* A: root, a fifth, the octave */
     tmpl_clip(cl, 16);
     tmpl_note(cl, 0, b, 110, 4);
     tmpl_note(cl, 4, b, 90, 2);
@@ -245,7 +242,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_note(cl, 12, b + 12, 90, 2);
     tmpl_note(cl, 14, b + third, 90, 2);
 
-    cl = &s.clip[8];               /* B: syncopated */
+    cl = &out->clip[8];               /* B: syncopated */
     tmpl_clip(cl, 16);
     tmpl_note(cl, 0, b, 110, 3);
     tmpl_note(cl, 3, b, 70, 2);
@@ -254,7 +251,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_note(cl, 12, b, 110, 3);
     tmpl_note(cl, 15, b + third, 90, 2);
 
-    cl = &s.clip[9];               /* C: driving eighths */
+    cl = &out->clip[9];               /* C: driving eighths */
     tmpl_clip(cl, 16);
     tmpl_note(cl, 0, b, 110, 2);
     tmpl_note(cl, 2, b + 12, 70, 2);
@@ -264,7 +261,7 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_note(cl, 14, b + 12, 90, 2);
 
     /* --- LEAD A-C: clips 12..14 --- */
-    cl = &s.clip[12];              /* A: a simple call */
+    cl = &out->clip[12];              /* A: a simple call */
     tmpl_clip(cl, 16);
     tmpl_note(cl, 0, l, 100, 4);
     tmpl_note(cl, 4, l + third, 90, 2);
@@ -273,14 +270,14 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
     tmpl_note(cl, 12, l + 7, 90, 2);
     tmpl_note(cl, 14, l + third, 90, 2);
 
-    cl = &s.clip[13];              /* B: an answer an octave up */
+    cl = &out->clip[13];              /* B: an answer an octave up */
     tmpl_clip(cl, 16);
     tmpl_note(cl, 2, l + 12, 90, 2);
     tmpl_note(cl, 6, l + third + 12, 90, 2);
     tmpl_note(cl, 8, l + 7 + 12, 100, 2);
     tmpl_note(cl, 12, l + 12, 100, 4);
 
-    cl = &s.clip[14];              /* C: held notes */
+    cl = &out->clip[14];              /* C: held notes */
     tmpl_clip(cl, 16);
     tmpl_note(cl, 0, l, 90, 2);
     tmpl_note(cl, 3, l + third, 90, 2);
@@ -291,19 +288,18 @@ void song_template_starter(song_t *out, uint16_t bpm_x10, int key)
 
     /* --- CHORDS A-B: clips 19..20, one chord per bar --- */
     if (minor) {
-        tmpl_progression(&s.clip[19], MIN_A, c, 0);
-        tmpl_progression(&s.clip[20], MIN_B, c, 1);
+        tmpl_progression(&out->clip[19], MIN_A, c, 0);
+        tmpl_progression(&out->clip[20], MIN_B, c, 1);
     } else {
-        tmpl_progression(&s.clip[19], MAJ_A, c, 0);
-        tmpl_progression(&s.clip[20], MAJ_B, c, 1);
+        tmpl_progression(&out->clip[19], MAJ_A, c, 0);
+        tmpl_progression(&out->clip[20], MAJ_B, c, 1);
     }
 
     /* --- FX A: clip 24 (noise accents) --- */
-    cl = &s.clip[24];
+    cl = &out->clip[24];
     tmpl_clip(cl, 16);
     tmpl_note(cl, 0, l + 12, 100, 2);
     tmpl_note(cl, 8, l + 7, 80, 4);
 
-    tmpl_no_motion(&s);
-    *out = s;
+    tmpl_no_motion(out);
 }

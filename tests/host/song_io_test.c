@@ -314,8 +314,8 @@ static void test_clip_editor_ops(void)
     /* motion: two lanes at most; the same param reuses its lane */
     song_io_clip_create(7, 16, 0, 0);
     song_io_edit_begin(7);
-    CHECK(song_io_motion_lane(7, 0x6001, 1) == 0);
-    CHECK(song_io_motion_lane(7, 0x6001, 1) == 0);
+    CHECK(song_io_motion_lane(7, 0x600d, 1) == 0);
+    CHECK(song_io_motion_lane(7, 0x600d, 1) == 0);
     CHECK(song_io_motion_lane(7, 0x4002, 1) == 1);
     CHECK(song_io_motion_lane(7, 0x5003, 1) == -1);        /* two lanes at most */
     song_io_motion_set(7, 0, 3, 99);
@@ -419,8 +419,8 @@ static void test_failed_save_no_retry(void)
     CHECK(song_io_wants_save() == 0);           /* nothing to do until an edit */
     {
         long o = ops;
-        CHECK(song_io_flush() == 0);            /* the autosave path: a no-op, not a retry */
-        CHECK(song_io_flush() == 0);
+        CHECK(song_io_flush() < 0);             /* report failure without retrying */
+        CHECK(song_io_flush() < 0);
         CHECK(ops == o);                        /* no further erase/program happened */
     }
     song_io_set_key_clip(0, 11);                /* a new edit re-enables saving */
@@ -501,6 +501,195 @@ static void test_take_undo_order_flush(void)
     CHECK(song_io_undo_type() == 4 /* UNDO_REPLACE_TAKE */);    /* ... then the take */
 }
 
+/* TFIXS: every motion-page knob can persist and reload, and invalid IDs stay rejected. */
+static void test_motion_persistence(void)
+{
+    static const int params[] = {0x600d, 0x4007, 0x400b, 0x4002};
+    int i;
+    for (i = 0; i < 4; i++) {
+        reset_flash(); boot();
+        song_io_edit_begin(7);
+        CHECK(song_io_motion_lane(7, params[i], 1) == 0);
+        song_io_motion_set(7, 0, 3, 99);
+        song_io_edit_end();
+        CHECK(song_validate(&g_song) == 0);
+        CHECK(song_io_save() == 0);
+        boot();
+        CHECK(song_io_loaded());
+        CHECK(song_io_motion_param(7, 0) == params[i]);
+        CHECK(song_io_motion_get(7, 0, 3) == 99);
+    }
+    CHECK(song_io_motion_lane(7, 0x7000, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x4100, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x6010, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x10000, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x6001, 1) == 1);
+    song_io_motion_set(7, 1, 0, 99); /* RATIO has max 9 */
+    CHECK(song_io_motion_get(7, 1, 0) == 9);
+    CHECK(song_validate(&g_song) == 0);
+    g_song.clip[7].motion[1].v[0] = 10;
+    CHECK(song_validate(&g_song) < 0);
+}
+
+static void test_shorten_persistence(void)
+{
+    clip_t before;
+    int n;
+    reset_flash(); boot();
+    before = g_song.clip[7];
+    song_io_clip_set_len(7, 8);
+    for (n = 0; n < g_song.clip[7].nnotes; n++)
+        CHECK(g_song.clip[7].d.notes[n].step < 8);
+    CHECK(song_validate(&g_song) == 0);
+    CHECK(song_io_undo() == UNDO_DONE);
+    CHECK(memcmp(&before, &g_song.clip[7], sizeof before) == 0);
+    CHECK(song_io_redo() == UNDO_DONE);
+    CHECK(song_io_save() == 0);
+    boot();
+    CHECK(song_io_loaded() && g_song.clip[7].len == 8);
+    CHECK(song_validate(&g_song) == 0);
+    n = song_io_note_add(7, 63, 77, 100, 64);
+    CHECK(n >= 0 && g_song.clip[7].d.notes[n].step == 7);
+    CHECK(g_song.clip[7].d.notes[n].len == 8);
+    CHECK(song_io_note_add(7, 63, 77, 100, 64) == n);
+    song_io_note_set(7, n, 60, -1, -1, 60);
+    CHECK(g_song.clip[7].d.notes[n].step == 7 && g_song.clip[7].d.notes[n].len == 8);
+    CHECK(song_io_save() == 0);
+    boot();
+    CHECK(song_validate(&g_song) == 0);
+}
+
+static void test_failed_take_clear(void)
+{
+    int depth;
+    reset_flash(); boot();
+    CHECK(song_io_save() == 0);
+    memset(&g_take_hdr, 0, sizeof g_take_hdr);
+    memset(g_take_ev, 0, sizeof g_take_ev);
+    live_bridge_take_loaded(2, 100u, 1200u);
+    song_io_take_request_save();
+    CHECK(song_io_flush() == 0);
+    depth = song_io_undo_depth();
+    song_io_take_request_clear();
+    CHECK(song_io_save() == 0); /* make the next injected failure the empty-take commit */
+    fail_prog_once = 1;
+    CHECK(song_io_take_flush() < 0);
+    CHECK(song_io_take_pending() && song_io_take_failed());
+    CHECK(song_io_undo_depth() == depth);
+    CHECK(song_io_take_flush() == 0); /* an explicit retry succeeds */
+    CHECK(!song_io_take_pending() && !song_io_take_failed());
+    boot();
+    CHECK(g_take_n == 0 && !g_song.has_take);
+}
+
+/* TFIXS r1/B1: an explicit SAVE clears a failed song save and retries it then; autosave (flush)
+ * still refuses to retry without that explicit action. */
+static void test_save_retry_explicit(void)
+{
+    long o;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    song_io_set_key_clip(0, 5);
+    CHECK(song_io_save() == 0);
+    song_io_set_key_clip(0, 9);
+    fail_prog_once = 1;
+    CHECK(song_io_save() < 0);
+    CHECK(song_io_failed() && song_io_dirty());
+    o = ops;
+    CHECK(song_io_flush() < 0);                  /* autosave does not retry a failed save */
+    CHECK(song_io_flush() < 0);
+    CHECK(ops == o);                             /* no further erase/program happened */
+    CHECK(song_io_failed());
+    song_io_retry();                             /* the explicit SAVE lifts the failure */
+    CHECK(!song_io_failed());
+    CHECK(song_io_flush() == 0);                 /* ...and the store is tried again */
+    CHECK(ops > o && !song_io_dirty() && !song_io_failed());
+    CHECK(((song_t *)live_bridge_song())->key_clip[0] == 9);
+}
+
+/* TFIXS r1/B1: the SONGS hold-to-discard drops the unsaved edits so a switch may proceed. */
+static void test_discard_unsaved(void)
+{
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    CHECK(song_io_save() == 0);
+    song_io_set_key_clip(0, 9);
+    fail_prog_once = 1;
+    CHECK(song_io_save() < 0);
+    CHECK(song_io_dirty() && song_io_failed());
+    song_io_songs_discard(0);
+    CHECK(!song_io_dirty() && !song_io_failed());
+    CHECK(song_io_flush() == 0);                 /* the switch's flush is now a no-op */
+}
+
+/* TFIXS r1/S1: a failed take write is retried only by an explicit SAVE or a new take edit, never
+ * by autosave or a switch attempt (which call song_io_flush). */
+static void test_failed_take_no_retry(void)
+{
+    long o;
+    reset_flash();
+    boot();
+    CHECK(song_io_save() == 0);
+    live_bridge_take_loaded(2, 100u, 1200u);
+    song_io_take_request_save();
+    CHECK(song_io_flush() == 0);                 /* the take commits */
+    song_io_take_request_clear();
+    CHECK(song_io_save() == 0);                  /* the song commits; the clear is still pending */
+    fail_prog_once = 1;
+    CHECK(song_io_take_flush() < 0);             /* the empty-take commit fails */
+    CHECK(song_io_take_pending() && song_io_take_failed());
+    o = ops;
+    CHECK(song_io_flush() < 0);                  /* autosave does not retry the failed take */
+    CHECK(song_io_flush() < 0);                  /* nor a switch attempt */
+    CHECK(ops == o);                             /* nothing was rewritten */
+    CHECK(song_io_take_pending() && song_io_take_failed());
+    song_io_retry();                             /* an explicit SAVE lifts the failure */
+    CHECK(!song_io_take_failed());
+    CHECK(song_io_flush() == 0);                 /* ...and commits the pending clear */
+    CHECK(!song_io_take_pending() && ops > o);
+    /* a new take edit also re-enables the retry */
+    live_bridge_take_loaded(1, 50u, 1200u);
+    song_io_take_request_save();
+    CHECK(song_io_save() == 0);
+    fail_prog_once = 1;
+    CHECK(song_io_take_flush() < 0);
+    CHECK(song_io_take_failed());
+    o = ops;
+    CHECK(song_io_flush() < 0 && ops == o);
+    song_io_take_request_save();                 /* a new take edit clears the failure */
+    CHECK(!song_io_take_failed());
+    CHECK(song_io_flush() == 0 && !song_io_take_pending());
+}
+
+/* TFIXS r1/S2: consecutive clip-length detents of one clip are one undo record; any other edit or
+ * an undo starts a new one. */
+static void test_clip_len_coalesce(void)
+{
+    int i;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    wipe_clips();
+    song_io_clip_create(0, 32, 0, 0);
+    CHECK(song_io_clip_len(0) == 32);
+    song_io_clip_set_len(0, 31);
+    CHECK(song_io_undo_depth() == 1);
+    for (i = 30; i >= 20; i--)                   /* eleven more detents */
+        song_io_clip_set_len(0, i);
+    CHECK(song_io_clip_len(0) == 20);
+    CHECK(song_io_undo_depth() == 1);            /* the whole sweep is one record */
+    CHECK(song_io_undo() == UNDO_DONE);
+    CHECK(song_io_clip_len(0) == 32);            /* the first detent's before-state */
+    CHECK(song_io_redo() == UNDO_DONE && song_io_clip_len(0) == 20);
+    /* another edit ends the coalescing: two length records again */
+    song_io_clip_set_len(0, 19);
+    song_io_clip_set_mode(0, 1);                 /* a different action */
+    song_io_clip_set_len(0, 18);
+    CHECK(song_io_undo_depth() == 3);
+}
+
 int main(void)
 {
     test_boot_empty_builds();
@@ -516,6 +705,13 @@ int main(void)
     test_corrupt_record_falls_back();
     test_take_undo_order_full_ring();
     test_take_undo_order_flush();
+    test_motion_persistence();
+    test_shorten_persistence();
+    test_failed_take_clear();
+    test_save_retry_explicit();
+    test_discard_unsaved();
+    test_failed_take_no_retry();
+    test_clip_len_coalesce();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

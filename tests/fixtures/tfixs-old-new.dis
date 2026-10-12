@@ -1,0 +1,18 @@
+# Excerpts from device disassembly of 86a0b8f, before TFIXS.
+
+song_io_songs_create:
+ 20324cc:    79 04             	[--sp] = {rets, r9-r4}
+ 20324ce:    f0 e8 00 10       	sp += -4096
+ 20324d2:    f0 e8 00 10       	sp += -4096
+ 20324d6:    f0 e8 00 10       	sp += -4096
+ 20324da:    f0 e8 e8 17       	sp += -2072
+ 20324de:    36 16             	r6 = r3
+ 2032564:    80 ea 62 04       	call 2244 <song_template_starter : 2032e2c >
+
+song_template_starter:
+ 2032e2c:    7f 04             	[--sp] = {rets, r15-r4}
+ 2032e2e:    f0 e8 00 10       	sp += -4096
+ 2032e32:    f0 e8 00 10       	sp += -4096
+ 2032e36:    f0 e8 00 10       	sp += -4096
+ 2032e3a:    f0 e8 e0 17       	sp += -2080
+ 2032e3e:    43 38             	r3 = 24

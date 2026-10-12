@@ -8,6 +8,7 @@
  * already includes lz.c. */
 #include <stdint.h>
 #include "song_store.h"
+#include "motion_contract.h"
 
 /* T6i: this unit carries its own copy of lz.c (project.c has the other). On the device its 4 KB
  * lz_head goes to the shared .pool instead of .bss, so the table is not paid for twice in the
@@ -566,10 +567,11 @@ int song_validate(const song_t *s)
             }
         }
         for (j = 0; j < (int)CLIP_MOTION_LANES; j++) {
-            if (c->motion[j].param != PARAM_NONE && c->motion[j].param >= 0x0800u)
-                return -1;                    /* a T5i range check tightens this later */
+            int max = c->motion[j].param == PARAM_NONE ? 127 : motion_param_max(c->motion[j].param);
+            if (max < 0)
+                return -1;
             for (k = 0; k < (int)CLIP_MAX_STEPS; k++)
-                if (c->motion[j].v[k] != MOTION_NONE && c->motion[j].v[k] > 127)
+                if (c->motion[j].v[k] != MOTION_NONE && c->motion[j].v[k] > max)
                     return -1;
         }
     }

@@ -92,6 +92,8 @@ static void sr_say(songs_ui_t *u, const char *msg, uint32_t ms)
     sr_copy(u->msg, sizeof u->msg, msg);
     u->msg_until = ms + SONGS_TOAST_MS;
 }
+static void sr_say_refused(songs_ui_t *u, int slot, uint32_t ms);
+static int  sr_try_open(songs_ui_t *u, int slot, uint32_t ms);
 
 /* ============================================================== the state ==== */
 
@@ -133,6 +135,9 @@ void ui_songs_begin(songs_ui_t *u, const songs_ops_t *ops)
     u->bpm_x10 = SONGS_BPM_DEFAULT;
     u->del_held = u->del_done = 0;
     u->del_t0 = 0;
+    u->refused = u->refused_slot = 0;
+    u->dis_held = u->dis_done = 0;
+    u->dis_t0 = 0;
     u->home_used = 0;
     u->prev_btn = u->prev_keys = 0;
     u->msg[0] = 0;
@@ -187,10 +192,32 @@ static void sr_create(songs_ui_t *u, int *action, uint32_t ms)
         return;
     }
     ui_songs_refresh(u);
-    if (u->ops->open && u->ops->open(u->ops->ctx, ns) == 0)
-        *action = SONG_ACTION_OPENED;
+    *action = sr_try_open(u, ns, ms);
+}
+
+/* B1: the open was refused because the current song could not be preserved. The toast names the
+ * two ways out: SAVE retries, or hold SEL to discard. */
+static void sr_say_refused(songs_ui_t *u, int slot, uint32_t ms)
+{
+    u->refused = 1;
+    u->refused_slot = (uint8_t)slot;
+    sr_say(u, "SAVE FAILED: SAVE RETRIES,\nHOLD TO DISCARD", ms);
+}
+
+/* Open `slot`; on success the shell leaves SONGS. rc == -2 is the store's "refused to preserve
+ * the current song" (songs_op_open); anything else is a plain failure. */
+static int sr_try_open(songs_ui_t *u, int slot, uint32_t ms)
+{
+    int rc = u->ops->open ? u->ops->open(u->ops->ctx, slot) : -1;
+    if (rc == 0) {
+        u->refused = 0;
+        return SONG_ACTION_OPENED;
+    }
+    if (rc == -2)
+        sr_say_refused(u, slot, ms);
     else
-        sr_say(u, "SAVE FAILED", ms);
+        sr_say(u, "OPEN FAILED", ms);
+    return SONG_ACTION_NONE;
 }
 
 int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
@@ -247,6 +274,41 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
         return action;
     }
 
+    /* B1: a refused open. Holding SEL for the delete-ring interval discards the unsaved edits
+     * and opens the wanted song; releasing early keeps the song (and the toast). Any other
+     * action dismisses the prompt. */
+    if (u->refused) {
+        int sel_held = (int)((ev->btn >> B_SEL) & 1u);
+        if (sel_held) {
+            if (!u->dis_held) {
+                u->dis_held = 1;
+                u->dis_t0 = ev->ms;
+            } else if ((ev->ms - u->dis_t0) >= SONGS_DELETE_MS) {
+                int slot = u->refused_slot;
+                if (u->ops->discard)
+                    u->ops->discard(u->ops->ctx);
+                u->dis_held = 0;
+                u->dis_done = 1;
+                u->refused = 0;
+                if (u->ops->open && u->ops->open(u->ops->ctx, slot) == 0)
+                    action = SONG_ACTION_OPENED;
+                else
+                    sr_say(u, "OPEN FAILED", ev->ms);
+                ui_songs_refresh(u);
+                u->prev_btn = ev->btn;
+                u->prev_keys = ev->keys;
+                return action;
+            }
+            u->prev_btn = ev->btn;      /* the ring is filling: ignore everything else */
+            u->prev_keys = ev->keys;
+            return action;
+        }
+        u->dis_held = 0;
+        u->dis_done = 0;
+        if (sel || down || up || ev->keys)
+            u->refused = 0;             /* any other action dismisses the prompt */
+    }
+
     switch (u->screen) {
     case SO_LIST:
         if (sel)
@@ -256,14 +318,10 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
                 sr_open_new(u);
             } else {
                 int slot = u->row - 1;
-                if (u->rows[slot].used) {
-                    if (u->ops->open && u->ops->open(u->ops->ctx, slot) == 0)
-                        action = SONG_ACTION_OPENED;
-                    else
-                        sr_say(u, "OPEN FAILED", ev->ms);
-                } else {
+                if (u->rows[slot].used)
+                    action = sr_try_open(u, slot, ev->ms);
+                else
                     sr_say(u, "EMPTY SLOT", ev->ms);
-                }
             }
         }
         if (down & (1u << B_EDIT)) {
@@ -325,10 +383,7 @@ int ui_songs_input(songs_ui_t *u, const song_event_t *ev)
             if (down & (1u << B_SEL)) {
                 switch (u->row) {
                 case 0:
-                    if (u->ops->open && u->ops->open(u->ops->ctx, u->slot) == 0)
-                        action = SONG_ACTION_OPENED;
-                    else
-                        sr_say(u, "SAVE FAILED", ev->ms);
+                    action = sr_try_open(u, u->slot, ev->ms);
                     break;
                 case 1: {
                     int ns = -1;
@@ -683,15 +738,63 @@ static void sr_footer_list(void)
     x = sr_hint(x, 216, "EDIT", "menu");
     sr_hint(x, 216, "HOME", "back");
 }
+/* split a toast at its '\n' (a two-line message must fit the screen width) */
+static void sr_split(const char *s, char *a, uint32_t capa, char *b, uint32_t capb)
+{
+    uint32_t i = 0, j;
+    while (s[i] && s[i] != '\n' && i + 1u < capa) {
+        a[i] = s[i];
+        i++;
+    }
+    a[i] = 0;
+    b[0] = 0;
+    if (s[i] == '\n') {
+        i++;
+        for (j = 0; s[i] && j + 1u < capb; j++)
+            b[j] = s[i++];
+        b[j] = 0;
+    }
+}
 static void sr_toast(const songs_ui_t *u, uint32_t ms)
 {
-    int w, x;
+    char a[48], b[48];
+    int w, w2, x;
     if (!u->msg[0] || (int32_t)(ms - u->msg_until) >= 0)
         return;
-    w = (int)text_w(&AF_M, u->msg) + 16;
+    sr_split(u->msg, a, sizeof a, b, sizeof b);
+    if (!b[0]) {
+        w = (int)text_w(&AF_M, a) + 16;
+        x = (240 - w) / 2;
+        sr_rrect(x, 116, w, 24, 6, TOK_ACCENT);
+        sr_text_c(120, sr_vc(&AF_M, 116, 24), &AF_M, a, TOK_INK);
+        return;
+    }
+    w = (int)text_w(&AF_M, a);
+    w2 = (int)text_w(&AF_M, b);
+    if (w2 > w)
+        w = w2;
+    w += 16;
     x = (240 - w) / 2;
-    sr_rrect(x, 116, w, 24, 6, TOK_ACCENT);
-    sr_text_c(120, sr_vc(&AF_M, 116, 24), &AF_M, u->msg, TOK_INK);
+    sr_rrect(x, 100, w, 48, 6, TOK_ACCENT);
+    sr_text_c(120, sr_vc(&AF_M, 100, 24), &AF_M, a, TOK_INK);
+    sr_text_c(120, sr_vc(&AF_M, 124, 24), &AF_M, b, TOK_INK);
+}
+/* B1: the hold-to-discard dialog (STUDIO 13's ring). The ring text says undo cannot restore. */
+static void sr_discard(const songs_ui_t *u, uint32_t ms)
+{
+    int pct = 0;
+    cv_rect(0, SY(30), 240, 184, TOK_BG);
+    sr_rrect(14, 34, 212, 140, 6, TOK_SURF);
+    sr_frame(14, 34, 212, 140, TOK_LINE);
+    if (u->dis_held && ms - u->dis_t0 < SONGS_DELETE_MS)
+        pct = (int)((ms - u->dis_t0) * 100u / SONGS_DELETE_MS);
+    sr_ring(54, 104, 26, pct, TOK_LINE, TOK_REC);
+    sr_text_c(54, sr_vc(&AF_S, 98, 14), &AF_S, "SEL", TOK_MID);
+    sr_text(96, sr_vc(&AF_S, 46, 14), &AF_S, "UNSAVED EDITS", TOK_REC);
+    sr_text(96, sr_vc(&AF_M, 64, 18), &AF_M, "DISCARD?", TOK_THEME);
+    sr_text(96, sr_vc(&AF_S, 86, 14), &AF_S, "HOLD SEL 1.5 S", TOK_MID);
+    sr_text_c(120, sr_vc(&AF_S, 146, 14), &AF_S, "UNDO CANNOT RESTORE", TOK_MID);
+    sr_text_c(120, sr_vc(&AF_S, 160, 14), &AF_S, "THE DISCARDED EDITS", TOK_MID);
 }
 static void sr_scene(const songs_ui_t *u, uint32_t ms)
 {
@@ -725,6 +828,8 @@ static void sr_scene(const songs_ui_t *u, uint32_t ms)
     default:
         break;
     }
+    if (u->dis_held)
+        sr_discard(u, ms);
     sr_toast(u, ms);
 }
 

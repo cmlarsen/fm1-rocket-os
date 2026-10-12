@@ -67,4 +67,8 @@ typedef struct {
     /* How many clips the slot's song holds, for the menu and the delete ring;
      * -1 when unknown. */
     int  (*clip_count)(void *ctx, int slot);
+
+    /* TFIXS r1/B1: drop the current song's unsaved edits and pending take, so a refused
+     * open may proceed. The edits cannot be undone. */
+    void (*discard)(void *ctx);
 } songs_ops_t;

@@ -39,7 +39,7 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 
 ## Saving (one model, no hidden state)
 - **The song on screen is the song.** It autosaves when the transport is stopped and no voices are sounding.
-- **SAVE tap saves now.** The header dot means "not yet written".
+- **SAVE tap saves now.** The header dot means "not yet written". If a save fails, SONGS keeps the unsaved song open and shows SAVE FAILED when you try to switch songs. **SAVE retries**, and a new edit also re-enables saving; the same rule covers a failed take write (a clear or a finished recording), which stays deferred for the next explicit SAVE or take edit rather than rewriting flash on a timer. If the flash keeps failing you are not trapped: on the refused switch the toast reads **"SAVE FAILED: SAVE RETRIES, HOLD TO DISCARD"**, and **holding SEL for 1.5 s** (the delete ring) discards the unsaved song and take edits and opens the other song. That discard **cannot be undone** — the ring text says so.
 - **There is no separate saved copy** that can disagree with what you hear. Recovery comes from **undo**, which covers clears, copies, record passes and the take.
 - **The song persists in slot 0 on the flash** (0xA0000–0xDBFFF, beside the project). Its record is written header-last, so a power cut during an autosave leaves the version before it. At boot the stored song *is* the current song; with an empty store (a first boot) the current song is the **Starter** template from `song_templates.c` (TCLS/ADR-0004), so a new device plays something at once. LIVE performs the current song — it is not rebuilt on every entry — and changes that belong to the song (T10 adds assign-keys, K1–K4 and the launch default) mark it dirty.
 
@@ -155,7 +155,7 @@ Role mutes and punch FX are performance state (decided 2026-10-11). They reset w
   - HOME+FX resets everything, and leaving LIVE releases every effect and clears every mute.
 - **K1–K4 changes you didn't record revert** when you leave LIVE.
 
-**SONGS is a stopped view (2026-10-11).** Opening SONGS stops the transport. PLAY, HOME+PLAY and REC do nothing there, so song files are only written while everything is silent. Clip undo belongs to one song: opening another song starts a fresh undo history, and HOME+REC in SONGS undoes the last song delete.
+**SONGS is a stopped view (2026-10-11).** Opening SONGS stops the transport. PLAY, HOME+PLAY and REC do nothing there, so song files are only written while everything is silent. Clip undo belongs to one song: opening another song starts a fresh undo history, and HOME+REC in SONGS undoes the last song delete. A switch away from a song whose save failed is refused; **hold SEL for 1.5 s** on the open action to discard those unsaved edits and open anyway (the ring warns that undo cannot restore them).
 
 ## STUDIO tasks (R15)
 | Task | Gesture |
@@ -167,9 +167,10 @@ Role mutes and punch FX are performance state (decided 2026-10-11). They reset w
 | Edit a clip | SEQ cycles NOTES (or the DRUM grid) → MOTION → SETTINGS |
 | Copy a clip | Hold the source pad, then tap an empty `+` slot. To move a clip, copy it and then clear the original. |
 | Clear a clip | HOME + hold the pad for 1.5 s. A ring names the clip. Undoable. |
+| Shorten a melodic clip | Notes starting past the new end are removed; undo restores the length and notes together. New or moved notes stay within the clip length. |
 | Record knob motion | Turn knobs while recording a clip. HOME + touch a knob clears that lane (on the sound pages and the clip MOTION page; on the song home the K1–K4 edit the clip, so HOME + a knob does nothing there). |
 | Undo / redo | HOME+REC / HOME+PLAY. A toast names the action. |
-| Save | SAVE tap. Autosave also runs while stopped. |
+| Save | SAVE tap. Autosave also runs while stopped. A failed save is retried by SAVE; holding SEL on a refused song switch discards the unsaved edits (not undoable). |
 | Help | GLO + any button shows that button's card |
 
 Deferred: HOME+SAVE capture, OCT± clip banks, and the Gate clip mode.
