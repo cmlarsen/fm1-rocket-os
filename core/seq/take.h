@@ -147,3 +147,6 @@ const take_event_t *take_events(const take_t *t);
 
 /* ISR recording-start snapshot: rebuild offset-zero setup before boundary notes fire. */
 void take_refresh_setup(take_t *t);
+
+/* ISR: incomplete recording (ingress overflow), closed with an END and full indication. */
+void take_overflow(take_t *t, uint32_t now);

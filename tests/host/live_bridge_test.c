@@ -653,6 +653,34 @@ static void tfixa_phase_test(void)
     live_bridge_take_stop_play(); live_bridge_exit();
 }
 
+extern void (*live_bridge_test_post_hook)(void);
+static uint32_t command_base;
+static void post_irq(void)
+{
+    command_base = plat_crit_active() ? 256 : 0;
+    if (!plat_crit_active()) run_isr_block(0, 256);
+}
+static void tfixa_intents_test(void)
+{
+    int i, found = 0;
+    const take_event_t *events;
+    live_bridge_take_init(); live_bridge_enter(); live_bridge_song_reload(); g_now = 0;
+    live_bridge_take_arm(); live_bridge_transport_start(); run_isr_block(0, 128);
+    live_bridge_test_post_hook = post_irq;
+    live_bridge_set_bpm(1500);
+    live_bridge_test_post_hook = 0;
+    run_isr_block(256, 256);
+    events = live_bridge_take_events();
+    for (i=0;i<live_bridge_take_nevents();i++)
+        if (events[i].cmd == TAKE_MARK_TEMPO(1500) && events[i].sample == command_base) found++;
+    CHECK(found > 0);
+    for (i=0;i<40;i++) live_bridge_take_fx(0, i & 1);
+    run_isr_block(512, 256);
+    CHECK(live_bridge_take_full());
+    CHECK(!live_bridge_take_recording());
+    live_bridge_exit();
+}
+
 static int order_expected;
 static void order_irq(void)
 {
@@ -873,6 +901,7 @@ int main(void)
     r5_scan_test();
     tfixa_take_tests();
     tfixa_phase_test();
+    tfixa_intents_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

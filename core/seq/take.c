@@ -284,3 +284,9 @@ void take_refresh_setup(take_t *t)
     t->arming = 0;
     if (!t->ended) t->state = TAKE_REC;
 }
+
+void take_overflow(take_t *t, uint32_t now)
+{
+    if (t && t->state == TAKE_REC) take_end(t, now - t->start, 1);
+    else if (t && t->state == TAKE_ARMED) take_clear(t);
+}

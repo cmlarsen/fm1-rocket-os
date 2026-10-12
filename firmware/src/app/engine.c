@@ -76,13 +76,17 @@ static uint8_t echo_applied;                 /* the throw is engaged in the engi
 
 void engine_perform_engage(int fx, int latch)
 {
+    uint32_t f = engine_crit_enter();
     perform_engage(&perf, fx, latch);
     live_bridge_take_fx(fx, latch ? 2 : 1);              /* T9i: record the punch FX (recording only) */
+    engine_crit_exit(f);
 }
 void engine_perform_release(int fx)
 {
+    uint32_t f = engine_crit_enter();
     perform_release(&perf, fx);
     live_bridge_take_fx(fx, 0);
+    engine_crit_exit(f);
 }
 void engine_perform_reset(void) { perform_reset(&perf); }
 void engine_perform_echo_throw(int on) { perform_echo_throw(&perf, on); }

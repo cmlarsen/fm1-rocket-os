@@ -56,6 +56,7 @@ void (*live_bridge_test_hook)(void);
  * real IRQ could run there) to prove the closed take ignores a later ISR feed. Never set on the
  * device. */
 void (*take_test_hook)(void);
+void (*live_bridge_test_post_hook)(void);
 #endif
 
 /* The main loop's launch / mute / FX intents, stamped by the ISR at the block boundary where
@@ -64,16 +65,22 @@ enum { TP_LAUNCH, TP_STOP, TP_LAUNCH_NOW, TP_MUTE, TP_FX, TP_LAUNCH_Q, TP_BPM };
 #define TP_RING 32u
 static struct { uint8_t kind, a, b; } tp[TP_RING];
 static volatile uint8_t tp_h, tp_t;
+static volatile uint8_t tp_overflow;
+static uint32_t tp_drops;
 
 static void tp_post(uint8_t kind, uint8_t a, uint8_t b)
 {
     uint8_t next = (uint8_t)((tp_h + 1u) % TP_RING);
 #ifdef X0X_HOST
+    if (live_bridge_test_post_hook) live_bridge_test_post_hook();
     if (live_bridge_isr)               /* T9i r1: the ISR-side take sink must never post here */
         __builtin_trap();
 #endif
-    if (next == tp_t)
-        return;                                       /* full: drop (a stray bump) */
+    if (next == tp_t) {
+        tp_drops++;
+        tp_overflow = 1;
+        return; /* the ISR marks/closes an incomplete recording */
+    }
     tp[tp_h].kind = kind;
     tp[tp_h].a = a;
     tp[tp_h].b = b;
@@ -461,6 +468,8 @@ void live_bridge_take_init(void)
     g_take_window_end = 0;
     g_take_reload_req = 0;
     tp_h = tp_t = 0;
+    tp_overflow = 0;
+    tp_drops = 0;
     {
         int r;
         for (r = 0; r < (int)NROLES; r++)
@@ -506,6 +515,10 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
 {
     take_sink_t sink;
     g_take_window_base = base;
+    if (tp_overflow) {
+        tp_overflow = 0;
+        take_overflow(&g_take, base);
+    }
     while (tp_t != tp_h) {
         uint8_t kind = tp[tp_t].kind, a = tp[tp_t].a, b = tp[tp_t].b;
         uint32_t cmd = 0;
@@ -804,7 +817,7 @@ int live_bridge_take_playing(void) { return take_playing(&g_take); }
 int live_bridge_take_full(void) { return take_full(&g_take); }
 int live_bridge_take_has(void) { return take_has(&g_take); }
 int live_bridge_take_nevents(void) { return (int)g_take.n; }
-int live_bridge_take_drops(void) { return clip_engine_take_drops(&g_eng); }
+int live_bridge_take_drops(void) { return clip_engine_take_drops(&g_eng) + (int)tp_drops; }
 
 #ifdef X0X_HOST
 /* T9i r2: the host tests' window on the hard invariant. For every role, cur[role] must be CLIP_NONE
@@ -1093,7 +1106,9 @@ void live_bridge_transport_continue(void)                /* T11i: MIDI Continue 
 }
 void live_bridge_transport_stop(void)
 {
+    uint32_t f = engine_crit_enter();
     clip_engine_transport_stop(&g_eng);
+    engine_crit_exit(f);
     if (take_playing(&g_take))
         live_bridge_take_stop_play();                    /* S7: MIDI Stop stops take playback too */
     else if (take_recording(&g_take) || take_armed(&g_take))
@@ -1152,9 +1167,14 @@ void live_bridge_stop(uint8_t role)
 {
     if (role >= NROLES)
         return;
-    g_stop_q[role] ^= 1;                               /* a second stop cancels, as the engine does */
-    clip_engine_stop(&g_eng, role);
-    tp_post(TP_STOP, role, 0);
+    {
+        uint32_t f = engine_crit_enter();
+        if (clip_engine_stop(&g_eng, role) == 0) {
+            g_stop_q[role] ^= 1;
+            tp_post(TP_STOP, role, 0);
+        }
+        engine_crit_exit(f);
+    }
 }
 
 void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
@@ -1187,13 +1207,17 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
 
 void live_bridge_set_bpm(uint16_t bpm_x10)
 {
-    clip_engine_queue_bpm(&g_eng, bpm_x10);
+    uint32_t f = engine_crit_enter();
+    if (clip_engine_queue_bpm(&g_eng, bpm_x10) == 0)
     tp_post(TP_BPM, (uint8_t)(bpm_x10 >> 8), (uint8_t)bpm_x10);   /* S2: record the tempo change */
+    engine_crit_exit(f);
 }
 void live_bridge_set_bpm_soft(uint16_t bpm_x10)   /* T11i: the clock */
 {
-    clip_engine_queue_bpm_soft(&g_eng, bpm_x10);
+    uint32_t f = engine_crit_enter();
+    if (clip_engine_queue_bpm_soft(&g_eng, bpm_x10) == 0)
     tp_post(TP_BPM, (uint8_t)(bpm_x10 >> 8), (uint8_t)bpm_x10);   /* S2: and the followed clock's */
+    engine_crit_exit(f);
 }
 uint16_t live_bridge_bpm_x10(void) { return g_eng.bpm_x10; }
 
@@ -1241,8 +1265,10 @@ void live_bridge_grid(uint32_t *next_8, uint32_t *next_16)
 void live_bridge_mute(uint8_t role, int on)
 {
     if (role < NROLES) {
-        clip_engine_mute(&g_eng, role, on);
-        tp_post(TP_MUTE, role, (uint8_t)(on ? 1 : 0));    /* T9i */
+        uint32_t f = engine_crit_enter();
+        if (clip_engine_mute(&g_eng, role, on) == 0)
+            tp_post(TP_MUTE, role, (uint8_t)(on ? 1 : 0));
+        engine_crit_exit(f);    /* T9i */
     }
 }
 int live_bridge_muted(uint8_t role) { return clip_engine_muted(&g_eng, role); }
@@ -1252,6 +1278,7 @@ int live_bridge_song_role_muted(uint8_t role)
 }
 void live_bridge_mute_all(int on)                    /* leaving LIVE clears every mute */
 {
+    uint32_t f = engine_crit_enter();
     if (on) {
         uint8_t r;
         for (r = 0; r < NROLES; r++)
@@ -1259,6 +1286,7 @@ void live_bridge_mute_all(int on)                    /* leaving LIVE clears ever
     } else {
         clip_engine_mute_clear(&g_eng);              /* synchronous: the engine may stop rendering */
     }
+    engine_crit_exit(f);
 }
 
 /* ----- queries ----- */
