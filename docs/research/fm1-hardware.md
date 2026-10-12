@@ -33,7 +33,7 @@ Related: [firmware landscape](firmware-landscape.md) · [dev tooling](dev-toolin
 | Keys | **27 silicone keys**, F3–G5, each with an LED | [12][13] |
 | Velocity | **No velocity sensing found.** Felucca scans the keys as plain switches and gives hand-entered steps a fixed velocity of 96. The stock firmware's fixed velocity value is Unknown. | [13][14][12] |
 | Knobs | 1 analog MASTER pot (ADC PB6) and **7 endless detented encoders**: SELECT, ALGORITHM, PRESETS, KNOB 1–4 | [12][13][15] |
-| Buttons | **14**: FX, SCL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC, OCT−, OCT+. Plus a rear power switch. | [15][12] |
+| Buttons | **14**: FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC, OCT−, OCT+. Plus a rear power switch. | [15][12] |
 | Display | **Colour TFT, 240×240, ST7789-class controller on SPI1** (12 MHz), RGB565 | [2][7][16] |
 | LEDs | Per-key and per-button LEDs, multiplexed through the scan matrix. PLAY can show green. Felucca adds dim, breathe and mid levels with PWM. | [13][5] |
 | Audio | 3.5 mm TRS out and a speaker. The stock engine and FX are mono. | [12][4] |

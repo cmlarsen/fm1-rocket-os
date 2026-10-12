@@ -17,11 +17,9 @@ import re
 import sys
 
 # the panel's buttons, by the names the interaction model uses, mapped to the B_* enum in plat.h.
-# The model prints the second button SEL in one place and SCL in another: both are B_SEL.
 BUTTONS = {
     "FX": "B_FX",
     "SEL": "B_SEL",
-    "SCL": "B_SEL",
     "ENV": "B_ENV",
     "LFO": "B_LFO",
     "EDIT": "B_EDIT",
@@ -38,12 +36,11 @@ BUTTONS = {
 }
 ALL_B = sorted(set(BUTTONS.values()))
 LABEL = {v: k for k, v in BUTTONS.items()}
-LABEL["B_SEL"] = "SEL/SCL"
 
 # a markdown table is a "gesture table" when one of its header cells is one of these
 HDR_KEYS = ("gesture", "task", "control", "enter", "leave", "layer", "keys do", "purpose", "shows")
 
-TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(FX|SEL|SCL|ENV|LFO|EDIT|GLO|HOME|SAVE|ARP|SEQ|PLAY|REC|OCT[+\-\u2212])(?![A-Za-z0-9])")
+TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(FX|SEL|ENV|LFO|EDIT|GLO|HOME|SAVE|ARP|SEQ|PLAY|REC|OCT[+\-\u2212])(?![A-Za-z0-9])")
 
 
 def read(path):

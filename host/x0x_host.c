@@ -1306,12 +1306,12 @@ static int fz_pick(uint32_t *m)
     }
     return -1;
 }
-/* the buttons the spec calls out for a long hold (SCL/SEL, HOME, SEQ, EDIT, GLO, SAVE, FX, REC...) */
+/* the buttons the spec calls out for a long hold (SEL, HOME, SEQ, EDIT, GLO, SAVE, FX, REC...) */
 static const int FZ_HOLD[] = {B_SEL, B_HOME, B_SEQ, B_EDIT, B_GLO, B_SAVE, B_FX, B_REC, B_ARP,
                               B_ENV, B_LFO, B_OCTUP, B_OCTDN, B_PLAY};
 
 /* T2c: key down -> one transition -> key up, with the key held across it (the review's list:
- * HOME, GLO, LFO, EDIT, SEQ, long PLAY, SCL, an FX hold, a SAVE hold). The transition is applied
+ * HOME, GLO, LFO, EDIT, SEQ, long PLAY, SEL, an FX hold, a SAVE hold). The transition is applied
  * while the key is down; fuzz_cmd then runs the heldnotes check when it changed the view. REC is
  * armed first in some variants (and left armed, or disarmed again, in others). */
 static void fz_held_across(uint32_t *hk)
@@ -1331,7 +1331,7 @@ static void fz_held_across(uint32_t *hk)
     case 3: fz_add(FZ_BTN_TAP, B_EDIT, 0, 0); break;
     case 4: fz_add(FZ_BTN_TAP, B_SEQ, 0, 0); break;
     case 5: fz_add(FZ_BTN_HOLD, B_PLAY, 700, 0); break;            /* long PLAY */
-    case 6: fz_add(FZ_BTN_TAP, B_SEL, 0, 0); break;                /* SCL / launch */
+    case 6: fz_add(FZ_BTN_TAP, B_SEL, 0, 0); break;                /* SEL / launch */
     case 7: fz_add(FZ_BTN_HOLD, B_FX, 900 + FZP(200), 0); break;   /* FX hold */
     default: fz_add(FZ_BTN_HOLD, B_SAVE, 400 + FZP(200), 0); break;/* SAVE hold */
     }
@@ -1425,7 +1425,7 @@ static void fz_build(int seed, int n, uint32_t *hk_out, uint32_t *hb_out)
                 fz_add(FZ_TURN, EN_SELECT, FZP(5) - 2, 80);
                 fz_add(FZ_BTN_TAP, B_EDIT, 0, 0);     /* a sound page for the cursor role */
             } else if (m == 3) {
-                fz_add(FZ_BTN_TAP, B_SEL, 0, 0);      /* SCL / launch / list entry */
+                fz_add(FZ_BTN_TAP, B_SEL, 0, 0);      /* SEL / launch / list entry */
             } else {
                 fz_held_across(&hk);                  /* a key held across a transition (REC variants) */
             }

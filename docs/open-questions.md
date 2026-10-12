@@ -18,7 +18,7 @@ These questions are still unresolved. When one is answered, record the answer in
 ## Resolved 2026-10-11 (plan review)
 - **Build host.** deltron.local: x86_64, Ubuntu 26.04, glibc 2.43, 12 cores, 30 GB RAM, 49 GB free, with Docker, gcc, rsync and qemu. SSH works as `caleb`. KVM doesn't speed up the pi32v2 emulator, because QEMU has to emulate the instructions in software.
 - **Classic patterns removed, delay 0.75 s** (owner, 2026-10-11): [ADR-0004](decisions/0004-remove-classic-shorten-delay.md). Frees about 39 KB of RAM pool; built in TCLS.
-- **The LIVE layer toggle is the SEL button** (owner, 2026-10-11): use the panel's printed label and X0X's name (`B_SEL`) everywhere. SEL confirms in menus and toggles the PADS/PLAY layers in LIVE. Only a long press on PLAY leaves LIVE. The SCL wording in docs, help cards and the LIVE footer is renamed in TPOL.
+- **The LIVE layer toggle is the SEL button** (owner, 2026-10-11): use the panel's printed label and X0X's name (`B_SEL`) everywhere. SEL confirms in menus and toggles the PADS/PLAY layers in LIVE. Only a long press on PLAY leaves LIVE. The old layer-toggle wording in docs, help cards and the LIVE footer is renamed in TPOL.
 - **One take per song** in v1.
 - **Save model.** One state per song, autosaved while stopped, and undo is the safety net.
 - **Scope cuts:** quantize is Bar, Beat or End; modes are Loop or Once; six punch FX; one pad map; no scenes. The full list is in [build-plan](engineering/build-plan.md#deferred-past-v1).

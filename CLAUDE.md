@@ -47,7 +47,7 @@ See [architecture.md](docs/engineering/architecture.md).
 - **`targets/host`** is a headless scenario runner that outputs PNG, WAV and JSON.
 - **`targets/wasm`** is the browser emulator (AudioWorklet).
 - **Logic never goes in `targets/`.**
-- **Modes:** STUDIO builds the song. LIVE is entered and left with a long press on PLAY. In LIVE, **SCL** toggles the PADS and PLAY layers, and REC records the song's single take.
+- **Modes:** STUDIO builds the song. LIVE is entered and left with a long press on PLAY. In LIVE, **SEL** toggles the PADS and PLAY layers, and REC records the song's single take.
 - **Data model:** a Song holds Roles; each Role holds Clips, and one clip per role plays at a time. A Take is a recorded performance, stored as an event log, never as audio.
 
 ## Development loop (planned; build these in M0, then update this section with real commands)

@@ -147,7 +147,7 @@ channel (on the mixer).
 
 ![What the keys do](img/fm1-keys.svg)
 
-(The SEL button is labelled SCL in Felucca.)
+(The panel prints SEL.)
 
 ### Lists
 

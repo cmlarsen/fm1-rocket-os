@@ -21,7 +21,7 @@
 /* Role indices, matching core/model/model.h (frozen): DRUMS, BASS, LEAD, CHORDS, FX. */
 enum { LIVE_DRUMS, LIVE_BASS, LIVE_LEAD, LIVE_CHORDS, LIVE_FX, LIVE_NROLES };
 
-/* The two LIVE layers, toggled by SCL. */
+/* The two LIVE layers, toggled by SEL. */
 enum { LIVE_PADS, LIVE_PLAY };
 
 #define LIVE_NCLIPS 27u          /* core/model/model.h's NCLIPS (asserted in live_bridge.c) */

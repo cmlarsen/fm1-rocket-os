@@ -93,7 +93,7 @@ static void mark_dirty(void) { ui.dirty = 1; }
 /* ============================================================== T3: LIVE === */
 /* ui_live.c is included near the bottom, after the drawing helpers. Everything ui.c needs from
  * it is forward-declared here; the view enum has V_LIVE. LIVE is entered and left only by the
- * long press on PLAY (live_play_tick below), and SCL (B_SEL) toggles the PADS / PLAY layers. */
+ * long press on PLAY (live_play_tick below), and SEL (B_SEL) toggles the PADS / PLAY layers. */
 static int  live_mode(void);                 /* ui.view == V_LIVE */
 static void live_play_tick(uint32_t btn);    /* PLAY: short = transport, long = in/out of LIVE */
 static int  live_holding(void);              /* the enter/leave ring is filling */
@@ -3930,7 +3930,7 @@ static void leds(void)
         b |= 1u << B_SAVE;
     if (proj.set.keyled) {                           /* bright: on / chosen; dim: there, not chosen */
         if (ui.view == V_LIVE) {
-            live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SCL shows the layer */
+            live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SEL shows the layer */
         } else if (ui.view == V_STUDIO) {
             studio_leds(&b, &k, &d);                 /* T7a: the clip grid's states on the keys */
         } else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {

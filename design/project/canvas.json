@@ -66,7 +66,7 @@
       "w": 480,
       "h": 632,
       "page": "live",
-      "title": "LIVE 5 \u00b7 Play layer (SCL)"
+      "title": "LIVE 5 \u00b7 Play layer (SEL)"
     },
     "Live-FX.dc.html": {
       "x": 0,
@@ -323,7 +323,7 @@
     "liveTitle": {
       "x": 0,
       "y": -300,
-      "text": "LIVE mode: hold PLAY to enter or leave \u00b7 SCL flips Pads / Play \u00b7 REC records the take",
+      "text": "LIVE mode: hold PLAY to enter or leave \u00b7 SEL flips Pads / Play \u00b7 REC records the take",
       "kind": "title1",
       "maxW": 2720,
       "page": "live"

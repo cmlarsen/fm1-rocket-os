@@ -1,6 +1,6 @@
 # Screen inventory (design v2)
 
-v2 (2026-10-11) applies the [plan review](../reviews/2026-10-11-build-plan-review.md): SCL is the layer toggle, there is one take per song, six punch FX, assign keys lives in LIVE SETUP, and Gate, legato, 2/4/8-bar launch and SAVE-paste are gone.
+v2 (2026-10-11) applies the [plan review](../reviews/2026-10-11-build-plan-review.md): SEL is the layer toggle, there is one take per song, six punch FX, assign keys lives in LIVE SETUP, and Gate, legato, 2/4/8-bar launch and SAVE-paste are gone.
 
 **TCLS (2026-10-11):** X0X's Classic pattern screens are removed ([ADR-0004](../decisions/0004-remove-classic-shorten-delay.md)). The screens below that belong to STUDIO, LIVE, SONGS and the inherited sound/FX/MIX/GLOBAL pages are what the firmware draws; the X0X pattern home, the 909/303 step grid, TB-3PO and the song arranger have no screens any more.
 
@@ -27,9 +27,9 @@ Related: [interaction model](interaction-model.md) · [UX principles](ux-princip
 |---|---|---|
 | LIVE | 1 Enter | Hold PLAY in STUDIO: a ring fills. Release to cancel. |
 | LIVE | 2 Pads, stopped | Every loaded clip is dim; tap a pad to start |
-| LIVE | 3 Pads, playing + queued | Playing clips pulse. BASS B is queued and blinking. SCL switches to the PLAY layer. |
+| LIVE | 3 Pads, playing + queued | Playing clips pulse. BASS B is queued and blinking. SEL switches to the PLAY layer. |
 | LIVE | 4 Pads, recording | Red border, REC timer, knob cards marked as recorded, LEAD B queued to stop |
-| LIVE | 5 Play layer | After SCL: the keys play LEAD in C minor, with a clip-status strip |
+| LIVE | 5 Play layer | After SEL: the keys play LEAD in C minor, with a clip-status strip |
 | LIVE | 6 Punch FX | FX held: six effects on the first six lower keys. One is latched, one is held. Upper keys mute roles. |
 | LIVE | 7 Assign keys | LIVE SETUP → SEL: hold a key, turn PRESETS through clips, stops, FX and Live note; release commits |
 | LIVE | 8 Clear take | Hold REC: a red ring names the take. The clips stay and the music keeps playing. |

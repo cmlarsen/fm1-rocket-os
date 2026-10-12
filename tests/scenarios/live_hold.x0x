@@ -1,5 +1,5 @@
 # T3 review #4: a key held across a layer or focus change releases the note that key started.
-# The note is tracked per key, so SCL and ALGORITHM do not retarget it.
+# The note is tracked per key, so SEL and ALGORITHM do not retarget it.
 wait 300
 # TCLS: the boot song is the Starter template, so BASS and LEAD have clips.
 # enter LIVE and switch to the PLAY layer
