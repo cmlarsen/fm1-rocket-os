@@ -3,7 +3,7 @@
 This is the proposed control scheme. It is a **draft to prototype in the emulator and on hardware, not a final spec**. Anything undecided is marked **OPEN** and tracked in [open questions](../open-questions.md).
 
 **v2 (2026-10-11)** applies the [build plan review](../reviews/2026-10-11-build-plan-review.md) and the owner's answers:
-- **SCL** toggles the LIVE layers. SEL means "confirm" everywhere.
+- **SEL** is one button: it toggles the LIVE layers and confirms everywhere.
 - Only a long press on PLAY leaves LIVE.
 - Quick assign moved into LIVE SETUP.
 - Each song keeps one take.
@@ -17,12 +17,12 @@ Related: [requirements](requirements.md) · [UX principles](ux-principles.md) ·
 | Control | Count | Notes |
 |---|---|---|
 | Keys | 27: 16 lower, 11 upper (grouped 3-2-3-2-1), F3–G5 | Each key has a white LED with dim, breathe and mid levels. Velocity is **OPEN**. |
-| Buttons | FX, SCL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC, OCT−, OCT+ | REC is red. PLAY can also light green. **SEL is the push on the SELECT encoder.** |
-| Encoders | SELECT (push = SEL), ALGORITHM, PRESETS, K1–K4 | Endless, detented |
+| Buttons | FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC, OCT−, OCT+ | REC is red. PLAY can also light green. **SEL toggles the LIVE layers and confirms.** |
+| Encoders | SELECT, ALGORITHM, PRESETS, K1–K4 | Endless, detented |
 | Screen | 240×240 colour | Minimum text size is set at RC0 on hardware |
 
 ## One grammar, everywhere
-- **SELECT** turns to move between rows. **SEL** (its push) confirms or opens. **ALGORITHM** moves the cursor across, or changes a value. **HOME tap** goes back. **HOME hold** is SHIFT and shows the cheat sheet.
+- **SELECT** turns to move between rows. **SEL** confirms or opens. **ALGORITHM** moves the cursor across, or changes a value. **HOME tap** goes back. **HOME hold** is SHIFT and shows the cheat sheet.
 - **Keep or relabel the inherited X0X pages** (part, mix, FX, global) so they follow this grammar. X0X uses ALGORITHM for the part and PRESETS for the pattern, and those pages adopt the meanings above. **OPEN:** which X0X views survive is decided in the first serial build task.
 
 ## What the user sees
@@ -60,11 +60,12 @@ views. Its header names the song, the transport, BPM and bar.beat; below it sit 
 the role × clip grid with its cursor, and the K1–K4 strip (the cursor clip's length, mode, launch
 and swing). SELECT moves the cursor between roles, ALGORITHM along a row, SEL launches the clip
 under the cursor; the keys mirror the grid. SEQ opens the cursor clip's settings (STUDIO 5),
-creating an empty clip first if the slot is empty; HOME + hold a pad (or SEL on the cursor) clears
-with a ring (STUDIO 9); holding a loaded pad copies onto a blinking empty same-role slot
-(STUDIO 14); HOME+REC undoes and HOME+PLAY redoes with a toast (STUDIO 10). **The clip engine is
-the only audio source in every normal view** (the song home, the sound/FX/MIX/GLOBAL pages and
-LIVE), so tweaking a sound never stops the clips.
+creating an empty clip first if the slot is empty; a plain tap on a key selects and launches that
+clip at its own quantize, and **HOME + tap launches it now** (immediate, as in LIVE); HOME + hold a
+pad (or SEL on the cursor) clears with a ring (STUDIO 9); holding a loaded pad copies onto a blinking
+empty same-role slot (STUDIO 14); HOME+REC undoes and HOME+PLAY redoes with a toast (STUDIO 10). **The
+clip engine is the only audio source in every normal view** (the song home, the sound/FX/MIX/GLOBAL
+pages and LIVE), so tweaking a sound never stops the clips.
 
 ### Classic patterns: removed
 X0X's pattern editors, its pattern sequencer and its song arranger are **gone** (TCLS, owner
@@ -78,15 +79,15 @@ are still read at boot, and the inherited sound/FX/MIX/GLOBAL pages survive.
 
 ## LIVE mode
 
-### Two layers, toggled by SCL
+### Two layers, toggled by SEL
 | Layer | Keys do | Screen |
 |---|---|---|
 | **PADS** (the default) | Launch clips, laid out by the pad map | Role × clip grid with clip states |
 | **PLAY** | Play the **focused role** live, in the song's scale. OCT−/OCT+ transpose. | Role name, sound, scale, and a strip showing clip status |
 
-- The SCL LED shows the layer: off means PADS, lit means PLAY. A header badge says the same. Switching layers never changes what's playing.
+- The SEL LED shows the layer: off means PADS, lit means PLAY. A header badge says the same. Switching layers never changes what's playing.
 - **Focused role:** whichever role launched most recently. Turn ALGORITHM to step to another role.
-- **SEL does nothing in LIVE** except confirm inside overlays. **Turning SELECT does nothing in LIVE**, so a stray bump can't change anything.
+- **SEL toggles the PADS/PLAY layers** in LIVE and confirms inside overlays. **Turning SELECT does nothing in LIVE**, so a stray bump can't change anything.
 - **Simultaneous launch and play** (R11):
   - An external keyboard on TRS MIDI IN plays the focused role.
   - The FM-1's own keys can't launch and play at the same moment. The owner accepted this trade-off for v1.
@@ -160,12 +161,13 @@ Role mutes and punch FX are performance state (decided 2026-10-11). They reset w
 | Task | Gesture |
 |---|---|
 | New song | SAVE held → SONGS → `+ New song` → Empty, Starter or Copy current |
+| Launch a clip now | HOME + tap a pad: immediate, not quantized (a plain tap uses the clip's own launch setting) |
 | Open, copy, rename or delete a song | SONGS → EDIT on the song → menu. Delete is hold-to-confirm and undoable. |
 | New clip | Cursor on an empty slot. REC records from the next bar (pressing REC again closes the loop), or SEQ opens step entry. |
 | Edit a clip | SEQ cycles NOTES (or the DRUM grid) → MOTION → SETTINGS |
 | Copy a clip | Hold the source pad, then tap an empty `+` slot. To move a clip, copy it and then clear the original. |
 | Clear a clip | HOME + hold the pad for 1.5 s. A ring names the clip. Undoable. |
-| Record knob motion | Turn knobs while recording a clip. HOME + touch a knob clears that lane. |
+| Record knob motion | Turn knobs while recording a clip. HOME + touch a knob clears that lane (on the sound pages and the clip MOTION page; on the song home the K1–K4 edit the clip, so HOME + a knob does nothing there). |
 | Undo / redo | HOME+REC / HOME+PLAY. A toast names the action. |
 | Save | SAVE tap. Autosave also runs while stopped. |
 | Help | GLO + any button shows that button's card |

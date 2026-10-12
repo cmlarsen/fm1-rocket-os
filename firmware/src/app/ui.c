@@ -93,7 +93,7 @@ static void mark_dirty(void) { ui.dirty = 1; }
 /* ============================================================== T3: LIVE === */
 /* ui_live.c is included near the bottom, after the drawing helpers. Everything ui.c needs from
  * it is forward-declared here; the view enum has V_LIVE. LIVE is entered and left only by the
- * long press on PLAY (live_play_tick below), and SCL (B_SEL) toggles the PADS / PLAY layers. */
+ * long press on PLAY (live_play_tick below), and SEL (B_SEL) toggles the PADS / PLAY layers. */
 static int  live_mode(void);                 /* ui.view == V_LIVE */
 static void live_play_tick(uint32_t btn);    /* PLAY: short = transport, long = in/out of LIVE */
 static int  live_holding(void);              /* the enter/leave ring is filling */
@@ -135,6 +135,7 @@ int  studio_cursor_clip(void);                /* the clip under the cursor, -1 n
 int  studio_cursor_role(void);
 void studio_set_cursor(int role, int col);    /* the runner's test setup */
 static int  studio_holding(void);             /* a clear/copy hold is in progress */
+void studio_drop_tap(void);                   /* forget a pending HOME + pad tap (no late launch) */
 void studio_tick(void);                        /* the clear / copy hold timers */
 int  studio_cursor(void);                      /* packed role<<8 | clip, for the runner */
 static void studio_sound_key(int k, int down); /* the sound page's keys audition the role */
@@ -1601,7 +1602,9 @@ static void motion_touch(pref_t r)
     }
 }
 
-/* SAVE held + a sound knob: forget its motion in this pattern */
+/* HOME held + a sound knob: forget its motion in this pattern (the X0X SAVE + knob combo is gone
+ * with Classic; TCLS left no X0X lane that can still be allocated, so this answers "no motion").
+ * T7b's clip editor clears a clip's own lane the same way (ui_clip.c's clip_motion_knob). */
 static void motion_forget(pref_t r)
 {
     int part, k;
@@ -2553,8 +2556,8 @@ static void input(void)
             }
             continue;
         }
-        if (ui.btn & (1u << B_SAVE)) {                  /* SAVE + knob: forget that knob's motion */
-            ui.btn_used |= 1u << B_SAVE;
+        if (ui.btn & (1u << B_HOME)) {                  /* HOME + knob: forget that knob's motion */
+            ui.btn_used |= 1u << B_HOME;
             motion_forget(pg.r[cur_page()][i]);
             continue;
         }
@@ -3629,7 +3632,10 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
     }
     return C_DIM;
 }
-#define FOOT_Y 71                     /* in the knob row: its last line, in the tiny face */
+#define FOOT_Y 70                     /* in the knob row: its last line, in the tiny face. One row
+                                       * higher than the caps alone need, so a lowercase descender
+                                       * reaches row 82, not past the 82 px knob strip
+                                       * (tests/lint/check_layout.py). */
 static void draw_footer(void)
 {
     const char *a, *b, *c;
@@ -3930,7 +3936,7 @@ static void leds(void)
         b |= 1u << B_SAVE;
     if (proj.set.keyled) {                           /* bright: on / chosen; dim: there, not chosen */
         if (ui.view == V_LIVE) {
-            live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SCL shows the layer */
+            live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SEL shows the layer */
         } else if (ui.view == V_STUDIO) {
             studio_leds(&b, &k, &d);                 /* T7a: the clip grid's states on the keys */
         } else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {

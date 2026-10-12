@@ -1,0 +1,26 @@
+# TPOL: HOME + a sound knob is the motion-lane gesture everywhere (Classic is gone, so the X0X
+# SAVE+knob combo is too). With no X0X lane left to clear, the gesture answers "NO MOTION ON ...";
+# SAVE + the knob does nothing, and HOME + the knob does not go back.
+wait 300
+newsong 0
+cursor 0 0
+tap EDIT
+expect view 1
+expect part 0
+# SAVE + the knob is no longer the gesture
+press SAVE
+spin K1 20
+wait 100
+expect msg 0
+release SAVE
+wait 1500
+expect msg 0
+# HOME + the knob is the gesture: it says so and stays on the page
+press HOME
+spin K1 20
+wait 100
+expect msg 1
+release HOME
+wait 100
+expect view 1
+dump motion_knob_home.json

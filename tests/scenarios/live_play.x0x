@@ -1,4 +1,4 @@
-# T3 LIVE, the PLAY layer: SCL toggles layers, the keys play the focused role, and leaving LIVE
+# T3 LIVE, the PLAY layer: SEL toggles layers, the keys play the focused role, and leaving LIVE
 # hands the transport back to X0X's sequencer with no hung note.
 wait 300
 # TCLS: the boot song is the Starter template, so BASS and LEAD have clips.
@@ -9,7 +9,7 @@ release PLAY
 wait 50
 expect mode 1
 expect layer 0
-# SCL toggles to the PLAY layer
+# SEL toggles to the PLAY layer
 tap SEL
 expect layer 1
 shot live_play.png

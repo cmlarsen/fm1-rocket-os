@@ -19,13 +19,13 @@ typedef struct { const char *l[HELP_CARD_LINES]; } help_card_t;
  * the report lists where the two disagree (the text follows the model, the code is unchanged). */
 static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
 [HELP_CTX_STUDIO] = {
-    [B_FX]   = {{"the FX page", "tap again: next page", "HOME+FX: reset all FX"}},
+    [B_FX]   = {{"the FX page", "tap again: next page", "the punch FX are in LIVE"}},
     [B_SEL]  = {{"launch the cursor clip", "hold 1.5 s: clear it", "in a list: run the row"}},
     [B_ENV]  = {{"no action here", "the sound lives on EDIT"}},
     [B_LFO]  = {{"the mixer and master", "tap again: next page"}},
     [B_EDIT] = {{"the cursor role's sound", "drums 909, bass 303,", "chords FM6, FX NOISE"}},
     [B_GLO]  = {{"settings; tap again:", "close", "GLO + a button: its card"}},
-    [B_HOME] = {{"the song home (root)", "HOME + pad: clear the clip", "HOME+REC undo +PLAY redo", "hold: the cheat sheet"}},
+    [B_HOME] = {{"the song home (root)", "HOME + tap: launch now", "HOME + hold: clear the clip", "hold: the cheat sheet"}},
     [B_SAVE] = {{"save now", "hold 0.6 s: the songs", "stopped: it autosaves"}},
     [B_ARP]  = {{"no action here", "TB-3PO is gone"}},
     [B_SEQ]  = {{"new clip: REC, or step it", "the cursor clip's settings", "tap again: next page"}},
@@ -39,7 +39,7 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
     [B_SEL]  = {{"SEL toggles the layers", "off: PADS, lit: PLAY", "in SETUP: open the row"}},
     [B_ENV]  = {{"no action in LIVE"}},
     [B_LFO]  = {{"no action in LIVE"}},
-    [B_EDIT] = {{"EDIT: setup / EDIT again: done", "hold key + PRESETS: assign", "ALGO: change row value", "MIDI, clock, lock, take"}},
+    [B_EDIT] = {{"EDIT: setup, EDIT: done", "SELECT row, ALGO value", "SEL: assign keys or take", "clock, MIDI, lock, take"}},
     [B_GLO]  = {{"GLO + a button: its card", "nothing else in LIVE"}},
     [B_HOME] = {{"HOME + tap a pad:", "launch it now", "hold: the cheat sheet", "HOME never exits LIVE"}},
     [B_SAVE] = {{"no action in LIVE", "the song saves when stopped"}},
@@ -69,22 +69,31 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
 };
 
 /* the cheat sheet: the HOME combos of a context (key, tap/hold/touch, what it does). STUDIO is
- * Sys-Shift's six rows; LIVE is the same minus the editing rows (pad hold, knob-lane touch). */
-typedef struct { const char *key, *mod, *does; } help_row_t;
+ * Sys-Shift's five rows; LIVE is the same minus the editing rows (pad hold, knob-lane touch).
+ * `lane` marks the row that only makes sense where the knobs have a motion lane (the sound pages
+ * and the clip MOTION page), so the song home does not claim it. */
+typedef struct { const char *key, *mod, *does; uint8_t lane; } help_row_t;
 static const help_row_t SHEET_STUDIO[] = {
-    {"REC",    "tap",   "undo"},
-    {"PLAY",   "tap",   "redo"},
-    {"PAD",    "tap",   "launch now"},
-    {"PAD",    "hold",  "clear clip"},
-    {"K1-K4",  "touch", "clear knob lane"},
-    {"FX",     "tap",   "reset all FX"}
+    {"REC",    "tap",   "undo",            0},
+    {"PLAY",   "tap",   "redo",            0},
+    {"PAD",    "tap",   "launch now",      0},
+    {"PAD",    "hold",  "clear clip",      0},
+    {"K1-K4",  "touch", "clear knob lane", 1}
 };
 static const help_row_t SHEET_LIVE[] = {
-    {"REC",  "tap", "undo"},
-    {"PLAY", "tap", "redo"},
-    {"PAD",  "tap", "launch now"},
-    {"FX",   "tap", "reset all FX"}
+    {"REC",  "tap", "undo",          0},
+    {"PLAY", "tap", "redo",          0},
+    {"PAD",  "tap", "launch now",    0},
+    {"FX",   "tap", "reset all FX",  0}
 };
+
+/* The K1-K4 lane row applies only where HOME + a knob clears a lane: the sound pages
+ * (V_PART/V_SOUND) and the clip MOTION page. On the song home and the settings/notes pages the
+ * knobs edit the clip, so the row is hidden and the gesture answers "NO LANES HERE". */
+static int help_knob_lanes_here(void)
+{
+    return ui.view == V_PART || ui.view == V_SOUND || ui.view == V_CLIPMOTION;
+}
 
 static const help_card_t *help_card_for(int ctx, int b)
 {
@@ -219,6 +228,8 @@ static void help_draw_sheet(int band)
     int n = HELP_SHEET_N(ctx), i;
     for (i = 0; i < n; i++) {
         int32_t abs = HELP_SHEET_Y0 + i * HELP_SHEET_STEP, y = abs - band * BAND_H, cw, x;
+        if (rows[i].lane && !help_knob_lanes_here())
+            continue;                                    /* skip the lane row where there is no lane */
         if (y <= -HELP_SHEET_H || y >= BAND_H)
             continue;
         box(4, y, 232, HELP_SHEET_H, TOK_SURF);
@@ -279,7 +290,6 @@ void help_draw_songs(void)
 
 int help_footer(const char **a, const char **b, const char **c)
 {
-    /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
     if (hlp.sheet) {
         *a = "HOLDING HOME";
         *b = "TAP HOME: BACK";

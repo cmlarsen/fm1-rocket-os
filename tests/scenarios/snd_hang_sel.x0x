@@ -1,4 +1,4 @@
-# T7a round 2: in LIVE's PLAY layer, holding a key across the SCL layer toggle still releases the
+# T7a round 2: in LIVE's PLAY layer, holding a key across the SEL layer toggle still releases the
 # note the key started when it is let go.
 wait 300
 tap SEQ
@@ -13,7 +13,7 @@ wait 20
 expect mode 1
 tap SEL
 expect layer 1
-events snd_hang_scl_events.txt
+events snd_hang_sel_events.txt
 key 2 down
 wait 100
 tap SEL
@@ -22,5 +22,5 @@ key 2 up
 wait 300
 eventsstop
 expect bassheld 0
-dump snd_hang_scl.json
+dump snd_hang_sel.json
 tap PLAY

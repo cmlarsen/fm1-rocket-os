@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* T3: the LIVE view. Included by ui.c (like undo.c) so it can draw with the same helpers; it
  * is the PADS layer (a role x clip grid on the keys) and the PLAY layer (the keys play the
- * focused role), toggled by SCL. The state itself is plain bytes; the song and the clip engine
+ * focused role), toggled by SEL. The state itself is plain bytes; the song and the clip engine
  * belong to live_bridge.c. Screens follow design/project/Live-Pads-*.dc.html, Live-Play.dc.html,
  * Header.dc.html and PadGrid.dc.html, at 1:1. */
 #include "live_bridge.h"
@@ -426,7 +426,7 @@ static int live_handle_button(int b)
             say("PLAY", 0);
         }
         break;
-    case B_SEL:                                            /* SCL toggles the layers; on the card: play */
+    case B_SEL:                                            /* SEL toggles the layers; on the card: play */
         if (take_open) {
             if (live_bridge_take_has()) {
                 live_bridge_take_play();
@@ -526,7 +526,7 @@ static void live_input(void)
 }
 
 /* ---- the LEDs: off (empty), dim (loaded), on (playing), fast blink (queued to start),
- * slow blink (queued to stop). SCL is lit on the PLAY layer. ---- */
+ * slow blink (queued to stop). SEL is lit on the PLAY layer. ---- */
 
 static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
 {
@@ -550,7 +550,7 @@ static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
         return;
     }
     if (live.layer == LIVE_PLAY)
-        *btn |= 1u << B_SEL;                               /* the SCL LED: off = PADS, lit = PLAY */
+        *btn |= 1u << B_SEL;                               /* the SEL LED: off = PADS, lit = PLAY */
     for (k = 0; k < NKEYS; k++) {
         int clip, role, play, q, qstart, qstop;
         if (live.layer == LIVE_PLAY) {                     /* the keyboard: its Cs dim, to find your place */
@@ -644,7 +644,7 @@ static void live_draw_header(void)
 
 static uint16_t live_footer(const char **a, const char **b, const char **c)
 {
-    /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
+    /* the design's lowercase; FOOT_Y leaves room for the descenders (ui.c) */
     *a = *b = *c = 0;
     if (live_bridge_take_recording() || live_bridge_take_armed()) {
         *a = "REC STOP";
@@ -668,18 +668,18 @@ static uint16_t live_footer(const char **a, const char **b, const char **c)
         return C_DIM;
     }
     if (fx_layer_active()) {
-        *a = "TAP LATCH";
-        *b = "HOME+FX RESET";
+        *a = "tap latch hold moment";
+        *b = "HOME+FX reset";
     } else if (live.layer == LIVE_PLAY) {
         static char t[24];
         char *q;
-        q = put_s(t, "KEYS PLAY ");
+        q = put_s(t, "keys play ");
         put_s(q, LV_ROLE_L[live.focus]);
         *a = t;
-        *b = "SEL PADS";
+        *b = "SEL pads";
     } else {
-        *a = "SEL PLAY";
-        *b = "HOLD PLAY EXIT";
+        *a = "SEL play";
+        *b = "hold PLAY exit";
     }
     return C_DIM;
 }

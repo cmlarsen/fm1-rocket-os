@@ -1,5 +1,5 @@
-# TLSET r1: a live note on an assigned key is recorded into the take and pinned (takedump). The
-# replay's own note stream is not compared: it starts 256 samples early (a T9i offset, see the report).
+# TLSET r1: a live note on an assigned key is recorded into the take and pinned (takedump), and
+# TPOL: the replay's note stream now matches the recording event for event (eventscmp).
 wait 300
 tap GLO
 tap SEL
@@ -39,8 +39,11 @@ expect takehas 1
 takedump take_rec.txt
 tap PLAY
 wait 400
+eventsnotes play_notes.txt
 takeplay
 waitbarabs 7
+eventsstop
+eventscmp rec_notes.txt play_notes.txt
 tap PLAY
 wait 300
 expect heldnotes 0

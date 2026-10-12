@@ -18,7 +18,7 @@ Related: [requirements](requirements.md) · [interaction model](interaction-mode
 ## 3. Few combos, and no two-handed holds while performing
 - There is no physical Shift key. **HOME acts as Shift** (hold) and as Back (tap), and the hold shows its own cheat sheet ([GrooveOS](../research/grooveos.md#control-model)).
 - Any layer reached by holding a button can also be **latched** (double-tap), so performing never needs two hands held down ([sentiment §3](../research/community-sentiment.md#3-hidden-hold-combos-with-no-physical-shift-key)).
-- **The same control does the same job on every screen.** Fixed roles: SELECT scrolls, ALGORITHM moves the cursor and sets values, SEL confirms, HOME goes back. This is Baud Girl's consistency rule, the most-praised UX trait. LIVE switches layers with SCL, so SEL keeps meaning "confirm".
+- **The same control does the same job on every screen.** Fixed roles: SELECT scrolls, ALGORITHM moves the cursor and sets values, SEL confirms, HOME goes back. This is Baud Girl's consistency rule, the most-praised UX trait. **The one exception is SEL in LIVE:** it toggles the PADS/PLAY layers on the performance screen and confirms inside LIVE's overlays, so a SEL press never means two things on the same screen at once.
 - **Every gesture has one meaning.** HOME hold always means SHIFT and the cheat sheet. A long press on PLAY is the only way in or out of LIVE. Holding a pad means copy, or clear when combined with HOME.
 
 ## 4. The screen explains itself
@@ -41,7 +41,7 @@ Related: [requirements](requirements.md) · [interaction model](interaction-mode
 ## 7. Recording is playing
 - You start recording by playing, with no setup. An empty clip plus REC records from the next bar, and pressing again closes the loop.
 - **Capture after the fact:** you can keep what you just played even if REC was off (GrooveOS, Melodee, Ableton Capture).
-- Knob moves made while recording are stored. Each recorded knob lane can be seen and can be cleared on its own (modifier + touch the knob).
+- Knob moves made while recording are stored. Each recorded knob lane can be seen and can be cleared on its own (HOME + the knob).
 
 ## 8. Saving is boring and reliable
 - **One state per song.** The song on screen is the song. It autosaves while stopped and silent, because flash writes stall audio, and SAVE tap writes it immediately. There is no separate "saved copy" that can disagree with what you hear. Undo is the safety net.

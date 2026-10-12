@@ -1,0 +1,25 @@
+# TPOL: the clip MOTION page's live motion lane clears with HOME + that knob (the same gesture as
+# the sound pages). One lane, then HOME + K1 removes it.
+wait 300
+newsong 0
+cursor 1 0
+tap REC
+expect recrec 1
+tap SEQ
+expect view 14
+wait-bar 1
+spin K1 30
+wait 250
+spin K1 30
+wait 250
+tap REC
+wait-bar 2
+expect recrec 0
+expect mlany7.0 1
+# HOME + K1 clears lane 0
+press HOME
+spin K1 10
+release HOME
+wait 100
+expect mlany7.0 0
+dump studio_motion_clear.json

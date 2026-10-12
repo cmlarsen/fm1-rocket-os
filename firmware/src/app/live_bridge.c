@@ -33,7 +33,9 @@ static uint8_t g_stop_q[NROLES];                      /* a stop on the role is p
 static take_t g_take LIVE_POOL;                       /* 16,436 B: the song's one take */
 static uint8_t g_take_arm_at_start;                   /* REC while stopped: start at the next PLAY */
 static uint8_t g_bar_identity;                        /* the arm-to-start bar function (see below) */
-static uint32_t g_take_block_base;                    /* the block base the sink's offsets add to */
+static uint32_t g_take_block_end;                     /* the block's end: the T2a tap's sample for
+                                                       * a command the ISR applies at the block's
+                                                       * first frame (drain logs it there too) */
 static uint8_t g_take_live;                           /* T9i: LIVE is active: the take may record */
 static volatile uint8_t g_take_end_req;               /* the ISR's natural take end, polled by the main loop */
 static uint8_t g_take_reload_req;                     /* an arm was cancelled: reload the song's take (NIT) */
@@ -141,6 +143,7 @@ static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
 {
     uint32_t type = TAKE_CMD_TYPE(cmd), a = TAKE_CMD_A(cmd), b = TAKE_CMD_B(cmd), c = TAKE_CMD_C(cmd);
     (void)ctx;
+    (void)sample;                                     /* the tap uses the block end, not the offset */
     if (type < 12u) {
         engine_take_cmd(cmd);
     } else if (type == TAKE_T_LAUNCH) {
@@ -160,7 +163,11 @@ static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
         clip_engine_take_bpm(&g_eng, (uint16_t)TAKE_MARK_TEMPO_GET(b, c));
     }
     if (engine_tap)
-        engine_tap(g_take_block_base + sample, cmd);
+        engine_tap(g_take_block_end, cmd);            /* T2a logs a drained command at the block's
+                                                       * end; the replay must report the same sample
+                                                       * (the note is applied at the block's first
+                                                       * frame either way), or eventscmp sees the
+                                                       * recorded and replayed notes one block apart */
 }
 
 /* Reset the clip transport to bar 0 before a playback pass, without a render in between. */
@@ -507,7 +514,7 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
     take_tick(&g_take, base);
     if (!take_playing(&g_take))
         return;
-    g_take_block_base = base;
+    g_take_block_end = base + nframes;
     sink.ev = take_sink_ev;
     sink.ctx = 0;
     take_render(&g_take, nframes, &sink);
