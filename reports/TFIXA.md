@@ -62,3 +62,26 @@ existing mask/snapshot contract.
 Code is committed through `06388aa`; final committed-tree host units, scenarios and
 screen lint passed. The final long fuzz and firmware/loader ladder is in progress;
 this section will be replaced with its measured results before completion is reported.
+
+## r1 — Opus review follow-ups
+
+The Opus r1 review's repros (`repro_r1/`) are folded into the committed tests and the
+directory is removed. The branch merged `integration` (only `tools/orca/health.py`).
+
+| Finding | Change | Test that failed before the fix |
+| --- | --- | --- |
+| **B1** MIDI Stop→Start silences a role after a cancelled launch | In `consume_cmds` the second-press cancel clears the matching staged copy (`next_set[role]` when `next_clip[role] == target`), so `relaunch_stage()` no longer skips the role. The write is ISR-side; the main loop's staging that could set it runs under `engine_crit`. | `clip_engine_test.c` `tfixa_checks`: launch 12, launch 13, launch 13 again (cancel), Stop, Start → `cur[LEAD] == 12`, `take_drop == 0`. Before: `cur=255 drop=1`. |
+| **S1** the ISR baseline wiped offset-0 events | `take_refresh_setup` recaptures only the dynamic state **in place** (`n = 1`, rewrite `[1, state_n)`); the parameter mirror and any events already appended at offset 0 survive. | `live_bridge_test.c` `tfixa_stop_at_start_test`: a role Stop drained in the block whose base is the take start is recorded (`lead_stop_after_phase()`). Before: not recorded. |
+| **S2** the ISR baseline ran the ~300-event parameter prelude | The prelude is split: `bridge_prelude` (clip/phase per role, mutes, tempo, FX) runs at arm and again at the boundary; `bridge_prelude_params` (the sound mirror) runs once at arm on the main loop. `take_set_prelude_params` registers it. | `live_bridge_test.c` `tfixa_isr_prelude_test`: counts `take_put()` calls in the start block; must be `<= 2*NROLES + 8`. Before: the mirror was included. |
+| **N1** non-atomic safety-latch RMW | `push_cmd` runs the latch read-modify-write inside an installable interrupt mask (`clip_engine_set_crit`, installed by `live_bridge_init` with `engine_crit_enter/exit`; a null hook is a no-op for the standalone host units). | `live_bridge_test.c` `tfixa_latch_crit_test`: a counting hook proves a push takes the mask. |
+| **N2** the 64-bit lint missed the fast/least/`__` types | `WIDE` in `tools/check_no_64_div.py` also matches `u?int_fast64_t`, `u?int_least64_t` and `__u?int64_t`. | `tests/lint/no_64_div_test.py` folds the reviewer's probes (`uint_fast64_t`, `uint_least64_t`, `__uint64_t`, the `unsigned long long` cast, the struct member) as positives and the multiline-return probe as a negative. |
+| **N3** `take_arm_if_pending()` read `g_eng` outside `engine_crit` | `live_bridge_transport_restart/continue` call it inside the same `engine_crit` section as the transport command (it already is for `transport_start`). | Structural (its `g_eng` reads in `bridge_bar_fn`/`take_arm` are now masked on every call path); no dedicated test. |
+
+### Measured ladder (committed tree)
+
+`make unit unit-core scenarios screens-lint fuzz-ui check fw fw-debug` all pass;
+`tools/check_loader.sh` passes on `build/x0x.fwsc` and `build/debug/x0x.fwsc`. Release
+and debug both report pool spare 42,088 B (`301,976 B of 344,064`) and no forbidden
+symbols. No golden file changed: the arm prelude order (`state` then `params`) is
+unchanged, and the boundary refresh now keeps the arm-time parameter mirror (identical
+values in the scenarios) instead of rewriting it in the ISR. No hardware was flashed.
