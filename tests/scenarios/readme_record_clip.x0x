@@ -1,0 +1,56 @@
+# TDOC: the README's "Record a clip" section. Put the cursor on an empty slot, press REC to
+# record from the next bar, and press REC again to close the loop. SEQ is the step-entry
+# alternative. Shots: the empty slot, the pass recording, the finished clip, and step entry.
+wait 300
+newsong 1
+cursor 0 4
+expect studioclip 4
+expect clipused4 0
+wait 1400
+shot readme_record_empty.png
+
+# --- with the transport running, REC arms a pass from the next bar ---
+tap PLAY
+wait-bar 1
+tap REC
+expect view 13
+expect editclip 4
+expect recrec 1
+wait-bar 1
+# finger-drum a few hits a beat apart so they land on different steps
+key w0 down
+key w0 up
+wait 480
+key w4 down
+key w4 up
+wait 480
+key w1 down
+key w1 up
+wait 480
+key w3 down
+key w3 up
+wait 120
+shot readme_record_rec.png
+# --- REC again closes the loop at the next bar; the clip launches and plays ---
+tap REC
+wait-bar 2
+expect recrec 0
+expect clipused4 1
+expect liveclip0 4
+expect drumhits4 >0
+shot readme_record_clip.png
+tap PLAY
+expect playing 0
+
+# --- the alternative: SEQ on an empty slot opens step entry (the notes page here) ---
+tap HOME
+expect view 10
+cursor 2 3
+expect clipused15 0
+tap SEQ
+expect view 13
+expect editclip 15
+wait 1400
+shot readme_record_notes.png
+tap HOME
+dump readme_record.json

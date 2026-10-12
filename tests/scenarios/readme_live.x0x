@@ -1,0 +1,121 @@
+# TDOC: the README's "LIVE as a launchpad" section. The PADS layer launches clips at their
+# quantize point; tap the playing clip to stop it; HOME + tap launches now; SEL switches to the
+# PLAY layer. FX shows the punch effects and role mutes; HOME+FX resets them. EDIT opens LIVE
+# SETUP (assign keys, launch default, stage lock, MIDI, clock in, the take). REC records the
+# take; the take card plays it; holding REC clears it with a ring.
+# Shots: a queued pad, the PLAY layer, the FX layer, LIVE SETUP, assign keys, the take card and
+# the clear-take ring.
+wait 300
+newsong 1
+# --- enter LIVE and start the transport ---
+press PLAY
+wait 700
+release PLAY
+wait 1400
+expect mode 1
+expect layer 0
+tap PLAY
+expect playing 1
+wait 1400
+
+# --- PADS: tap a pad; it waits for its quantize point and blinks ---
+tapkey 0
+expect liveque0 0
+shot readme_live_queued.png
+wait-bar 1
+expect liveclip0 0
+# --- tap the playing clip to stop it (also quantized) ---
+tapkey 0
+expect livestop0 1
+wait-bar 1
+expect liveclip0 -1
+# --- HOME + tap launches immediately ---
+press HOME
+tapkey 1
+release HOME
+wait 250
+expect liveclip0 1
+
+# --- SEL toggles the PLAY layer; the keys then play the focused role ---
+tap SEL
+expect layer 1
+shot readme_live_play.png
+tap SEL
+expect layer 0
+
+# --- the punch FX layer: tap to latch, hold for momentary; upper keys mute roles ---
+press FX
+wait 100
+shot readme_live_fx.png
+key w0 down
+wait 100
+key w0 up
+wait 100
+expect fxlatch0 1
+key 16 down
+wait 100
+key 16 up
+wait 100
+expect fxmute0 1
+release FX
+wait 1400
+expect fxlatch0 1
+# HOME + FX resets every effect
+press HOME
+tap FX
+release HOME
+expect fxlatch0 0
+
+# --- record the take: REC arms it from the next bar ---
+tap REC
+wait-bar 1
+expect takerec 1
+tapkey 2
+wait-bar 1
+tap REC
+wait-bar 2
+expect takehas 1
+expect takestate 0
+
+# --- LIVE SETUP: EDIT opens the list ---
+tap EDIT
+wait 200
+shot readme_live_setup.png
+# assign keys: SEL opens the screen; hold a key, turn PRESETS, release to commit
+tap SEL
+wait 200
+key 0 down
+turn PRESET 5 80
+shot readme_live_assign.png
+key 0 up
+wait 100
+expect keyclip0 5
+wait 1400
+tap HOME
+# the Take row: SEL opens the take card; SEL plays it, PLAY stops it
+turn SELECT 6
+tap SEL
+wait 300
+shot readme_live_take.png
+tap SEL
+wait 400
+expect takeplaying 1
+tap PLAY
+wait 1400
+expect takeplaying 0
+# hold REC to clear the take: the ring fills over 1.5 s
+press REC
+wait 750
+shot readme_live_clear_take.png
+wait 1000
+release REC
+wait 100
+expect takehas 0
+tap EDIT
+wait 200
+press PLAY
+wait 700
+release PLAY
+wait 1400
+expect mode 0
+dump readme_live.json

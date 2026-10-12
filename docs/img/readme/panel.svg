@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" role="img" aria-label="The FM-1 panel: the knobs, the two rows of buttons with SEL, EDIT, HOME, SEQ, PLAY and REC highlighted, and the 27 keys">
+<style>.lbl{font:600 18px 'Barlow Semi Condensed','Arial Narrow',Arial,sans-serif;fill:#e8e8ea;letter-spacing:.05em}.hi{fill:#f0a043}.cap{font:500 17px 'Barlow Semi Condensed','Arial Narrow',Arial,sans-serif;fill:#9aa0a8;letter-spacing:.03em}</style>
+<rect x="4" y="4" width="992" height="712" rx="40" fill="#2b2d31" stroke="#44474c" stroke-width="2"/>
+<rect x="300" y="44" width="236" height="236" rx="10" fill="#0c0d10" stroke="#44474c" stroke-width="2"/>
+<text x="418" y="170" text-anchor="middle" class="cap">240 x 240 screen</text>
+<circle cx="105" cy="92" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="105" y1="73" x2="105" y2="83" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="105" y="52" text-anchor="middle" class="lbl">MASTER</text>
+<circle cx="215" cy="92" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="215" y1="73" x2="215" y2="83" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="215" y="52" text-anchor="middle" class="lbl">SELECT</text>
+<circle cx="105" cy="210" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="105" y1="191" x2="105" y2="201" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="105" y="170" text-anchor="middle" class="lbl">PRESETS</text>
+<circle cx="215" cy="210" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="215" y1="191" x2="215" y2="201" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="215" y="170" text-anchor="middle" class="lbl">ALGORITHM</text>
+<circle cx="610" cy="92" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="610" y1="73" x2="610" y2="83" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="610" y="52" text-anchor="middle" class="lbl">KNOB 1</text>
+<circle cx="714" cy="92" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="714" y1="73" x2="714" y2="83" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="714" y="52" text-anchor="middle" class="lbl">KNOB 2</text>
+<circle cx="818" cy="92" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="818" y1="73" x2="818" y2="83" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="818" y="52" text-anchor="middle" class="lbl">KNOB 3</text>
+<circle cx="922" cy="92" r="29" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<line x1="922" y1="73" x2="922" y2="83" stroke="#e8e8ea" stroke-width="3" stroke-linecap="round"/>
+<text x="922" y="52" text-anchor="middle" class="lbl">KNOB 4</text>
+<rect x="72" y="294" width="82" height="38" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="113" y="319" text-anchor="middle" class="lbl">OCT-</text>
+<rect x="170" y="294" width="82" height="38" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="211" y="319" text-anchor="middle" class="lbl">OCT+</text>
+<text x="163" y="360" text-anchor="middle" class="cap">octave / steps</text>
+<rect x="582" y="158" width="54" height="48" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="609" y="189" text-anchor="middle" class="lbl">FX</text>
+<rect x="645" y="158" width="54" height="48" rx="8" fill="#2a2418" stroke="#f0a043" stroke-width="2"/>
+<text x="672" y="189" text-anchor="middle" class="lbl hi">SEL</text>
+<rect x="708" y="158" width="54" height="48" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="735" y="189" text-anchor="middle" class="lbl">ENV</text>
+<rect x="771" y="158" width="54" height="48" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="798" y="189" text-anchor="middle" class="lbl">LFO</text>
+<rect x="834" y="158" width="54" height="48" rx="8" fill="#2a2418" stroke="#f0a043" stroke-width="2"/>
+<text x="861" y="189" text-anchor="middle" class="lbl hi">EDIT</text>
+<rect x="897" y="158" width="54" height="48" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="924" y="189" text-anchor="middle" class="lbl">GLO</text>
+<rect x="582" y="264" width="54" height="48" rx="8" fill="#2a2418" stroke="#f0a043" stroke-width="2"/>
+<text x="609" y="295" text-anchor="middle" class="lbl hi">HOME</text>
+<rect x="645" y="264" width="54" height="48" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="672" y="295" text-anchor="middle" class="lbl">SAVE</text>
+<rect x="708" y="264" width="54" height="48" rx="8" fill="#26282c" stroke="#44474c" stroke-width="2"/>
+<text x="735" y="295" text-anchor="middle" class="lbl">ARP</text>
+<rect x="771" y="264" width="54" height="48" rx="8" fill="#2a2418" stroke="#f0a043" stroke-width="2"/>
+<text x="798" y="295" text-anchor="middle" class="lbl hi">SEQ</text>
+<rect x="834" y="264" width="54" height="48" rx="8" fill="#2a2418" stroke="#f0a043" stroke-width="2"/>
+<text x="861" y="295" text-anchor="middle" class="lbl hi">PLAY</text>
+<rect x="897" y="264" width="54" height="48" rx="8" fill="#2a2418" stroke="#f0a043" stroke-width="2"/>
+<text x="924" y="295" text-anchor="middle" class="lbl hi">REC</text>
+<rect x="36" y="400" width="928" height="270" rx="14" fill="#232529" stroke="#44474c" stroke-width="2"/>
+<rect x="54.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="110.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="167.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="223.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="280.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="336.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="393.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="449.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="506.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="562.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="619.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="675.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="732.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="788.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="845.2" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="901.7" y="516.1" width="44.1" height="140.4" rx="6" fill="#e8e8ea" stroke="#b9bbc0" stroke-width="1"/>
+<rect x="82.5" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="139.0" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="195.5" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="308.5" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="365.0" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="478.0" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="534.5" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="591.0" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="704.0" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="760.5" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<rect x="873.5" y="416.2" width="44.1" height="89.1" rx="5" fill="#26282c" stroke="#000" stroke-width="1"/>
+<text x="500" y="690" text-anchor="middle" class="cap">The six buttons this guide uses are orange: SEL, EDIT, HOME, SEQ, PLAY, REC.  The keys are F3 to G5 (27 keys).</text>
+</svg>
