@@ -99,7 +99,7 @@ typedef struct {
 
     /* Single-producer / single-consumer command ring (UI writer, ISR reader). */
     uint32_t cmd_drops;
-    volatile uint8_t safety_pending; /* full-ring Stop / mute-clear, after older entries */
+    volatile uint8_t safety_pending; /* full-ring transport/role Stops and mute-clear, after older entries */
     clip_cmd_t cmd[CLIP_CMD_RING];
     volatile uint8_t cmd_head;   /* producer writes here */
     volatile uint8_t cmd_tail;   /* consumer reads here */

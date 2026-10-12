@@ -439,6 +439,12 @@ static void tfixa_checks(void)
     clip_engine_render(&eng, 1, &SINK);
     if (eng.playing) { puts("TFIXA FAIL saturated Stop"); case_fail++; }
 
+    clip_engine_init(&eng, &song);
+    for (i = 0; i < 20; i++) clip_engine_queue_bpm_soft(&eng, 1200);
+    for (i = 0; i < NROLES; i++)
+        if (clip_engine_stop(&eng, (uint8_t)i) != 0) { puts("TFIXA FAIL saturated role Stop"); case_fail++; }
+    clip_engine_render(&eng, 1, &SINK);
+
     for (i = 0; i < 2; i++) {
         clip_engine_init(&eng, &song);
         clip_engine_launch_now(&eng, 12);

@@ -372,14 +372,15 @@ static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, 
     if (clip_engine_isr)               /* T9i r1: an ISR-side path must never push onto this ring */
         __builtin_trap();
 #endif
-    uint8_t safety = cmd == CLIP_CMD_TRANSPORT_STOP ? 1u : cmd == CLIP_CMD_MUTE_CLEAR ? 2u : 0u;
+    uint8_t safety = cmd == CLIP_CMD_TRANSPORT_STOP ? 1u : cmd == CLIP_CMD_MUTE_CLEAR ? 2u : cmd == CLIP_CMD_STOP ? (uint8_t)(4u << clip) : 0u;
     uint8_t used = (uint8_t)((head + CLIP_CMD_RING - e->cmd_tail) % CLIP_CMD_RING);
     if (!safety && (used >= CLIP_CMD_RING - 3u || e->safety_pending)) {
         e->cmd_drops++;
         return -1;
     }
     if (next == e->cmd_tail || e->safety_pending) {
-        e->safety_pending |= safety;
+        if (cmd == CLIP_CMD_STOP) e->safety_pending ^= safety; /* two role stops cancel */
+        else e->safety_pending |= safety;
         return 0;
     }
     e->cmd[head].cmd = cmd;
@@ -790,10 +791,16 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         clip_cmd_t c;
         uint8_t role, target;
         CLIP_BARRIER();                       /* read the head before the slot */
-        if (e->cmd_tail == head)
-            break;
-        c = e->cmd[e->cmd_tail];
-        e->cmd_tail = (uint8_t)((e->cmd_tail + 1u) % CLIP_CMD_RING);
+        if (e->cmd_tail == head) {
+            uint8_t r;
+            if (!(e->safety_pending & 0x7Cu)) break;
+            for (r = 0; r < NROLES; r++) if (e->safety_pending & (4u << r)) break;
+            e->safety_pending &= (uint8_t)~(4u << r);
+            c.cmd = CLIP_CMD_STOP; c.clip = r; c.quant = Q_END; c.bpm_x10 = 0; c.at = 0;
+        } else {
+            c = e->cmd[e->cmd_tail];
+            e->cmd_tail = (uint8_t)((e->cmd_tail + 1u) % CLIP_CMD_RING);
+        }
 
         if (c.cmd == CLIP_CMD_SET_BPM) {
             if (e->song)
