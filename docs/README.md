@@ -33,6 +33,20 @@ This folder is the project's memory: linked markdown documents that are the sour
 ## Open questions
 - [Open questions](open-questions.md): owner decisions, hardware facts to verify, tooling
 
+## Glossary
+- **STUDIO** — the build mode (after boot): make the song's roles, clips and sounds.
+- **LIVE** — the performance mode (long-press PLAY): launch clips, play, punch FX, record the take.
+- **layer (PADS / PLAY / FX)** — what the keys do in LIVE: PADS launches clips, PLAY plays the focused role, FX makes them punch effects and role mutes. SEL toggles PADS and PLAY; FX is held or double-tapped.
+- **role** — one part of a song (DRUMS, BASS, LEAD, CHORDS, NOISE/FX), with its own sound, clips and MIDI channel.
+- **clip** — a short loop or one-shot of notes (or drum hits) plus knob motion, belonging to one role.
+- **song** — the whole thing: its roles and their clips, one take, and its settings.
+- **take** — the most recent LIVE recording, stored as an event log; a song keeps one.
+- **launch** — start a clip; it replaces whatever that role was already playing.
+- **quantize** — when a launch or stop lands: the next bar (default), the next beat, or the end of the clip.
+- **stage lock** — a per-song option that blocks clearing clips from launch mode while the transport plays.
+- **punch FX** — six performance effects (repeat 1/8, repeat 1/16, tape stop, filter dive, echo throw, freeze); tap to latch, hold for momentary.
+- **motion lane** — a recorded knob move stored on a clip; HOME + that knob clears the lane.
+
 ## Conventions
 - **One topic per file.** Link related files instead of duplicating content.
 - **Research files are dated snapshots.** The FM-1 scene changes daily, so recheck facts before relying on them.

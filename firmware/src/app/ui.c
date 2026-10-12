@@ -1601,7 +1601,9 @@ static void motion_touch(pref_t r)
     }
 }
 
-/* SAVE held + a sound knob: forget its motion in this pattern */
+/* HOME held + a sound knob: forget its motion in this pattern (the X0X SAVE + knob combo is gone
+ * with Classic; TCLS left no X0X lane that can still be allocated, so this answers "no motion").
+ * T7b's clip editor clears a clip's own lane the same way (ui_clip.c's clip_motion_knob). */
 static void motion_forget(pref_t r)
 {
     int part, k;
@@ -2553,8 +2555,8 @@ static void input(void)
             }
             continue;
         }
-        if (ui.btn & (1u << B_SAVE)) {                  /* SAVE + knob: forget that knob's motion */
-            ui.btn_used |= 1u << B_SAVE;
+        if (ui.btn & (1u << B_HOME)) {                  /* HOME + knob: forget that knob's motion */
+            ui.btn_used |= 1u << B_HOME;
             motion_forget(pg.r[cur_page()][i]);
             continue;
         }
