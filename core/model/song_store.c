@@ -8,6 +8,7 @@
  * already includes lz.c. */
 #include <stdint.h>
 #include "song_store.h"
+#include "core/seq/take.h"
 
 /* T6i: this unit carries its own copy of lz.c (project.c has the other). On the device its 4 KB
  * lz_head goes to the shared .pool instead of .bss, so the table is not paid for twice in the
@@ -164,7 +165,7 @@ static uint32_t sst_put_hdr(sst_hdr_t *h, uint16_t kind, uint8_t slot, uint8_t f
 {
     int i;
     h->magic = SST_MAGIC;
-    h->version = SONG_STORE_VERSION;
+    h->version = kind == SST_KIND_TAKE ? SONG_STORE_TAKE_VERSION : SONG_STORE_VERSION;
     h->kind = kind;
     h->slot = slot;
     h->flags = flags;
@@ -182,7 +183,8 @@ static uint32_t sst_put_hdr(sst_hdr_t *h, uint16_t kind, uint8_t slot, uint8_t f
 /* header fields consistent with its kind and range: 0 = ok */
 static int sst_hdr_ok(const sst_hdr_t *h, uint32_t cap)
 {
-    if (h->magic != SST_MAGIC || h->version != SONG_STORE_VERSION)
+    if (h->magic != SST_MAGIC ||
+        (h->version != SONG_STORE_VERSION && !(h->kind == SST_KIND_TAKE && h->version == SONG_STORE_TAKE_VERSION)))
         return 0;
     if (h->slot >= SONG_STORE_SLOTS)
         return 0;
@@ -900,6 +902,18 @@ int song_store_list(const song_store_t *st, int slot, song_slot_t *out)
 
 /* ---- takes -------------------------------------------------------------- */
 
+static int take_launch_valid(uint32_t cmd, uint16_t version)
+{
+    uint32_t how, role, c;
+    if (TAKE_CMD_TYPE(cmd) != TAKE_T_LAUNCH) return 1;
+    how = TAKE_CMD_B(cmd); c = TAKE_CMD_C(cmd);
+    role = TAKE_LAUNCH_ROLE(cmd);
+    if (role >= NROLES || how > TAKE_LAUNCH_PHASE) return 0;
+    if (how != TAKE_LAUNCH_STOP && (TAKE_CMD_A(cmd) >= NCLIPS || clip_role(TAKE_CMD_A(cmd)) != role)) return 0;
+    if (how == TAKE_LAUNCH_PHASE) return version >= 2u && c < 512u;
+    return how == TAKE_LAUNCH_QUANT ? (c >> 8) < NQUANT : c < NROLES;
+}
+
 static int sst_try_take(const song_store_t *st, int ext, uint8_t slot, take_hdr_t *hdr, take_event_t *ev,
                         uint32_t max_events)
 {
@@ -934,9 +948,10 @@ static int sst_try_take(const song_store_t *st, int ext, uint8_t slot, take_hdr_
         return -1;
     {
         uint32_t k;
-        for (k = 1; k < nevents; k++)
-            if ((int32_t)(ev[k].sample - ev[k - 1u].sample) < 0)
-                return -1;
+        for (k = 0; k < nevents; k++) {
+            if (!take_launch_valid(ev[k].cmd, h.version) ||
+                (k && (int32_t)(ev[k].sample - ev[k - 1u].sample) < 0)) return -1;
+        }
     }
     return 0;
 }
@@ -989,6 +1004,11 @@ int song_store_take_save(song_store_t *st, int slot, const take_hdr_t *hdr, cons
         return -1;
     if (hdr->nevents > TAKE_MAX_EVENTS || (hdr->nevents && !ev))
         return -2;
+    {
+        uint32_t k;
+        for (k = 0; k < hdr->nevents; k++)
+            if (!take_launch_valid(ev[k].cmd, SONG_STORE_TAKE_VERSION)) return -2;
+    }
     ext = sst_pick_take_ext(st);
     if (ext < 0)
         return -3;

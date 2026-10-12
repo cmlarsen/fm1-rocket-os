@@ -620,6 +620,39 @@ static void r5_drop_recovery_test(void)
     live_bridge_exit();
 }
 
+static void tfixa_phase_test(void)
+{
+    int i, n, match;
+    live_ev_t original[128];
+    live_song_t *song;
+    live_bridge_take_init(); live_bridge_enter(); g_now = 0;
+    song = (live_song_t *)live_bridge_song();
+    memset(&song->clip[12], 0, sizeof song->clip[12]);
+    song->clip[12].used = 1; song->clip[12].len = 32; song->clip[12].nnotes = 32;
+    for (i = 0; i < 32; i++) {
+        song->clip[12].d.notes[i] = (note_t){(uint8_t)i, (uint8_t)(40+i), 100, 1};
+    }
+    song->bpm_x10 = 1200; live_bridge_song_reload();
+    live_bridge_transport_start(); run_isr_block(0, 12000);
+    live_bridge_launch_now(12); run_isr_block(12000, 5000); /* launches mid-bar, global step 3 */
+    g_now = 17000; live_bridge_take_arm();
+    run_isr_block(17000, 71200); /* recording starts at global step 16, clip step 13 */
+    ncap = 0;
+    run_isr_block(88200, 88000);
+    n = ncap; CHECK(n > 1 && n < 128);
+    memcpy(original, cap, (size_t)n * sizeof cap[0]);
+    g_now = 176200; live_bridge_take_finish();
+    live_bridge_take_play(); ncap = 0; run_isr_block(176200, 88000);
+    /* Natural end releases are outside the half-open recorded interval. */
+    while (ncap && cap[ncap-1].sample >= 88000) ncap--;
+    match = ncap == n;
+    for (i = 0; i < n && i < ncap; i++)
+        if (original[i].kind != cap[i].kind || original[i].a != cap[i].a || original[i].sample != cap[i].sample)
+            match = 0;
+    CHECK(match);
+    live_bridge_take_stop_play(); live_bridge_exit();
+}
+
 static int order_expected;
 static void order_irq(void)
 {
@@ -839,6 +872,7 @@ int main(void)
     r5_tempo_restore_test();
     r5_scan_test();
     tfixa_take_tests();
+    tfixa_phase_test();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

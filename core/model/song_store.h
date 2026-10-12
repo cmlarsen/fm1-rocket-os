@@ -59,6 +59,7 @@
 #define SONG_STORE_EXTENTS (SONG_STORE_SONG_EXTENTS + SONG_STORE_TAKE_EXTENTS)
 
 #define SONG_STORE_VERSION 1u
+#define SONG_STORE_TAKE_VERSION 2u /* phase prelude; v1 takes remain readable */
 
 /* ---- flash interface --------------------------------------------------- */
 /* Offsets are absolute flash sectors (not relative to the region). `program`

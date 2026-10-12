@@ -77,6 +77,9 @@ typedef struct {
     uint8_t  pos[NROLES];    /* step inside each role's clip */
     uint8_t  cur[NROLES];    /* playing clip, or CLIP_NONE */
     uint8_t  que[NROLES];    /* target clip of the pending action, or CLIP_NONE */
+    uint8_t que_phase[NROLES]; /* take prelude: first step of a queued launch */
+    void (*step_hook)(void *ctx, uint32_t offset); /* ISR, after role advance, before note-ons */
+    void *step_hook_ctx;
     uint8_t  que_set[NROLES];/* a queued action is pending: target que[role] */
     uint32_t que_at[NROLES]; /* global step the pending action takes effect on */
     uint8_t  muted[NROLES];  /* T10i: the role is muted (no new notes; the transport keeps running) */
@@ -238,3 +241,5 @@ uint8_t clip_engine_playing_clip(const clip_engine_t *e, uint8_t role); /* CLIP_
 uint8_t clip_engine_queued_clip(const clip_engine_t *e, uint8_t role);  /* CLIP_NONE = none  */
 uint8_t clip_engine_progress(const clip_engine_t *e, uint8_t role);     /* 0..255 through the clip */
 void    clip_engine_pos(const clip_engine_t *e, uint8_t *bar, uint8_t *beat, uint8_t *step);
+
+void clip_engine_take_phase(clip_engine_t *e, uint8_t role, uint8_t phase);

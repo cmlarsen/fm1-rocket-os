@@ -272,3 +272,15 @@ int take_has(const take_t *t)        { return t && t->n > 0; }
 uint16_t take_nevents(const take_t *t) { return t ? t->n : 0; }
 const take_hdr_t *take_header(const take_t *t) { return t ? &t->hdr : 0; }
 const take_event_t *take_events(const take_t *t) { return t ? t->ev : 0; }
+
+void take_refresh_setup(take_t *t)
+{
+    if (!t || (t->state != TAKE_ARMED && t->state != TAKE_REC)) return;
+    t->state = TAKE_IDLE;
+    t->n = 0;
+    t->arming = 1;
+    take_put(t, 0, TAKE_MARK_START);
+    if (t->pre) t->pre(t->pre_ctx, t);
+    t->arming = 0;
+    if (!t->ended) t->state = TAKE_REC;
+}

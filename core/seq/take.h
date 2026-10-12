@@ -49,11 +49,14 @@
 /* TAKE_LAUNCH: a = clip, b = how, c = role. TAKE_LAUNCH_STOP ignores a.
  * TAKE_LAUNCH_QUANT (S1): a Program Change launch, b = how, c = role | (quant << 8), so the replay
  * uses the recorded quantize rather than the clip's own. */
-enum { TAKE_LAUNCH_QUEUE, TAKE_LAUNCH_NOW, TAKE_LAUNCH_STOP, TAKE_LAUNCH_QUANT };
+enum { TAKE_LAUNCH_QUEUE, TAKE_LAUNCH_NOW, TAKE_LAUNCH_STOP, TAKE_LAUNCH_QUANT, TAKE_LAUNCH_PHASE };
 #define TAKE_LAUNCH(clip, how, role) TAKE_CMD(TAKE_T_LAUNCH, (clip), (how), (role))
 #define TAKE_LAUNCH_Q(clip, quant, role) \
     TAKE_CMD(TAKE_T_LAUNCH, (clip), TAKE_LAUNCH_QUANT, \
              ((uint32_t)(role) & 0xFFu) | (((uint32_t)(quant) & 3u) << 8))
+#define TAKE_LAUNCH_AT_PHASE(clip, role, phase) \
+    TAKE_CMD(TAKE_T_LAUNCH, (clip), TAKE_LAUNCH_PHASE, ((role) & 7u) | (((phase) & 63u) << 3))
+#define TAKE_LAUNCH_ROLE(cmd) (TAKE_CMD_B(cmd) == TAKE_LAUNCH_PHASE ? (TAKE_CMD_C(cmd) & 7u) : (TAKE_CMD_C(cmd) & 0xFFu))
 /* TAKE_MUTE: a = role, b = 0/1 */
 #define TAKE_MUTE(role, on)          TAKE_CMD(TAKE_T_MUTE, (role), (on), 0)
 /* TAKE_FX: a = punch FX id, b = 0 off / 1 on / 2 latch */
@@ -141,3 +144,6 @@ int         take_has(const take_t *t);                   /* a take was recorded 
 uint16_t    take_nevents(const take_t *t);
 const take_hdr_t *take_header(const take_t *t);
 const take_event_t *take_events(const take_t *t);
+
+/* ISR recording-start snapshot: rebuild offset-zero setup before boundary notes fire. */
+void take_refresh_setup(take_t *t);

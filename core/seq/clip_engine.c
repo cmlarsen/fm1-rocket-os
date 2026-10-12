@@ -508,6 +508,7 @@ int clip_engine_take_launch(clip_engine_t *e, uint8_t clip, uint8_t how, uint8_t
     if (clip >= NCLIPS)
         return 0;
     role = clip_role(clip);
+    e->que_phase[role] = 0;
     /* Keep a queued launch's front copy until it applies or is superseded. Any other copy older
      * than this replayed event arrived too late; discard it before matching this event. */
     if (e->ts_queued[role]) {
@@ -710,7 +711,8 @@ static void apply_role(clip_engine_t *e, uint8_t role, uint32_t off, const clip_
         }
         e->ts_queued[role] = 0u;
         e->cur[role] = target;
-        e->pos[role] = 0;
+        e->pos[role] = e->que_phase[role] < play_len(e, role) ? e->que_phase[role] : 0;
+        e->que_phase[role] = 0;
         ev(sink, off, CLIPEV_CLIP_STARTED, role, 0, 0, target);
     } else if (e->next_set[role] && e->next_clip[role] == target) {
         /* T7b: a live (non-take) launch: next -> play swap */
@@ -923,6 +925,7 @@ static void do_step(clip_engine_t *e, uint32_t off, uint32_t abs, const clip_sin
         if (e->cur[r] != CLIP_NONE)
             advance_role(e, r, off, abs, sink);
     }
+    if (e->step_hook) e->step_hook(e->step_hook_ctx, off);
     for (r = 0; r < NROLES; r++) {
         if (e->cur[r] != CLIP_NONE)
             step_events(e, r, e->cur[r], e->pos[r], off, abs, sink);
@@ -1139,4 +1142,9 @@ uint8_t clip_engine_step_phase(const clip_engine_t *e)
 uint8_t clip_engine_clip_step(const clip_engine_t *e, uint8_t role)
 {
     return role < NROLES ? e->pos[role] : 0;
+}
+
+void clip_engine_take_phase(clip_engine_t *e, uint8_t role, uint8_t phase)
+{
+    if (role < NROLES) e->que_phase[role] = (uint8_t)(phase & 63u);
 }

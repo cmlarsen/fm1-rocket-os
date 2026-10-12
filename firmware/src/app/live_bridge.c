@@ -31,6 +31,8 @@ static uint8_t g_stop_q[NROLES];                      /* a stop on the role is p
 
 /* ---- T9i: the take recorder/player -------------------------------------- */
 static take_t g_take LIVE_POOL;                       /* 16,436 B: the song's one take */
+static uint8_t g_take_baseline_due;
+static uint32_t g_take_window_base;
 static uint8_t g_take_arm_at_start;                   /* REC while stopped: start at the next PLAY */
 static uint8_t g_bar_identity;                        /* the arm-to-start bar function (see below) */
 static uint32_t g_take_block_end;                     /* the block's end: the T2a tap's sample for
@@ -113,9 +115,10 @@ static void bridge_prelude(void *ctx, struct take *t)
         if (c == CLIP_NONE)
             take_setup_event(t, TAKE_LAUNCH(0u, TAKE_LAUNCH_STOP, (uint8_t)r));
         else
-            take_setup_event(t, TAKE_LAUNCH(c, TAKE_LAUNCH_NOW, (uint8_t)r));
+            take_setup_event(t, TAKE_LAUNCH_AT_PHASE(c, (uint8_t)r, g_eng.pos[r]));
         take_setup_event(t, TAKE_MUTE((uint8_t)r, clip_engine_muted(&g_eng, (uint8_t)r) ? 1u : 0u));
     }
+    take_set_bpm(t, g_eng.bpm_x10);
     take_setup_event(t, TAKE_MARK_TEMPO(g_eng.bpm_x10));
     /* T9i: the punch FX state a replay starts from (S2). All six are written: a latched effect as
      * LATCH, a momentary one as ON, the rest as OFF, so the replay reconstructs the exact state
@@ -151,7 +154,10 @@ static void take_sink_ev(void *ctx, uint32_t sample, uint32_t cmd)
     } else if (type == TAKE_T_LAUNCH) {
         if (b == TAKE_LAUNCH_STOP)
             clip_engine_take_stop(&g_eng, (uint8_t)(c & 0xFFu));
-        else if (b == TAKE_LAUNCH_NOW)
+        else if (b == TAKE_LAUNCH_PHASE) {
+            if (clip_engine_take_launch(&g_eng, (uint8_t)a, 1u, 0u, g_take.play_i))
+                clip_engine_take_phase(&g_eng, (uint8_t)(c & 7u), (uint8_t)(c >> 3));
+        } else if (b == TAKE_LAUNCH_NOW)
             clip_engine_take_launch(&g_eng, (uint8_t)a, 1u, 0u, g_take.play_i);
         else if (b == TAKE_LAUNCH_QUANT)             /* S1: a Program Change launch's quantize */
             clip_engine_take_launch(&g_eng, (uint8_t)a, 0u, (uint8_t)((c >> 8) & 3u), g_take.play_i);
@@ -198,6 +204,7 @@ static void eng_reset_transport(void)
     g_eng.take_mute_set = 0;
     for (i = 0; i < (int)CLIP_ENGINE_MAX_VOICES; i++)
         g_eng.note[i].used = 0;
+    g_eng.safety_pending = 0;
     g_eng.cmd_tail = g_eng.cmd_head;                  /* drop any stale UI ring entry */
 }
 
@@ -448,6 +455,7 @@ void live_bridge_take_init(void)
     take_set_bar_fn(&g_take, bridge_bar_fn, 0);
     take_set_prelude(&g_take, bridge_prelude, 0);
     g_take_arm_at_start = 0;
+    g_take_baseline_due = 0;
     g_take_live = 0;
     g_take_end_req = 0;
     g_take_window_end = 0;
@@ -497,6 +505,7 @@ void live_bridge_take_fx(int id, int how)
 void live_bridge_take_block(uint32_t base, uint32_t nframes)
 {
     take_sink_t sink;
+    g_take_window_base = base;
     while (tp_t != tp_h) {
         uint8_t kind = tp[tp_t].kind, a = tp[tp_t].a, b = tp[tp_t].b;
         uint32_t cmd = 0;
@@ -546,7 +555,10 @@ void live_bridge_take_arm(void)
         take_set_bpm(&g_take, bpm);
         if (playing) {
             g_take_arm_at_start = 0;
+            f = engine_crit_enter();
             take_arm(&g_take, engine_sample_now());       /* the next bar */
+            g_take_baseline_due = take_armed(&g_take);
+            engine_crit_exit(f);
         } else {
             g_take_arm_at_start = 1;                      /* wait for PLAY: bar 0 */
         }
@@ -585,6 +597,7 @@ void live_bridge_take_finish(void)
 {
     uint32_t f;
     g_take_arm_at_start = 0;
+    g_take_baseline_due = 0;
     f = engine_crit_enter();
     if (take_recording(&g_take) || take_armed(&g_take))
         take_finish(&g_take, engine_sample_now());
@@ -610,7 +623,7 @@ static uint16_t take_next_launch(uint8_t role, uint16_t from)
 #endif
         if (TAKE_CMD_TYPE(cmd) == TAKE_T_LAUNCH &&
             TAKE_CMD_B(cmd) != TAKE_LAUNCH_STOP &&
-            (uint8_t)(TAKE_CMD_C(cmd) & 0xFFu) == role && TAKE_CMD_A(cmd) < NCLIPS)
+            (uint8_t)TAKE_LAUNCH_ROLE(cmd) == role && TAKE_CMD_A(cmd) < NCLIPS)
             break;
     }
     return i;
@@ -972,6 +985,16 @@ int live_bridge_active(void) { return g_active; }
 /* ----- audio: the clip engine's events, handed to engine.c in plain terms ----- */
 
 typedef struct { const live_sink_t *sink; uint32_t offset; } bridge_render_ctx_t;
+static void bridge_step(void *ctx, uint32_t off)
+{
+    const bridge_render_ctx_t *render = (const bridge_render_ctx_t *)ctx;
+    uint32_t now = g_take_window_base + render->offset + off;
+    if (g_take_baseline_due && (take_armed(&g_take) || take_recording(&g_take)) &&
+        (int32_t)(now - g_take.start) >= 0) {
+        g_take_baseline_due = 0;
+        take_refresh_setup(&g_take);
+    }
+}
 
 static void bridge_ev(void *ctx, const clip_event_t *e)
 {
@@ -998,8 +1021,11 @@ void live_bridge_render(uint32_t nframes, const live_sink_t *sink)
 {
     bridge_render_ctx_t ctx = {sink, 0};
     clip_sink_t cs = {bridge_ev, &ctx};
+    g_eng.step_hook = bridge_step;
+    g_eng.step_hook_ctx = &ctx;
     if (!g_take_window_end) {
         clip_engine_render(&g_eng, nframes, &cs);
+        g_eng.step_hook = 0;
         return;
     }
     clip_engine_render(&g_eng, g_take_window_frames, &cs);
@@ -1016,6 +1042,7 @@ void live_bridge_render(uint32_t nframes, const live_sink_t *sink)
     clip_engine_take_mute_clear(&g_eng);
     engine_take_perform_reset();
     g_take_window_end = 0;
+    g_eng.step_hook = 0;
     g_take_end_req = 1;
 }
 

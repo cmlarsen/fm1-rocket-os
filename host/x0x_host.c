@@ -1968,6 +1968,9 @@ int main(int argc, char **argv)
                 else
                     fails++;
             }
+        } else if (!strcmp(cmd, "tfixaphase")) {
+            extern int engine_test_tfixa_phase(const char *dir);
+            fails += engine_test_tfixa_phase(dir);
         } else if (!strcmp(cmd, "tfixaengine")) {
             extern int engine_test_tfixa(void);
             int nfail = engine_test_tfixa();

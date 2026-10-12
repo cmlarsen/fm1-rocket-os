@@ -43,3 +43,17 @@ FM6 and NOISE (T5i) use the existing parameter-target and note-on/off types with
 - **Pending take:** a record/clear that has not been written yet is undone by cancelling the pending write and reloading the stored take. A clip edit newer than the pending take is undone first (chronological order, T9i r1/S6); a take undo is refused while a take is armed, recording or playing.
 - **Delete song:** undo works until another save reuses that storage. After that it says "can't undo" rather than restoring something wrong.
 - **Deletes and take undos are durable:** they are written as new records, so a reboot keeps the result.
+
+### TFIXA take phase (2026-10-11)
+
+New take records use store envelope version 2; song records stay at version 1. Version 1 takes
+still load and their ordinary launch events start at clip step 0. The payload size is unchanged.
+A phase-prelude launch uses `how = 4`, with role in `c[2:0]` and clip step in `c[8:3]`.
+The validator checks the role, clip zone, phase encoding and envelope version.
+
+When REC is armed during playback, the audio ISR captures the baseline at the actual recording
+bar, after advancing the roles and before firing that step's notes. Replay starts each playing
+clip at its captured step, including clips launched mid-bar and multi-bar clips. The snapshot
+uses only ISR-owned clip state and never reads editable song clips or pushes a main-loop ring.
+Notes that started before the recording boundary are not reconstructed; their remaining sustain
+is accepted as lost on replay. Notes beginning at or after the captured step play normally.
