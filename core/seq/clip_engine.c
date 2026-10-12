@@ -43,6 +43,18 @@
 volatile int clip_engine_isr;
 #endif
 
+/* r1/N1: the app installs an interrupt mask so push_cmd's safety-latch update is atomic against the
+ * ISR's clear. Null (the default) is a no-op, so the standalone host units that link this file
+ * alone still build. */
+static uint32_t (*clip_crit_enter)(void);
+static void (*clip_crit_exit)(uint32_t);
+
+void clip_engine_set_crit(uint32_t (*enter)(void), void (*exit)(uint32_t))
+{
+    clip_crit_enter = enter;
+    clip_crit_exit = exit;
+}
+
 /* ---- tempo --------------------------------------------------------------- */
 
 static uint16_t clamp_bpm(uint16_t b)
@@ -368,21 +380,29 @@ int clip_engine_transport_stop(clip_engine_t *e)
 static int push_cmd(clip_engine_t *e, uint8_t cmd, uint8_t clip, uint8_t quant, uint16_t bpm, uint32_t at)
 {
     uint8_t head = e->cmd_head, next = (uint8_t)((head + 1u) % CLIP_CMD_RING);
+    uint32_t crit;
 #ifdef X0X_HOST
     if (clip_engine_isr)               /* T9i r1: an ISR-side path must never push onto this ring */
         __builtin_trap();
 #endif
     uint8_t safety = cmd == CLIP_CMD_TRANSPORT_STOP ? 1u : cmd == CLIP_CMD_MUTE_CLEAR ? 2u : cmd == CLIP_CMD_STOP ? (uint8_t)(4u << clip) : 0u;
     uint8_t used = (uint8_t)((head + CLIP_CMD_RING - e->cmd_tail) % CLIP_CMD_RING);
+    /* r1/N1: safety_pending is shared with the ISR, which clears bits as it consumes them. The
+     * read-modify-write below must not race that clear, so it runs inside the platform's short
+     * interrupt mask (a no-op when no hook is installed). */
+    crit = clip_crit_enter ? clip_crit_enter() : 0u;
     if (!safety && (used >= CLIP_CMD_RING - 3u || e->safety_pending)) {
         e->cmd_drops++;
+        if (clip_crit_exit) clip_crit_exit(crit);
         return -1;
     }
     if (next == e->cmd_tail || e->safety_pending) {
         if (cmd == CLIP_CMD_STOP) e->safety_pending ^= safety; /* two role stops cancel */
         else e->safety_pending |= safety;
+        if (clip_crit_exit) clip_crit_exit(crit);
         return 0;
     }
+    if (clip_crit_exit) clip_crit_exit(crit);
     e->cmd[head].cmd = cmd;
     e->cmd[head].clip = clip;
     e->cmd[head].quant = quant;
@@ -893,6 +913,12 @@ static void consume_cmds(clip_engine_t *e, const clip_sink_t *sink)
         if (c.cmd == CLIP_CMD_LAUNCH && e->que_set[role] && e->que[role] == target) {
             e->que_set[role] = 0;             /* relaunching the queued clip cancels */
             e->que[role] = CLIP_NONE;
+            /* B1 r1: the cancel discards the staged copy too. Otherwise the stale next_set[role]
+             * makes relaunch_stage() skip the role on a later Start, and the relaunch is dropped
+             * (take_drop, the role goes silent). We are in the ISR; the main loop's staging that
+             * could set next_set[role] runs under engine_crit, so it cannot race this write. */
+            if (e->next_set[role] && e->next_clip[role] == target)
+                e->next_set[role] = 0;
             ev(sink, 0, CLIPEV_CLIP_CANCELLED, role, 0, 0, target);
             continue;
         }

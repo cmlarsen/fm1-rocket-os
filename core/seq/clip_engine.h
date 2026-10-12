@@ -134,6 +134,10 @@ typedef struct {
 
 void clip_engine_init(clip_engine_t *e, song_t *song);
 
+/* r1/N1: install the platform's short interrupt-masking pair so push_cmd's safety-latch
+ * read-modify-write cannot race the ISR's clear. Optional; null disables it (host units). */
+void clip_engine_set_crit(uint32_t (*enter)(void), void (*exit)(uint32_t));
+
 /* Ring APIs return 0 on admission, -1 on refusal; cmd_drops counts refused pushes.
  * Two slots are reserved for safety; an overflow safety latch blocks later ordinary pushes. */
 /* Transport. Tempo and swing come from the song (or a tempo command).

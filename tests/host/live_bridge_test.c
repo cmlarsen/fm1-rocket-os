@@ -27,6 +27,7 @@ extern volatile int live_bridge_isr;
 extern void (*live_bridge_test_hook)(void);
 extern void (*take_test_hook)(void);
 extern void (*live_bridge_test_scan_hook)(void);
+extern void (*take_test_put_hook)(void);   /* r1/S2: count take_put() calls in the ISR baseline */
 extern int live_bridge_test_consistent(void);
 /* T9i r1: a mutable sample clock, so the race tests can arm at one sample and record at another. */
 static uint32_t g_now;
@@ -45,7 +46,8 @@ void engine_all_off(void) { all_off_posts++; }
 void (*engine_tap)(uint32_t sample, uint32_t cmd);
 void engine_take_cmd(uint32_t cmd) { (void)cmd; }
 uint32_t engine_sample_now(void) { return g_now; }
-const sound_t *engine_sound_mirror(void) { return 0; }
+static sound_t g_mirror;   /* a non-null mirror with a few params, so the arm prelude is non-trivial */
+const sound_t *engine_sound_mirror(void) { return &g_mirror; }
 void engine_perform_engage(int fx, int latch) { (void)fx; (void)latch; }
 void engine_perform_release(int fx) { (void)fx; }
 void engine_perform_reset(void) {}
@@ -54,7 +56,7 @@ int engine_perform_active(int fx) { (void)fx; return 0; }
 void engine_take_perform(int fx, int how) { (void)fx; (void)how; }
 void engine_take_perform_reset(void) {}
 int engine_nvoices(int t) { (void)t; return 1; }
-int engine_nparams(int t, int v) { (void)t; (void)v; return 0; }
+int engine_nparams(int t, int v) { (void)t; (void)v; return 4; }
 /* T9i r2: model the main-loop critical section with the host's nest-safe plat_crit (host/
  * plat_crit_host.c), so a test hook can ask whether a real IRQ could preempt a point. */
 extern uint32_t plat_crit_enter(void);
@@ -62,6 +64,8 @@ extern void plat_crit_exit(uint32_t prev);
 extern int plat_crit_active(void);
 uint32_t engine_crit_enter(void) { return plat_crit_enter(); }
 void engine_crit_exit(uint32_t s) { plat_crit_exit(s); }
+/* r1/N1: the clip engine's installable mask hook (declared in clip_engine.h, not pulled in here). */
+extern void clip_engine_set_crit(uint32_t (*enter)(void), void (*exit)(uint32_t));
 
 static int fails;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); fails++; } } while (0)
@@ -725,6 +729,95 @@ static void tfixa_take_tests(void)
     live_bridge_exit();
 }
 
+/* r1/S1: a role Stop that drains in the block whose base is the take's start sample is recorded
+ * at offset 0 and must survive the ISR baseline (take_refresh_setup). Before the fix the baseline
+ * wiped the log, so the Stop vanished. */
+static int lead_stop_after_phase(void)
+{
+    const take_event_t *ev = live_bridge_take_events();
+    int n = live_bridge_take_nevents(), k, phased = 0;
+    for (k = 0; k < n; k++) {
+        uint32_t c = ev[k].cmd;
+        if (TAKE_CMD_TYPE(c) == TAKE_T_LAUNCH && TAKE_LAUNCH_ROLE(c) == ROLE_LEAD) {
+            if (TAKE_CMD_B(c) == TAKE_LAUNCH_PHASE) phased = 1;
+            else if (TAKE_CMD_B(c) == TAKE_LAUNCH_STOP && phased) return 1;
+        }
+    }
+    return 0;
+}
+
+static void lead_take_arm_and_reach_start(int *started)
+{
+    live_song_t *song = (live_song_t *)live_bridge_song();
+    int i;
+    memset(&song->clip[12], 0, sizeof song->clip[12]);
+    song->clip[12].used = 1; song->clip[12].len = 32; song->clip[12].nnotes = 32;
+    song->clip[12].quant = Q_END;
+    for (i = 0; i < 32; i++)
+        song->clip[12].d.notes[i] = (note_t){(uint8_t)i, (uint8_t)(40 + i), 100, 1};
+    song->bpm_x10 = 1200;
+    live_bridge_song_reload();
+    live_bridge_set_bpm(1200);                                /* a previous test may have left a tempo */
+    /* force a bar-0 reset whatever engine state a previous test left, so the next bar is 88200 */
+    live_bridge_transport_stop(); run_isr_block(0, 256);
+    live_bridge_transport_start(); run_isr_block(256, 256);
+    run_isr_block(256, 9744);                                 /* elapsed = 10000 */
+    live_bridge_launch_now(12); run_isr_block(10000, 7000);   /* applied at step 2: clip 12 playing */
+    *started = live_bridge_playing_clip(ROLE_LEAD) == 12;
+    g_now = 17000; live_bridge_take_arm();                    /* the next bar: 88200 at 44.1k/120bpm */
+    run_isr_block(17000, 71200);                              /* to the start: still armed */
+}
+
+static void tfixa_stop_at_start_test(void)
+{
+    int started = 0;
+    live_bridge_take_init(); live_bridge_enter(); g_now = 0;
+    lead_take_arm_and_reach_start(&started);
+    CHECK(started);
+    live_bridge_stop(ROLE_LEAD);                              /* queued Stop, drained in the start block */
+    g_now = 88200; run_isr_block(88200, 4096);                /* base == start: intents at offset 0 */
+    CHECK(lead_stop_after_phase());                           /* r1/S1: the Stop survived the baseline */
+    live_bridge_take_finish();
+    live_bridge_transport_stop(); run_isr_block(92384, 4096);
+    live_bridge_exit();
+}
+
+/* r1/S2: the ISR baseline must not write the parameter mirror; its take_put() work is bounded by
+ * NROLES (one launch/stop and one mute per role, tempo and six FX). */
+static int isr_put_calls;
+static void isr_put_count(void) { isr_put_calls++; }
+static void tfixa_isr_prelude_test(void)
+{
+    int started = 0;
+    live_bridge_take_init(); live_bridge_enter(); g_now = 0;
+    lead_take_arm_and_reach_start(&started);
+    CHECK(started);
+    take_test_put_hook = isr_put_count;
+    isr_put_calls = 0;
+    g_now = 88200; run_isr_block(88200, 4096);                /* the start block runs the baseline */
+    take_test_put_hook = 0;
+    CHECK(isr_put_calls > 0);
+    CHECK(isr_put_calls <= 2 * NROLES + 8);                   /* not the ~300-event mirror */
+    live_bridge_take_finish();
+    live_bridge_transport_stop(); run_isr_block(92384, 4096);
+    live_bridge_exit();
+}
+
+/* r1/N1: the safety-latch update runs inside the installed interrupt mask. */
+static int crit_calls;
+static uint32_t counting_crit_enter(void) { crit_calls++; return engine_crit_enter(); }
+static void counting_crit_exit(uint32_t s) { engine_crit_exit(s); }
+static void tfixa_latch_crit_test(void)
+{
+    live_bridge_take_init(); live_bridge_enter(); g_now = 0;
+    clip_engine_set_crit(counting_crit_enter, counting_crit_exit);
+    crit_calls = 0;
+    live_bridge_launch_now(0);                                /* any push takes the mask for the latch */
+    CHECK(crit_calls > 0);
+    clip_engine_set_crit(engine_crit_enter, engine_crit_exit);
+    live_bridge_exit();
+}
+
 int main(void)
 {
     int i;
@@ -902,6 +995,9 @@ int main(void)
     tfixa_take_tests();
     tfixa_phase_test();
     tfixa_intents_test();
+    tfixa_stop_at_start_test();       /* r1/S1 */
+    tfixa_isr_prelude_test();         /* r1/S2 */
+    tfixa_latch_crit_test();          /* r1/N1 */
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);

@@ -110,12 +110,14 @@ static uint32_t bridge_bar_fn(void *ctx, uint32_t sample)
     return ret;
 }
 
-/* The prelude: the state a replay starts from. The playing clip per role (or a stop), the mutes,
- * the tempo and every parameter's current value (the engine's sound mirror). */
+/* The prelude is two callbacks. `bridge_prelude` (the r1/S2 dynamic state) is the state a replay
+ * starts from and is small: the playing clip/phase per role (or a stop), the mutes, the tempo and
+ * the punch FX. It runs at arm AND again from take_refresh_setup at the real recording boundary, so
+ * the baseline does not write the parameter mirror in the audio ISR. `bridge_prelude_params` is the
+ * (large) engine sound mirror and runs once, at arm, on the main loop. */
 static void bridge_prelude(void *ctx, struct take *t)
 {
-    const sound_t *snd = engine_sound_mirror();
-    int r, tgt, v, i;
+    int r;
     (void)ctx;
     for (r = 0; r < (int)NROLES; r++) {
         uint8_t c = clip_engine_playing_clip(&g_eng, (uint8_t)r);
@@ -138,6 +140,14 @@ static void bridge_prelude(void *ctx, struct take *t)
             take_setup_event(t, TAKE_FX((uint32_t)fx, how));
         }
     }
+}
+
+/* r1/S2: the parameter mirror (main loop only). */
+static void bridge_prelude_params(void *ctx, struct take *t)
+{
+    const sound_t *snd = engine_sound_mirror();
+    int tgt, v, i;
+    (void)ctx;
     if (!snd)
         return;
     for (tgt = 0; tgt < NTARGETS; tgt++)
@@ -449,10 +459,12 @@ void live_bridge_init(void)
                                                        * every view, from power-on; there is no second
                                                        * owner to hand it to. */
     clip_engine_init(&g_eng, &g_song);
+    clip_engine_set_crit(engine_crit_enter, engine_crit_exit);   /* r1/N1: atomic safety latch */
     g_eng_ready = 1;
     take_init(&g_take);                               /* T9i: the song's take */
     take_set_bar_fn(&g_take, bridge_bar_fn, 0);
     take_set_prelude(&g_take, bridge_prelude, 0);
+    take_set_prelude_params(&g_take, bridge_prelude_params, 0);
 }
 
 /* T9i: the take recorder/player's public surface. */
@@ -461,6 +473,7 @@ void live_bridge_take_init(void)
     take_init(&g_take);
     take_set_bar_fn(&g_take, bridge_bar_fn, 0);
     take_set_prelude(&g_take, bridge_prelude, 0);
+    take_set_prelude_params(&g_take, bridge_prelude_params, 0);
     g_take_arm_at_start = 0;
     g_take_baseline_due = 0;
     g_take_live = 0;
@@ -790,6 +803,7 @@ void live_bridge_take_clear_ram(void)
     take_init(&g_take);
     take_set_bar_fn(&g_take, bridge_bar_fn, 0);
     take_set_prelude(&g_take, bridge_prelude, 0);
+    take_set_prelude_params(&g_take, bridge_prelude_params, 0);
     g_take_arm_at_start = 0;
     for (r = 0; r < (int)NROLES; r++)
         g_take_stage_i[r] = 0;
@@ -1087,8 +1101,8 @@ void live_bridge_transport_restart(void)                 /* T11i: MIDI Start */
                                                           * cleanly first (no transport desync) */
     if (take_recording(&g_take))
         live_bridge_take_finish();                       /* S2: a Start during a recording ends it cleanly */
-    take_arm_if_pending();                               /* S2: honour a take armed while stopped */
     f = engine_crit_enter();
+    take_arm_if_pending();                               /* r1/N3: honour an arm with the g_eng reads masked */
     clip_engine_restart(&g_eng);                         /* stages next[] under the mask */
     engine_crit_exit(f);
 }
@@ -1099,8 +1113,8 @@ void live_bridge_transport_continue(void)                /* T11i: MIDI Continue 
         live_bridge_take_stop_play();                    /* NIT: as above */
     if (take_recording(&g_take))
         live_bridge_take_finish();                       /* S2: a Continue during a recording ends it cleanly */
-    take_arm_if_pending();                               /* S2: honour a take armed while stopped */
     f = engine_crit_enter();
+    take_arm_if_pending();                               /* r1/N3: honour an arm with the g_eng reads masked */
     clip_engine_continue(&g_eng);
     engine_crit_exit(f);
 }

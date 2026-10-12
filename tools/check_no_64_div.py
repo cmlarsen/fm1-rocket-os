@@ -10,7 +10,8 @@ import re
 import sys
 from pathlib import Path
 
-WIDE = r'\b(?:u?int64_t|(?:unsigned\s+|signed\s+)?long\s+long)\b'
+WIDE = (r'\b(?:u?int64_t|u?int_fast64_t|u?int_least64_t|__u?int64_t'
+        r'|(?:unsigned\s+|signed\s+)?long\s+long)\b')
 
 
 def violations(source):
