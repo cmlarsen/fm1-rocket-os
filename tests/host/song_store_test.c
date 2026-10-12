@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include "core/model/model.h"
 #include "core/model/song_store.h"
+#include "core/model/motion_contract.h"
 
 #define NOR_SIZE 0x100000u
 static uint8_t nor[NOR_SIZE];
@@ -232,10 +233,10 @@ static void make_starter(song_t *s)
             c->d.notes[k].len = 1;
         }
     }
-    s->clip[lead[0]].motion[0].param = 0x0123u;    /* a T5i-range param (< 0x0800) */
+    s->clip[lead[0]].motion[0].param = 0x600du;    /* master performance filter */
     for (j = 0; j < (int)CLIP_MAX_STEPS; j++)
         s->clip[lead[0]].motion[0].v[j] = (uint8_t)(j * 2);      /* 0..126 */
-    s->clip[chords[0]].motion[1].param = 0x00ABu;
+    s->clip[chords[0]].motion[1].param = 0x4007u;    /* reverb level */
     for (j = 0; j < (int)CLIP_MAX_STEPS; j += 2)
         s->clip[chords[0]].motion[1].v[j] = (uint8_t)(127 - (j / 2));
 }
@@ -271,10 +272,13 @@ static void make_worst(song_t *s)
             }
         }
         for (j = 0; j < (int)CLIP_MOTION_LANES; j++) {
-            int n;
-            cl->motion[j].param = (uint16_t)(rnd() % 0x800u);       /* valid T5i range */
+            int n, max;
+            do {
+                cl->motion[j].param = (uint16_t)(rnd() % 0x7000u);
+                max = motion_param_max(cl->motion[j].param);
+            } while (max < 0);
             for (n = 0; n < (int)CLIP_MAX_STEPS; n++)
-                cl->motion[j].v[n] = (uint8_t)((rnd() & 1u) ? MOTION_NONE : (rnd() & 0x7Fu));
+                cl->motion[j].v[n] = (uint8_t)((rnd() & 1u) ? MOTION_NONE : (rnd() % (unsigned)(max + 1)));
         }
     }
 }
@@ -653,7 +657,7 @@ int main(void)
         v.clip[7].d.notes[0].vel = 0;
         check("note vel 0 rejected", song_validate(&v) != 0);
         v = empty;
-        v.clip[0].motion[0].param = 0x0123u;
+        v.clip[0].motion[0].param = 0x600du;
         v.clip[0].motion[0].v[0] = 200;
         check("motion value 200 rejected", song_validate(&v) != 0);
         v = empty;
@@ -661,10 +665,10 @@ int main(void)
         check("motion param 0x1234 rejected", song_validate(&v) != 0);
         v = empty;
         v.clip[0].motion[0].param = 0x0800u;
-        check("motion param 0x0800 rejected", song_validate(&v) != 0);
+        check("motion param 0x0800 (909 voice 8 index 0) accepted", song_validate(&v) == 0);
         v = empty;
         v.clip[0].motion[0].param = 0x07FFu;
-        check("motion param 0x07FF accepted", song_validate(&v) == 0);
+        check("motion param 0x07FF (index 255) rejected", song_validate(&v) != 0);
         v = empty;
         v.clip[0].motion[0].param = PARAM_NONE;
         v.clip[0].motion[0].v[5] = MOTION_NONE;
