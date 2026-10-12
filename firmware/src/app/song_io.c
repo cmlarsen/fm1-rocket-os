@@ -861,8 +861,8 @@ int song_io_songs_copy(void *ctx, int src)
 int song_io_songs_rename(void *ctx, int slot, const char *name)
 {
     song_t *cur;
-    song_t s;
-    int i;
+    song_t *s;
+    int i, rc;
     (void)ctx;
     if (!store_quiet())
         return -1;
@@ -878,13 +878,18 @@ int song_io_songs_rename(void *ctx, int slot, const char *name)
         failed = 0;
         return song_io_save();
     }
-    if (song_store_load(&store, slot, &s) != 0)
+    s = song_store_scratch_acquire();
+    if (song_store_load(&store, slot, s) != 0) {
+        song_store_scratch_release();
         return -1;
+    }
     for (i = 0; i < (int)SONG_NAME_LEN; i++)
-        s.name[i] = 0;
+        s->name[i] = 0;
     for (i = 0; i < (int)SONG_NAME_LEN - 1 && name[i]; i++)
-        s.name[i] = name[i];
-    return song_store_save_tag(&store, slot, &s, song_store_tag(&store, slot));
+        s->name[i] = name[i];
+    rc = song_store_save_tag(&store, slot, s, song_store_tag(&store, slot));
+    song_store_scratch_release();
+    return rc;
 }
 
 int song_io_songs_delete(void *ctx, int slot)

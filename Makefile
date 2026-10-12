@@ -72,6 +72,7 @@ fw: push
 	@mkdir -p build/loader
 	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.fwsc ./build/x0x.fwsc
 	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.bin ./build/x0x.bin
+	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/x0x.dis ./build/x0x.dis
 	@rsync -az $(FW_HOST):$(REMOTE_DIR)/build/loader/ota.bin ./build/loader/ota.bin
 	@echo "fw: brought back build/x0x.fwsc, build/x0x.bin, build/loader/ota.bin"
 
@@ -293,7 +294,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-save-ui unit-motion-contract unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-delay unit-name unit-songs
+unit-core: unit-save-ui unit-motion-contract unit-stack unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-delay unit-name unit-songs
 
 # T7b re-review: the host plat_crit nesting (host/plat_crit_host.c).
 .PHONY: unit-crit
@@ -416,6 +417,9 @@ unit-motion-contract:
 	@X0X_HOST_SRC=tests/host/motion_contract_test.c X0X_HOST_OUT=build/host/motion_contract_test sh host/build_host.sh
 	@build/host/motion_contract_test
 
+unit-stack:
+	@python3 tests/host/template_stack_test.py
+	@python3 tests/host/stack_gate_test.py
 
 .PHONY: unit-save-ui
 unit-save-ui:

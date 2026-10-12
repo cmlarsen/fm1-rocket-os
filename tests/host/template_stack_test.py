@@ -7,7 +7,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for source in ('song_templates', 'song_io'):
         subprocess.run(['cc', '-O2', '-fstack-usage', '-DX0X_HOST', '-I.', '-c',
                         f'firmware/src/app/{source}.c', '-o', f'{tmp}/{source}.o'], check=True)
-    wanted = {'song_template_empty', 'song_template_starter', 'song_io_songs_create', 'song_io_songs_copy'}
+    wanted = {'song_template_empty', 'song_template_starter', 'song_io_songs_create', 'song_io_songs_copy', 'song_io_songs_rename'}
     seen = set()
     for path in pathlib.Path(tmp).glob('*.su'):
         for line in path.read_text().splitlines():

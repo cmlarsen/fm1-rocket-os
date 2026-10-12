@@ -30,6 +30,7 @@ LDR = OUT / "loader"
 sys.path.insert(0, str(SRC / "tools"))
 import fm1pkg_make  # noqa: E402
 import lz4blk  # noqa: E402
+import check_stack  # noqa: E402
 
 APP_XIP = 0x02000120                # app.bin offset 0 in the XIP map; the SPL jumps here
 APP_SLOT = fm1pkg_make.APP_SLOT
@@ -280,7 +281,15 @@ def build_app():
 
 
 def check(img, syms, dis, rt):
-    errors, notes = [], []
+    stack = check_stack.analyze(dis, margin=2048, product=check_stack.product_functions(SRC))
+    errors, notes = list(stack.errors), []
+    for name in sorted(stack.frames, key=stack.frames.get, reverse=True)[:10]:
+        notes.append(f"stack frame {stack.frames[name]} B: {name}")
+    notes.append(f"stack chain {stack.deepest[0]} B / 24320 B (2048 B reserve): " + " -> ".join(stack.deepest[1]))
+    notes.append(f"nested IRQ stack {stack.interrupts[0]} B / 7936 B (2048 B reserve): " + " -> ".join(stack.interrupts[1]))
+    notes.append(f"stack warnings: {len(stack.warnings)} unlisted inherited indirect transfers")
+    for warning in stack.warnings:
+        print("  WARN ", warning)
     m = re.search(r"^([0-9a-f]+) .*\s_start$", syms, re.M)
     if not m or int(m.group(1), 16) != APP_XIP:
         errors.append(f"_start is not at {APP_XIP:#x}")
