@@ -19,8 +19,10 @@ def newest_mtime(path):
 now = time.time()
 for w in orca("orchestration", "worker-list").get("workers", []):
     if w.get("dispatchStatus") != "dispatched": continue
-    h = w.get("agentTerminalHandle"); ws = w["projection"]["workspace"]["id"].split("::", 1)[-1]
-    agent = w["projection"]["provider"]["id"]; did = w["dispatchId"]
+    pr = w.get("projection") or {}
+    h = w.get("agentTerminalHandle"); ws = ((pr.get("workspace") or {}).get("id") or "").split("::", 1)[-1]
+    agent = (pr.get("provider") or {}).get("id", "?"); did = w["dispatchId"]
+    if not h or not ws: continue
     tail = ""
     try:
         r = orca("terminal", "read", "--terminal", h)
