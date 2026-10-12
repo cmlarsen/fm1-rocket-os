@@ -58,13 +58,30 @@ session snapshot when recording. Adding or moving a note clamps its start to
 `0..len-1` and its duration to `1..len`; negative fields in `song_io_note_set` still
 mean leave that field alone. Lengthening does not resurrect trimmed notes.
 
-A flush with a dirty, failed song returns an error without retrying the flash.
-SONGS keeps that song in RAM and refuses an open with a SAVE FAILED toast until
-an explicit SAVE succeeds or another edit re-enables saving. Failed empty-take
-commits return their storage error, keep the deferred request and add no durable
-undo entry; an explicit retry can commit the pending clear.
+A flush (autosave or a switch attempt) with a dirty, failed song returns an error
+without retrying the flash; a failed deferred take write follows the same rule, so
+neither rewrites flash on a timer. SONGS keeps that song in RAM and refuses an open
+with a SAVE FAILED toast. An explicit SAVE (`save_project` → `song_io_retry`) clears
+the song and take failure latches and retries; a new edit (song or take) also
+re-enables the store. A failed empty-take commit keeps the deferred request and adds
+no durable undo entry. As a deliberate escape hatch the SONGS toast offers
+hold-to-discard: holding SEL for 1.5 s drops the unsaved song and take edits and
+opens the other song (`song_io_songs_discard`); those edits cannot be undone.
+
+Consecutive clip-length edits of one clip coalesce into one undo record: the first
+detent captures the before-state and the later detents extend it in place until any
+other edit or an undo/redo (`song_io.c`'s length coalescing). The earlier TFIXS
+behavior, one record per detent, is superseded.
+
+Songs saved with motion lanes use the `target << 12 | voice << 8 | index` encoding
+that only v2 builds validate. A build carrying the pre-TFIXS validator rejects such a
+song on load, so a song with recorded motion is not downgrade-safe: keep a copy or
+clear its motion lanes before using it on an older build.
 
 Templates build in their destination. Create, Copy and noncurrent Rename use the
 existing guarded shared song scratch and release it on every return path. The
-device build checks linked stack frames and conservative callback call chains;
-see `tools/check_stack.py` and [TFIXS report](../../reports/TFIXS.md).
+device build checks linked stack frames and conservative callback call chains,
+counting braced and single unbraced `[--sp] = r` pushes alike and failing on a
+callback target that is no longer linked (a stale allowlist); the SONGS, MIDI and
+flash callback tables are audited against their real initializers. See
+`tools/check_stack.py` and [TFIXS report](../../reports/TFIXS.md).

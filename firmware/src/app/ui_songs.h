@@ -67,13 +67,21 @@ typedef struct {
     uint8_t  del_held;                 /* SEL is down on Delete: the ring is filling */
     uint8_t  del_done;                 /* the delete succeeded this hold */
     uint32_t del_t0;
+
+    /* TFIXS r1/B1: the hold-to-discard escape hatch after a refused open */
+    uint8_t  refused;                  /* an open was refused (dirty+failed or a failed take) */
+    uint8_t  refused_slot;             /* the slot the refused open wanted */
+    uint8_t  dis_held;                 /* SEL is down on the discard ring */
+    uint8_t  dis_done;                 /* the discard+open succeeded this hold */
+    uint32_t dis_t0;
+
     uint8_t  home_used;                /* HOME was used in the undo chord: its release must not go back */
 
     /* button/key edges (the shell feeds held state) */
     uint32_t prev_btn, prev_keys;
 
-    /* a transient message, shown as a pill and readable by the shell */
-    char     msg[30];
+    /* a transient message, shown as a pill and readable by the shell. A '\n' draws two lines. */
+    char     msg[48];
     uint32_t msg_until;
 } songs_ui_t;
 

@@ -27,15 +27,18 @@ void song_io_boot(uint16_t bpm_x10, int preferred);
 
 int  song_io_loaded(void);          /* 1: the current song came from slot 0 (not mapped from the project) */
 int  song_io_dirty(void);           /* the current song changed since the last save */
-int  song_io_failed(void);          /* the last save failed; no retry until the next edit (T6i item 3) */
+int  song_io_failed(void);          /* the last song save failed; no retry until the next edit (T6i item 3) */
 int  song_io_wants_save(void);      /* dirty and not failed: what the autosave gate acts on */
 void song_io_mark_dirty(void);
 int  song_io_saves(void);           /* successful saves since boot (tests/scenarios) */
 
 /* Save the current song to slot 0. 0 = saved; < 0 = the store refused it (kept in RAM, dirty).
- * `flush` is the autosave path: it saves only when dirty. */
+ * `flush` is the autosave path: it saves only when dirty and never retries a failure. */
 int  song_io_save(void);
 int  song_io_flush(void);
+/* TFIXS r1/B1: an explicit SAVE clears the failure latches so the song and the pending take are
+ * retried now. Autosave and a switch attempt never clear them. */
+void song_io_retry(void);
 
 /* T6i behaviour 2: an edit to the current song marks it dirty. T10's assign-keys UI calls this. */
 void song_io_set_key_clip(int key, int clip);
@@ -128,6 +131,7 @@ int song_io_take_load(int slot, void *hdr, void *ev, uint32_t max_events);
 void song_io_take_request_save(void);          /* a recording finished: the in-RAM take is the song's */
 void song_io_take_request_clear(void);         /* the clear gesture: on the next flush, store the empty take */
 int  song_io_take_pending(void);               /* a take store write is queued */
+int  song_io_take_failed(void);                /* the last take write failed; retried only by an explicit SAVE or a new take edit */
 int  song_io_take_flush(void);                 /* the deferred store write (called by song_io_flush) */
 int  song_io_take_load_ram(void);              /* the song's stored take into live_bridge's buffer */
 int  song_io_take_loaded_ram(void);            /* 1 while the in-RAM take holds the song's take */
@@ -170,6 +174,10 @@ int  song_io_songs_can_undelete(void *ctx);
 
 /* Used clips in `slot`'s stored song; -1 when unknown. */
 int  song_io_songs_clip_count(void *ctx, int slot);
+
+/* TFIXS r1/B1: SONGS' hold-to-discard. Drop the current song's unsaved edits and its pending
+ * take, so a switch may proceed. The discarded edits cannot be undone. */
+void song_io_songs_discard(void *ctx);
 
 /* The ops table above, for ui_songs_begin. */
 const songs_ops_t *song_io_songs_ops(void);

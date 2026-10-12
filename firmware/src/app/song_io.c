@@ -43,8 +43,17 @@ static uint32_t saves;
 /* T9i: the take's deferred store state (see the take block below) */
 enum { TAKE_NONE, TAKE_SAVE, TAKE_CLEAR };
 static uint8_t take_pending;
+static uint8_t take_failed;             /* TFIXS r1/S1: the deferred take write failed; only an
+                                         * explicit SAVE or a new take edit retries it */
 static uint8_t take_ram_ok;
 static uint32_t take_pending_ser;       /* S5: undo_stack_serial() when the pending write was queued */
+
+/* TFIXS r1/S2: consecutive length detents of one clip share one undo record. The first
+ * detent captures the before-state; later ones extend it until another edit or an undo. */
+static int len_edit_clip = -1;
+static uint32_t len_edit_ser;
+static uint8_t in_len_edit;             /* set while song_io_clip_set_len mutates, so its own
+                                         * edited() does not end the coalescing */
 
 static song_t *song(void) { return (song_t *)live_bridge_song(); }
 
@@ -71,6 +80,7 @@ void song_io_boot(uint16_t bpm_x10, int preferred)
     loaded = 0;
     dirty = 0;
     failed = 0;
+    len_edit_clip = -1;
     cur_slot = -1;
     /* T8i: the last current slot first, then slot 0, then the project */
     slot = (preferred >= 0 && preferred < (int)SONG_STORE_SLOTS) ? preferred : 0;
@@ -93,6 +103,7 @@ void song_io_boot(uint16_t bpm_x10, int preferred)
     ready = 1;
     live_bridge_song_reload();                          /* the clip engine follows the new song */
     take_pending = TAKE_NONE;                           /* T9i: the take is the song's own */
+    take_failed = 0;
     take_pending_ser = 0;
     song_io_take_load_ram();
 }
@@ -102,7 +113,12 @@ int song_io_dirty(void) { return dirty != 0; }
 int song_io_failed(void) { return failed != 0; }
 int song_io_wants_save(void) { return dirty && !failed; }
 int song_io_saves(void) { return (int)saves; }
-void song_io_mark_dirty(void) { dirty = 1; failed = 0; }   /* a new edit re-enables saving */
+void song_io_mark_dirty(void) { dirty = 1; failed = 0; len_edit_clip = -1; }   /* a new edit re-enables saving */
+
+/* TFIXS r1/B1: the explicit SAVE tap's retry. Only save_project() calls this; autosave
+ * (song_io_flush) and a switch attempt must never lift a failure, or they would write flash
+ * on a timer. */
+void song_io_retry(void) { failed = 0; take_failed = 0; }
 
 int song_io_save(void)
 {
@@ -131,11 +147,17 @@ int song_io_save(void)
 
 int song_io_flush(void)
 {
-    int rc = dirty && failed ? -1 : 0;
-    if (dirty && !failed)
+    int rc = 0;
+    if (dirty && failed)
+        return -1;                          /* the song is uncommitted: nothing else writes */
+    if (dirty)
         rc = song_io_save();
-    if (rc == 0)
-        rc = song_io_take_flush();          /* T9i: the take rides the same stopped-and-idle window */
+    if (rc == 0 && take_pending != TAKE_NONE) {
+        if (take_failed)
+            rc = -1;                        /* TFIXS r1/S1: never retry a failed take from autosave */
+        else
+            rc = song_io_take_flush();      /* T9i: the take rides the same stopped-and-idle window */
+    }
     return rc;
 }
 
@@ -178,7 +200,13 @@ void song_io_setup_set(int setting, int value)
 /* ---- T7a: the clip under the cursor -------------------------------------- */
 /* Every edit marks the song dirty and re-enables saving (a new edit is what lifts the failed state). */
 static clip_t *clip_at(int c) { return (c >= 0 && c < (int)NCLIPS) ? &song()->clip[c] : 0; }
-static void edited(void) { dirty = 1; failed = 0; }
+static void edited(void)
+{
+    dirty = 1;
+    failed = 0;
+    if (!in_len_edit)
+        len_edit_clip = -1;                 /* S2: any other edit ends the length coalescing */
+}
 /* T7b: after an edit, hand the clip to the clip engine so it writes the playing copy (and a staged
  * launch copy) with the audio IRQs masked; the ISR never reads song->clip[]. */
 static void synced(int c) { live_bridge_clip_changed((uint8_t)c); }
@@ -291,7 +319,9 @@ void song_io_clip_set_len(int c, int v)
         k->nnotes = (uint8_t)n;
     }
     k->len = len;
+    in_len_edit = 1;                        /* S2: this edit continues the length sweep */
     edited();
+    in_len_edit = 0;
     synced(c);
 }
 void song_io_clip_set_mode(int c, int v)
@@ -344,8 +374,8 @@ int song_io_scale(void) { return (int)song()->scale; }
 /* ---- T7b: the clip editor's edits ---------------------------------------- */
 
 static int edit_open = -1, edit_pushed;
-void song_io_edit_begin(int clip) { edit_open = clip; edit_pushed = 0; }
-void song_io_edit_end(void) { edit_open = -1; edit_pushed = 0; }
+void song_io_edit_begin(int clip) { edit_open = clip; edit_pushed = 0; len_edit_clip = -1; }
+void song_io_edit_end(void) { edit_open = -1; edit_pushed = 0; len_edit_clip = -1; }
 void song_io_edit_push(void)
 {
     if (edit_open < 0 || edit_pushed)
@@ -356,10 +386,17 @@ void song_io_edit_push(void)
 
 static void clip_edit_snapshot(int c)
 {
-    if (edit_open == c)
+    if (edit_open == c) {
         song_io_edit_push();
-    else
-        song_io_push_record(c, &song()->clip[c]);
+        return;
+    }
+    /* S2: while the same clip's length sweep continues, the record the first detent pushed
+     * already holds the before-state, so do not push again (11 detents would flush the ring). */
+    if (len_edit_clip == c && len_edit_ser == undo_stack_serial(&undo))
+        return;
+    song_io_push_record(c, &song()->clip[c]);
+    len_edit_clip = c;
+    len_edit_ser = undo_stack_serial(&undo);
 }
 
 int song_io_clip_is_drum(int c) { return clip_role((uint8_t)c) == ROLE_DRUMS; }
@@ -598,6 +635,7 @@ static int undo_run(int redo)
         }
         dirty = 1;                                      /* the song changed: write it back on the next save */
         failed = 0;
+        len_edit_clip = -1;                             /* S2: an undo/redo ends the length coalescing */
         if (type == UNDO_CLEAR_CLIP || type == UNDO_COPY_CLIP || type == UNDO_RECORD_CLIP) {
             /* T7b re-review: stage the restored clip through the main-loop path; do NOT re-init the
              * clip engine (that would stop the music while it plays). Only song open / load (stopped)
@@ -658,6 +696,7 @@ static int take_store_empty(int slot)
 void song_io_take_request_save(void)
 {
     take_pending = TAKE_SAVE;
+    take_failed = 0;                                    /* a new take edit re-enables the retry */
     take_ram_ok = 1;
     take_pending_ser = undo_stack_serial(&undo);        /* S5: where this op sits in undo order */
     song()->has_take = (uint8_t)(live_bridge_take_nevents() > 0 ? 1 : 0);
@@ -668,6 +707,7 @@ void song_io_take_request_clear(void)
 {
     live_bridge_take_clear_ram();
     take_pending = TAKE_CLEAR;
+    take_failed = 0;                                    /* a new take edit re-enables the retry */
     take_ram_ok = 1;
     take_pending_ser = undo_stack_serial(&undo);        /* S5 */
     song()->has_take = 0;
@@ -675,6 +715,7 @@ void song_io_take_request_clear(void)
     failed = 0;
 }
 int song_io_take_pending(void) { return take_pending != TAKE_NONE; }
+int song_io_take_failed(void) { return take_failed != 0; }
 int song_io_take_loaded_ram(void) { return take_ram_ok; }
 
 int song_io_take_flush(void)
@@ -686,7 +727,7 @@ int song_io_take_flush(void)
     if (slot < 0)
         slot = first_free_slot();
     if (slot < 0) {
-        failed = 1;
+        take_failed = 1;
         return -1;
     }
     if (take_pending == TAKE_CLEAR || live_bridge_take_nevents() == 0) {
@@ -696,10 +737,10 @@ int song_io_take_flush(void)
                                   (const take_event_t *)live_bridge_take_events());
     }
     if (rc != 0) {
-        failed = 1;
+        take_failed = 1;                    /* S1: only an explicit SAVE or a new take edit retries */
         return rc;
     }
-    failed = 0;
+    take_failed = 0;
     /* T9i r3/NIT: the durable take undo goes at the position it had when the take ended, not at
      * this deferred flush, so a clip edit made after the take is undone first. */
     undo_stack_push_take_at(&undo, &store, (uint8_t)slot, take_pending_ser);
@@ -768,7 +809,7 @@ static int8_t del_slot = -1;
 static int store_quiet(void) { return !live_bridge_transport_playing(); }
 
 /* T8i: a song change clears the clip undo (it belongs to one song). */
-static void clip_undo_clear(void) { undo_stack_init(&undo); }
+static void clip_undo_clear(void) { undo_stack_init(&undo); len_edit_clip = -1; }
 
 int song_io_songs_open(void *ctx, int slot)
 {
@@ -794,6 +835,7 @@ int song_io_songs_open(void *ctx, int slot)
     live_bridge_song_reload();
     live_bridge_song_baseline(song_store_tag(&store, slot));
     take_pending = TAKE_NONE;                            /* T9i: the new song's own take */
+    take_failed = 0;
     take_pending_ser = 0;
     song_io_take_load_ram();
     return 0;
@@ -945,6 +987,19 @@ int song_io_songs_clip_count(void *ctx, int slot)
     return n;
 }
 
+/* TFIXS r1/B1: the deliberate way out of a song that keeps failing to save. Abandon the
+ * current song's unsaved edits and any pending take so the refused open can proceed; the
+ * discarded edits cannot be undone. */
+void song_io_songs_discard(void *ctx)
+{
+    (void)ctx;
+    dirty = 0;
+    failed = 0;
+    take_pending = TAKE_NONE;
+    take_failed = 0;
+    take_pending_ser = 0;
+}
+
 static const songs_ops_t SONG_OPS = {
     0,
     song_io_songs_list,
@@ -957,7 +1012,8 @@ static const songs_ops_t SONG_OPS = {
     song_io_songs_undelete,
     song_io_songs_first_free,
     song_io_songs_can_undelete,
-    song_io_songs_clip_count
+    song_io_songs_clip_count,
+    song_io_songs_discard
 };
 
 const songs_ops_t *song_io_songs_ops(void) { return &SONG_OPS; }

@@ -1,14 +1,22 @@
 """pi32v2 gate regressions: register pushes, split allocation and call chains."""
+import re
 import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
-from check_stack import analyze, CALLBACKS
+from check_stack import analyze, CALLBACKS, SONGS, MIDI, FLASH
 
 
 def dis(body):
     return '\n'.join(f'{name}:\n' + '\n'.join(f' {0x2000000 + k * 256 + j * 2:x}:    00 00             \t{x}' for j, x in enumerate(lines))
                      for k, (name, lines) in enumerate(body.items()))
+
+
+def init_names(text, name):
+    """The non-null identifiers of a positional C initializer, e.g. SONGS_OPS / SINK / FB."""
+    m = re.search(rf'\b{name}\s*=\s*\{{(.*?)\}}', text, re.S)
+    assert m, f'{name} initializer not found'
+    return sorted(part.strip() for part in m.group(1).split(',') if part.strip() and part.strip() != '0')
 
 
 class Gate(unittest.TestCase):
@@ -56,6 +64,17 @@ class Gate(unittest.TestCase):
         self.assertFalse(r.errors)
         self.assertEqual(len(r.warnings), 1)
 
+    def test_unbraced_push(self):
+        # NIT: a single "[--sp] = rets" push is 4 B, like a braced {rets}
+        r = analyze(dis({'root': ['[--sp] = rets', 'rts']}))
+        self.assertEqual(r.frames['root'], 4)
+
+    def test_missing_callback_target_fails(self):
+        # S3: an allowlisted target that is no longer linked must fail, not be skipped
+        r = analyze(dis({'root': ['call r3', 'rts']}),
+                    callbacks={'root': ('renamed_away',)}, product={'root'})
+        self.assertTrue(any('renamed_away' in e for e in r.errors), r.errors)
+
     def test_fpu_half_is_not_call(self):
         body = "root:\n 2000000:    3f e5              <unknown instruction>\n 2000002:    c0 00             \tcall r0\n"
         self.assertFalse(analyze(body, callbacks={}).errors)
@@ -80,11 +99,22 @@ class Gate(unittest.TestCase):
                                 callbacks={'root': ()}).errors)
 
     def test_device_callback_audit(self):
-        import re
         root = Path(__file__).resolve().parents[2]
         engine = (root / 'firmware/src/app/engine.c').read_text()
+        it_songs = (root / 'firmware/src/app/song_io.c').read_text()
+        it_ui = (root / 'firmware/src/app/ui.c').read_text()
+        midi = (root / 'firmware/src/app/midi_live.c').read_text()
+        # the CPU2 job list
         jobs = tuple(sorted(set(re.findall(r'plat_cpu2_run\((\w+),', engine))))
         self.assertEqual(tuple(sorted(CALLBACKS['fm1_c1_main'])), jobs)
+        # the SONGS ops table the view is handed (ui.c) matches its allowlist
+        self.assertEqual(init_names(it_ui, 'SONGS_OPS'), sorted(SONGS))
+        # the MIDI sink matches its allowlist
+        self.assertEqual(sorted(CALLBACKS['midi_in_byte']), sorted(MIDI))
+        self.assertEqual(init_names(midi, 'SINK'), sorted(MIDI))
+        # the song store's flash callbacks match the FLASH allowlist
+        self.assertEqual(init_names(it_songs, 'FB'), sorted(FLASH))
+        # no tap may be assigned without a stack-allowlist entry
         for source in (root / 'firmware/src').rglob('*.c'):
             self.assertIsNone(re.search(r'\bengine_tap\s*=', source.read_text()),
                               f'device tap targets must be added to the stack allowlist: {source}')

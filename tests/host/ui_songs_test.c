@@ -131,6 +131,8 @@ typedef struct {
     uint8_t take[SONGS_SLOTS];
     int     clips[SONGS_SLOTS];
     int     current;
+    int     blocked;                     /* B1: an open is refused until discard is called */
+    int     discards;                    /* the discard hook was called */
 } fake_t;
 
 static int fake_clip_count(const song_t *s)
@@ -182,10 +184,18 @@ static int fake_current(void *ctx) { return ((fake_t *)ctx)->current; }
 static int fake_open(void *ctx, int slot)
 {
     fake_t *f = (fake_t *)ctx;
+    if (f->blocked)
+        return -2;                       /* the store refused: preserve the current song */
     if (!f->used[slot] || f->deleted[slot])
         return -1;
     f->current = slot;
     return 0;
+}
+static void fake_discard(void *ctx)
+{
+    fake_t *f = (fake_t *)ctx;
+    f->discards++;
+    f->blocked = 0;
 }
 static int fake_create_new(void *ctx, int kind, uint16_t bpm_x10, int key)
 {
@@ -267,7 +277,7 @@ static int fake_clips(void *ctx, int slot) { return ((fake_t *)ctx)->clips[slot]
 
 static songs_ops_t FAKE_OPS = { 0, fake_list, fake_current, fake_open, fake_create_new,
                                 fake_copy, fake_rename, fake_del, fake_undelete,
-                                fake_first_free, fake_can_undelete, fake_clips };
+                                fake_first_free, fake_can_undelete, fake_clips, fake_discard };
 
 /* ---- small helpers ------------------------------------------------------- */
 static int fails;
@@ -632,6 +642,41 @@ static void test_slot_policy(void)
     CHECK(strcmp(ui_songs_toast(&u), "CANNOT UNDO") == 0);
 }
 
+/* TFIXS r1/B1: a refused open (the current song cannot be preserved) shows the toast; holding
+ * SEL for 1.5 s discards the unsaved edits and opens the song. Releasing early keeps it. */
+static void test_discard_hold(void)
+{
+    static const char *names[] = {"NIGHT DRIVE", "SUNDAY DUB"};
+    fake_t f;
+    songs_ui_t u;
+    seed(&f, names, 2);                        /* current is 0 */
+    FAKE_OPS.ctx = &f;
+    ui_songs_begin(&u, &FAKE_OPS);
+    u.row = 2;                                 /* slot 1 */
+    f.blocked = 1;
+    feed(&u, 1u << B_SEL, 1000);               /* press: the open is refused */
+    CHECK(u.refused && u.refused_slot == 1);
+    CHECK(strcmp(ui_songs_toast(&u), "SAVE FAILED: SAVE RETRIES,\nHOLD TO DISCARD") == 0);
+    CHECK(f.current == 0 && f.discards == 0);
+    feed(&u, 1u << B_SEL, 1100);               /* still held: the ring starts */
+    CHECK(u.dis_held);
+    render(&u, "build/host/ui_songs/discard_ring.png", 1850);   /* 750/1500 = 50% */
+    feed(&u, 1u << B_SEL, 2700);               /* past 1.5 s: discards and opens */
+    CHECK(f.discards == 1);
+    CHECK(!u.refused && !u.dis_held && f.current == 1);
+
+    /* a tap (release before the ring) does not discard */
+    ui_songs_begin(&u, &FAKE_OPS);
+    u.row = 1;                                 /* slot 0 */
+    f.blocked = 1;
+    f.discards = 0;
+    feed(&u, 1u << B_SEL, 5000);
+    feed(&u, 1u << B_SEL, 5500);
+    CHECK(u.dis_held);
+    feed(&u, 0, 5600);                         /* released early */
+    CHECK(!u.dis_held && f.discards == 0 && f.current == 1);
+}
+
 static void test_deterministic_render(void)
 {
     static const char *names[] = {"NIGHT DRIVE", "SUNDAY DUB"};
@@ -663,6 +708,7 @@ int main(void)
     test_menu_open_copy();
     test_rename();
     test_delete_undo();
+    test_discard_hold();
     test_slot_policy();
     test_deterministic_render();
     if (fails) {

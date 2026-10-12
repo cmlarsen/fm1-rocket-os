@@ -2,9 +2,11 @@
 """Conservative pi32v2 product-stack gate over the linked device disassembly.
 
 Every linked function is a root (a superset of reachable product entry points).
-Frames include saved 32-bit registers and every split sp allocation in the
-prologue. Direct calls and reviewed callback sets add frames; tail transfers
-reuse the caller's frame. New indirect-call owners and recursion fail closed.
+Frames include saved 32-bit registers (braced "{...}" and single unbraced
+pushes alike) and every split sp allocation in the prologue. Direct calls and
+reviewed callback sets add frames; tail transfers reuse the caller's frame.
+New indirect-call owners, a callback target that is no longer linked, and
+recursion all fail closed (a stale allowlist must not silently drop an edge).
 The old objdump splits FPU instructions at 3f e5 / 3f f5; their second half is
 not an instruction, even when it prints as a call or stack adjustment.
 """
@@ -18,7 +20,7 @@ FLASH = ('fb_read', 'fb_erase', 'fb_program')
 SONGS = ('song_io_songs_list', 'song_io_songs_current_slot', 'songs_op_open',
          'song_io_songs_create', 'song_io_songs_copy', 'song_io_songs_rename',
          'songs_op_delete', 'song_io_songs_undelete', 'song_io_songs_first_free',
-         'song_io_songs_can_undelete', 'song_io_songs_clip_count')
+         'song_io_songs_can_undelete', 'song_io_songs_clip_count', 'song_io_songs_discard')
 MIDI = ('ml_note_on', 'ml_note_off', 'ml_all_off', 'ml_launch', 'ml_start',
         'ml_cont', 'ml_stop', 'ml_lost')
 CALLBACKS = {
@@ -30,7 +32,7 @@ CALLBACKS = {
     'do_step': ('bridge_ev',), 'clip_engine_render': ('bridge_ev',),
     'bridge_ev': ('live_sink',), 'take_arm': ('bridge_bar_fn', 'bridge_prelude'),
     'take_stop': ('bridge_bar_fn',), 'take_render': ('take_sink_ev',),
-    'lz_compress': ('sst_count_put', 'sst_wr_put', 'save_put'),
+    'lz_compress': ('sst_count_put', 'sst_wr_put'),
     'sst_wr_put': ('fb_program',),
     'midi_in_byte': MIDI, 'midi_in_tick': MIDI,
     'fm1_c1_main': ('core2_job',),  # plat_cpu2_run(core2_job, ...) in engine.c
@@ -105,6 +107,10 @@ def analyze(dis, stack=24320, margin=2048, callbacks=None, product=None):
         for _, op in body:
             alloc = re.search(r'sp \+= (-\d+)\b', op)
             push = re.search(r'\[--sp\] = \{([^}]+)\}', op)
+            if not push:
+                # a single unbraced register push: "[--sp] = rets" (4 B), which the
+                # braced form alone misses
+                push = re.search(r'\[--sp\] = (\S+)\s*$', op)
             if not prologue and (alloc or push) and name != 'fm1_fatal_stubs':
                 errors.append(f'{name}: stack allocation after prologue requires review: {op}')
             if prologue:
@@ -134,6 +140,11 @@ def analyze(dis, stack=24320, margin=2048, callbacks=None, product=None):
                     for target in callbacks[base]:
                         if target in bodies:
                             edges[name].append((target, frame))
+                        else:
+                            # A listed target that is not linked means the allowlist is stale
+                            # (the function was renamed, inlined away or the list is wrong):
+                            # fail closed rather than silently dropping the edge.
+                            errors.append(f'{name}: callback target {target} is not linked')
     # Bound every linked root; all callbacks are part of the same graph. A cycle
     # with a retained frame has no finite bound, and is rejected, not skipped.
     memo, visiting = {}, []

@@ -1410,6 +1410,7 @@ static void save_project(void)
         return;
     }
     save_wait = 0;
+    song_io_retry();          /* TFIXS r1/B1: an explicit SAVE clears a prior failure and retries */
     rc = project_save();
     say(rc == -7 ? "MEMORY FULL: NOT SAVED" : rc ? "SAVE FAILED" : "SAVED", 0);
     if (!rc)
@@ -2305,8 +2306,10 @@ static int songs_op_open(void *ctx, int slot)
     (void)ctx;
     if (!songs_stop_wait())
         return -1;                            /* the ISR did not settle: refuse the swap */
-    if (song_io_dirty() && song_io_failed())
-        return -2;                            /* preserve unsaved edits until an explicit retry */
+    /* TFIXS r1: keep unsaved edits and a failed/pending take until an explicit SAVE or the
+     * hold-to-discard gesture; a refused switch shows the SAVE FAILED toast. */
+    if ((song_io_dirty() && song_io_failed()) || song_io_take_failed())
+        return -2;
     if (song_io_songs_current_slot(0) >= 0) {
         int fr = song_io_flush();             /* keep a stored song; never auto-save the project seed */
         if (fr < 0)
@@ -2361,7 +2364,8 @@ static const songs_ops_t SONGS_OPS = {
     song_io_songs_undelete,
     song_io_songs_first_free,
     song_io_songs_can_undelete,
-    song_io_songs_clip_count
+    song_io_songs_clip_count,
+    song_io_songs_discard
 };
 
 static void songs_open(void)

@@ -574,12 +574,120 @@ static void test_failed_take_clear(void)
     CHECK(song_io_save() == 0); /* make the next injected failure the empty-take commit */
     fail_prog_once = 1;
     CHECK(song_io_take_flush() < 0);
-    CHECK(song_io_take_pending() && song_io_failed());
+    CHECK(song_io_take_pending() && song_io_take_failed());
     CHECK(song_io_undo_depth() == depth);
     CHECK(song_io_take_flush() == 0); /* an explicit retry succeeds */
-    CHECK(!song_io_take_pending() && !song_io_failed());
+    CHECK(!song_io_take_pending() && !song_io_take_failed());
     boot();
     CHECK(g_take_n == 0 && !g_song.has_take);
+}
+
+/* TFIXS r1/B1: an explicit SAVE clears a failed song save and retries it then; autosave (flush)
+ * still refuses to retry without that explicit action. */
+static void test_save_retry_explicit(void)
+{
+    long o;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    song_io_set_key_clip(0, 5);
+    CHECK(song_io_save() == 0);
+    song_io_set_key_clip(0, 9);
+    fail_prog_once = 1;
+    CHECK(song_io_save() < 0);
+    CHECK(song_io_failed() && song_io_dirty());
+    o = ops;
+    CHECK(song_io_flush() < 0);                  /* autosave does not retry a failed save */
+    CHECK(song_io_flush() < 0);
+    CHECK(ops == o);                             /* no further erase/program happened */
+    CHECK(song_io_failed());
+    song_io_retry();                             /* the explicit SAVE lifts the failure */
+    CHECK(!song_io_failed());
+    CHECK(song_io_flush() == 0);                 /* ...and the store is tried again */
+    CHECK(ops > o && !song_io_dirty() && !song_io_failed());
+    CHECK(((song_t *)live_bridge_song())->key_clip[0] == 9);
+}
+
+/* TFIXS r1/B1: the SONGS hold-to-discard drops the unsaved edits so a switch may proceed. */
+static void test_discard_unsaved(void)
+{
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    CHECK(song_io_save() == 0);
+    song_io_set_key_clip(0, 9);
+    fail_prog_once = 1;
+    CHECK(song_io_save() < 0);
+    CHECK(song_io_dirty() && song_io_failed());
+    song_io_songs_discard(0);
+    CHECK(!song_io_dirty() && !song_io_failed());
+    CHECK(song_io_flush() == 0);                 /* the switch's flush is now a no-op */
+}
+
+/* TFIXS r1/S1: a failed take write is retried only by an explicit SAVE or a new take edit, never
+ * by autosave or a switch attempt (which call song_io_flush). */
+static void test_failed_take_no_retry(void)
+{
+    long o;
+    reset_flash();
+    boot();
+    CHECK(song_io_save() == 0);
+    live_bridge_take_loaded(2, 100u, 1200u);
+    song_io_take_request_save();
+    CHECK(song_io_flush() == 0);                 /* the take commits */
+    song_io_take_request_clear();
+    CHECK(song_io_save() == 0);                  /* the song commits; the clear is still pending */
+    fail_prog_once = 1;
+    CHECK(song_io_take_flush() < 0);             /* the empty-take commit fails */
+    CHECK(song_io_take_pending() && song_io_take_failed());
+    o = ops;
+    CHECK(song_io_flush() < 0);                  /* autosave does not retry the failed take */
+    CHECK(song_io_flush() < 0);                  /* nor a switch attempt */
+    CHECK(ops == o);                             /* nothing was rewritten */
+    CHECK(song_io_take_pending() && song_io_take_failed());
+    song_io_retry();                             /* an explicit SAVE lifts the failure */
+    CHECK(!song_io_take_failed());
+    CHECK(song_io_flush() == 0);                 /* ...and commits the pending clear */
+    CHECK(!song_io_take_pending() && ops > o);
+    /* a new take edit also re-enables the retry */
+    live_bridge_take_loaded(1, 50u, 1200u);
+    song_io_take_request_save();
+    CHECK(song_io_save() == 0);
+    fail_prog_once = 1;
+    CHECK(song_io_take_flush() < 0);
+    CHECK(song_io_take_failed());
+    o = ops;
+    CHECK(song_io_flush() < 0 && ops == o);
+    song_io_take_request_save();                 /* a new take edit clears the failure */
+    CHECK(!song_io_take_failed());
+    CHECK(song_io_flush() == 0 && !song_io_take_pending());
+}
+
+/* TFIXS r1/S2: consecutive clip-length detents of one clip are one undo record; any other edit or
+ * an undo starts a new one. */
+static void test_clip_len_coalesce(void)
+{
+    int i;
+    reset_flash();
+    g_proj_hash = 0x1111u;
+    boot();
+    wipe_clips();
+    song_io_clip_create(0, 32, 0, 0);
+    CHECK(song_io_clip_len(0) == 32);
+    song_io_clip_set_len(0, 31);
+    CHECK(song_io_undo_depth() == 1);
+    for (i = 30; i >= 20; i--)                   /* eleven more detents */
+        song_io_clip_set_len(0, i);
+    CHECK(song_io_clip_len(0) == 20);
+    CHECK(song_io_undo_depth() == 1);            /* the whole sweep is one record */
+    CHECK(song_io_undo() == UNDO_DONE);
+    CHECK(song_io_clip_len(0) == 32);            /* the first detent's before-state */
+    CHECK(song_io_redo() == UNDO_DONE && song_io_clip_len(0) == 20);
+    /* another edit ends the coalescing: two length records again */
+    song_io_clip_set_len(0, 19);
+    song_io_clip_set_mode(0, 1);                 /* a different action */
+    song_io_clip_set_len(0, 18);
+    CHECK(song_io_undo_depth() == 3);
 }
 
 int main(void)
@@ -600,6 +708,10 @@ int main(void)
     test_motion_persistence();
     test_shorten_persistence();
     test_failed_take_clear();
+    test_save_retry_explicit();
+    test_discard_unsaved();
+    test_failed_take_no_retry();
+    test_clip_len_coalesce();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

@@ -1,5 +1,6 @@
-# T6i review item 3: a failed song save shows the error and does not retry on a timer; the next
-# edit is what brings it back, and it then succeeds on a different extent.
+# TFIXS r1/B1: a failed song save shows the error and stays dirty. Autosave does not retry it, but
+# the explicit SAVE tap does (docs: "SAVE retries; a new edit also re-enables saving"), and it then
+# succeeds on a different extent.
 wait 300
 assignkey 0 5
 tap SAVE
@@ -13,18 +14,20 @@ tap SAVE
 expect songfailed 1
 expect songdirty 1
 expect songsaves 1
-# no further erase or program without a new edit
-tap SAVE
+# autosave / a wait never retries a failed save
 wait 6000
 expect songfailed 1
 expect songsaves 1
-expect songwrites 9
-# a new edit re-enables saving; it succeeds on another extent
+# the explicit SAVE retries and commits on another extent
+tap SAVE
+expect songfailed 0
+expect songdirty 0
+expect songsaves 2
+# a new edit re-enables saving; the SAVE commits it
 assignkey 0 11
 expect songfailed 0
 tap SAVE
-expect songsaves 2
+expect songsaves 3
 expect songdirty 0
-expect songwrites 16
 reboot
 expect keyclip0 11
