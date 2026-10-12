@@ -1,0 +1,16 @@
+# TPOL r3: a pending HOME + pad tap resolves on whichever of the two is released first. Releasing
+# HOME a moment before the pad still launches the clip now (the tap is inside the 250 ms window).
+wait 300
+expect clipused1 1
+tap PLAY
+wait 200
+expect liveclip0 -1
+press HOME
+key 1 down
+wait 60
+release HOME
+wait 10
+key 1 up
+wait 120
+expect liveclip0 1
+dump studio_tap_home_first.json

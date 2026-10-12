@@ -729,6 +729,8 @@ static int expect(const char *what, const char *val)
         got = ui_songs_up();
     else if (!strcmp(what, "msg"))                 /* T8i: a header message is showing */
         got = (ui.msg_until && (int32_t)(ui.msg_until - plat_ms()) > 0) ? 1 : 0;
+    else if (!strcmp(what, "sttoast"))             /* TPOL r1: the STUDIO toast (LOCKED / CLEAR) is up */
+        got = (st.toast_until && (int32_t)(st.toast_until - plat_ms()) > 0) ? 1 : 0;
     else if (!strcmp(what, "songrow"))             /* T8i: the view's cursor row */
         got = ui_songs_row();
     else if (!strcmp(what, "liveclips")) {         /* T8i: used clips in the live song */

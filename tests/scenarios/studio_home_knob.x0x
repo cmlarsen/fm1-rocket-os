@@ -1,0 +1,19 @@
+# TPOL r1: the song home's K1-K4 strip edits the cursor clip's settings (length, mode, launch,
+# swing), so the song home has no motion lane. HOME + a knob there must leave the value alone and
+# mark HOME used, and the STUDIO cheat sheet must not list "K1-K4 touch: clear knob lane" on a
+# screen that has no lane. (The row stays on the sound pages and the clip MOTION page.)
+wait 300
+expect clipused0 1
+expect cliplen0 16
+press HOME
+wait 600
+expect sheet 1
+spin K1 20
+wait 100
+expect cliplen0 16
+expect msg 1                    # "NO LANES HERE": the gesture answers instead of editing
+shot studio_home_knob_sheet.png
+release HOME
+wait 100
+expect cliplen0 16
+dump studio_home_knob.json

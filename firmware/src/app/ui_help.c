@@ -69,21 +69,31 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
 };
 
 /* the cheat sheet: the HOME combos of a context (key, tap/hold/touch, what it does). STUDIO is
- * Sys-Shift's six rows; LIVE is the same minus the editing rows (pad hold, knob-lane touch). */
-typedef struct { const char *key, *mod, *does; } help_row_t;
+ * Sys-Shift's five rows; LIVE is the same minus the editing rows (pad hold, knob-lane touch).
+ * `lane` marks the row that only makes sense where the knobs have a motion lane (the sound pages
+ * and the clip MOTION page), so the song home does not claim it. */
+typedef struct { const char *key, *mod, *does; uint8_t lane; } help_row_t;
 static const help_row_t SHEET_STUDIO[] = {
-    {"REC",    "tap",   "undo"},
-    {"PLAY",   "tap",   "redo"},
-    {"PAD",    "tap",   "launch now"},
-    {"PAD",    "hold",  "clear clip"},
-    {"K1-K4",  "touch", "clear knob lane"}
+    {"REC",    "tap",   "undo",            0},
+    {"PLAY",   "tap",   "redo",            0},
+    {"PAD",    "tap",   "launch now",      0},
+    {"PAD",    "hold",  "clear clip",      0},
+    {"K1-K4",  "touch", "clear knob lane", 1}
 };
 static const help_row_t SHEET_LIVE[] = {
-    {"REC",  "tap", "undo"},
-    {"PLAY", "tap", "redo"},
-    {"PAD",  "tap", "launch now"},
-    {"FX",   "tap", "reset all FX"}
+    {"REC",  "tap", "undo",          0},
+    {"PLAY", "tap", "redo",          0},
+    {"PAD",  "tap", "launch now",    0},
+    {"FX",   "tap", "reset all FX",  0}
 };
+
+/* The K1-K4 lane row applies only where HOME + a knob clears a lane: the sound pages
+ * (V_PART/V_SOUND) and the clip MOTION page. On the song home and the settings/notes pages the
+ * knobs edit the clip, so the row is hidden and the gesture answers "NO LANES HERE". */
+static int help_knob_lanes_here(void)
+{
+    return ui.view == V_PART || ui.view == V_SOUND || ui.view == V_CLIPMOTION;
+}
 
 static const help_card_t *help_card_for(int ctx, int b)
 {
@@ -218,6 +228,8 @@ static void help_draw_sheet(int band)
     int n = HELP_SHEET_N(ctx), i;
     for (i = 0; i < n; i++) {
         int32_t abs = HELP_SHEET_Y0 + i * HELP_SHEET_STEP, y = abs - band * BAND_H, cw, x;
+        if (rows[i].lane && !help_knob_lanes_here())
+            continue;                                    /* skip the lane row where there is no lane */
         if (y <= -HELP_SHEET_H || y >= BAND_H)
             continue;
         box(4, y, 232, HELP_SHEET_H, TOK_SURF);

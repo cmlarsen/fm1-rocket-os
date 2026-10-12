@@ -1,0 +1,18 @@
+# TPOL r2: a HOME + hold the player abandons before the ring fills keeps the clip and must not
+# launch it. A release past 250 ms is a hold, not a tap: the ring shows ("release: keep"), and
+# letting go cancels the clear silently.
+wait 300
+expect clipused1 1
+tap PLAY
+wait 200
+expect liveclip0 -1
+press HOME
+key 1 down
+wait 1400
+shot studio_clear_abort_ring.png
+key 1 up
+release HOME
+wait 120
+expect clipused1 1
+expect liveclip0 -1
+dump studio_clear_abort.json

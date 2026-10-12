@@ -135,6 +135,7 @@ int  studio_cursor_clip(void);                /* the clip under the cursor, -1 n
 int  studio_cursor_role(void);
 void studio_set_cursor(int role, int col);    /* the runner's test setup */
 static int  studio_holding(void);             /* a clear/copy hold is in progress */
+void studio_drop_tap(void);                   /* forget a pending HOME + pad tap (no late launch) */
 void studio_tick(void);                        /* the clear / copy hold timers */
 int  studio_cursor(void);                      /* packed role<<8 | clip, for the runner */
 static void studio_sound_key(int k, int down); /* the sound page's keys audition the role */

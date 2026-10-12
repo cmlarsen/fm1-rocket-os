@@ -1,5 +1,5 @@
 {
-  "transport": {"playing": 0, "bpm": 125.0, "bar": 0, "beat": 0, "step": 0, "sample": 389120},
+  "transport": {"playing": 0, "bpm": 125.0, "bar": 0, "beat": 0, "step": 0, "sample": 400640},
   "parts": [
     {"part": 0, "ppat": 0, "pcue": -1, "mute": 0},
     {"part": 1, "ppat": 0, "pcue": -1, "mute": 0},

@@ -1,4 +1,6 @@
-# TLSET: stage lock blocks the launch-mode clear while playing, and only then.
+# TLSET: stage lock blocks the launch-mode clear while playing, and only then. TPOL r1: the lock
+# only refuses a hold once it passes the 250 ms tap threshold. A HOME + tap still launches now,
+# with no LOCKED toast; a refused hold neither clears nor launches the clip it refused.
 wait 300
 tap SEQ
 tap HOME
@@ -19,12 +21,28 @@ release PLAY
 wait 100
 tap PLAY
 wait-bar 1
+expect liveclip0 0
+# a HOME + tap launches now with the lock on, and no LOCKED toast appears (the lock does not touch a tap)
+press HOME
+key 1 down
+wait 80
+shot lock_tap.png
+expect sttoast 0
+key 1 up
+release HOME
+wait 100
+expect liveclip0 1
+# a refused HOME + hold (past 250 ms) shows LOCKED, keeps the clip and does not launch it either
 press HOME
 key w0 down
 wait 1700
+expect sttoast 1
 key w0 up
 release HOME
+wait 100
 expect clipused0 1
+expect liveclip0 1
+# stopped: the same hold clears
 tap PLAY
 wait 300
 press HOME

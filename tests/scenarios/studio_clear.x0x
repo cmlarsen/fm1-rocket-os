@@ -1,11 +1,23 @@
 # T7a STUDIO 9 + 10: HOME + hold a pad fills a ring that names the clip; on completion the clip
-# clears with an undo entry. Releasing early cancels. HOME+REC undoes, HOME+PLAY redoes.
+# clears with an undo entry. A release past the 250 ms tap threshold but before the fill keeps the
+# clip (no launch); a short tap launches now. HOME+REC undoes, HOME+PLAY redoes.
 wait 300
 tap SEQ
 tap HOME
 wait 1400
 expect clipused0 1
-# releasing early cancels the clear, and (TPOL) HOME + tap launches the clip now
+# a short HOME + tap (under 250 ms) launches the clip now; a plain tap cancels the queue again
+press HOME
+key w0 down
+wait 150
+key w0 up
+release HOME
+wait 100
+expect clipused0 1
+expect liveque0 0
+tapkey 0
+expect liveque0 -1
+# a hold past 250 ms shows the ring; releasing before it fills keeps the clip and does not launch
 press HOME
 key w0 down
 wait 400
@@ -13,9 +25,6 @@ key w0 up
 release HOME
 wait 100
 expect clipused0 1
-expect liveque0 0
-# a plain tap cancels the queued launch again, so the rest of the test starts clean
-tapkey 0
 expect liveque0 -1
 # HOME + hold the pad: the ring fills over ~1.5 s
 press HOME

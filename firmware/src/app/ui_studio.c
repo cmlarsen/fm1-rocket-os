@@ -19,6 +19,10 @@ static const uint16_t ST_COL[ST_ROLE_N] = {TOK_DRUM, TOK_BASS, TOK_LEAD, TOK_CHO
 static const char *const ST_ROLE[ST_ROLE_N] = {"DRUM", "BASS", "LEAD", "CHRD", "FX"};
 
 #define ST_CLEAR_MS 1500u                 /* hold-to-confirm, like the take (design: ~1.5 s) */
+#define ST_TAP_MS 250u                    /* under this a HOME + pad is a tap (launch now); past it, a hold */
+#define ST_TAP_NONE 0u                    /* no HOME + pad pending */
+#define ST_TAP_PENDING 1u                 /* HOME + pad down, under the 250 ms threshold */
+#define ST_TAP_REFUSED 2u                 /* the hold crossed the threshold but the stage lock refused it */
 #define ST_TOAST_MS 1800u
 
 typedef struct {
@@ -27,13 +31,14 @@ typedef struct {
     uint8_t clear_clip;                   /* the clip being cleared, 0xFF none */
     uint8_t clear_sel;                    /* the clear is SEL-on-cursor, not HOME+key */
     uint8_t clear_key;                    /* the key held for the clear, 0xFF for SEL */
-    uint8_t tap_key;                      /* HOME + this key: launch it now if released early, 0xFF none */
-    uint32_t clear_t0;
+    uint8_t tap;                          /* ST_TAP_*: a HOME + pad between press and release */
+    uint8_t tap_key, tap_clip;            /* the pending tap's key and clip */
+    uint32_t clear_t0, tap_t0;
     char tag[8], msg[26];                 /* the toast (UNDO / REDO / CLEAR / COPY) */
     uint32_t toast_until;
 } studio_t;
 
-static studio_t st = {.copy_src = 0xFF, .clear_clip = 0xFF, .clear_key = 0xFF, .tap_key = 0xFF};
+static studio_t st = {.copy_src = 0xFF, .clear_clip = 0xFF, .clear_key = 0xFF, .tap_clip = 0xFF};
 
 /* ---- helpers ---- */
 static int st_role_n(int r) { return live_bridge_role_nclips(r); }
@@ -132,11 +137,19 @@ void studio_enter(void)
     if (st.col >= (uint8_t)st_role_n(st.role))
         st.col = 0;
     st.copy_src = 0xFF;
-    st.tap_key = 0xFF;
+    studio_drop_tap();
     build_pages();
 }
 
 /* ============================================================ the gestures === */
+
+/* drop a pending (or refused) HOME + pad tap: it never launches again */
+void studio_drop_tap(void)
+{
+    st.tap = ST_TAP_NONE;
+    st.tap_key = 0xFF;
+    st.tap_clip = 0xFF;
+}
 
 static void st_finish_clear(void)
 {
@@ -150,7 +163,7 @@ static void st_finish_clear(void)
     if (st.clear_sel)
         ui.btn_used |= 1u << B_SEL;   /* suppress the SEL release */
     st.clear_clip = 0xFF;
-    st.tap_key = 0xFF;                /* a completed clear is not a launch-now tap */
+    studio_drop_tap();                /* a completed clear is not a launch-now tap */
 }
 
 static int st_key_clip(int k) { return k >= 0 && k < (int)LIVE_NCLIPS ? k : -1; }
@@ -163,17 +176,6 @@ static int st_clear_locked(void)
     return 1;
 }
 
-/* Start a clear on a clip if it holds one (HOME + a pad, or SEL on the cursor). */
-static void st_clear_start(int clip, int sel, int key)
-{
-    if (clip < 0 || !live_bridge_clip_used(clip) || st_clear_locked())
-        return;
-    st.clear_clip = (uint8_t)clip;
-    st.clear_sel = (uint8_t)sel;
-    st.clear_key = (uint8_t)key;
-    st.clear_t0 = plat_ms();
-}
-
 void studio_tick(void)
 {
     uint32_t now = plat_ms();
@@ -181,7 +183,7 @@ void studio_tick(void)
      * HOME + a pad; the ring runs 1.5 s from the press. */
     if ((ui.view == V_STUDIO) && (ui.btn & (1u << B_SEL)) && !(ui.btn & (1u << B_HOME)) &&
         !(ui.btn_used & (1u << B_SEL)) &&
-        st.clear_clip == 0xFF && (now - ui.down_t[B_SEL]) >= 250u) {
+        st.clear_clip == 0xFF && (now - ui.down_t[B_SEL]) >= ST_TAP_MS) {
         int c = st_cursor_clip();
         if (c >= 0 && live_bridge_clip_used(c)) {
             if (st_clear_locked()) {
@@ -191,6 +193,31 @@ void studio_tick(void)
                 st.clear_sel = 1;
                 st.clear_key = 0xFF;
                 st.clear_t0 = ui.down_t[B_SEL];
+            }
+        }
+    }
+    /* HOME + a pad: pending until the 250 ms threshold. Released first (either button): a tap that
+     * launches the clip now. Held past it: a hold (the ring), and only then does the stage lock
+     * refuse it. A refused hold never launches. */
+    if (st.tap != ST_TAP_NONE) {
+        uint32_t el = now - st.tap_t0;
+        int home = (ui.btn & (1u << B_HOME)) != 0;
+        int key = ((ui.keys >> st.tap_key) & 1u) != 0;
+        if (!home || !key) {                             /* whichever of the two is released first */
+            int launch = st.tap == ST_TAP_PENDING && el < ST_TAP_MS;
+            int c = st.tap_clip;
+            studio_drop_tap();
+            if (launch && c >= 0 && live_bridge_clip_used(c))
+                live_bridge_launch_now((uint8_t)c);
+        } else if (st.tap == ST_TAP_PENDING && el >= ST_TAP_MS) {
+            if (st_clear_locked()) {
+                st.tap = ST_TAP_REFUSED;                 /* refused: the release must not launch */
+            } else {
+                st.clear_clip = st.tap_clip;
+                st.clear_sel = 0;
+                st.clear_key = st.tap_key;
+                st.clear_t0 = st.tap_t0;                 /* the ring runs from the press */
+                studio_drop_tap();
             }
         }
     }
@@ -246,10 +273,12 @@ static void studio_handle_key(int k, int down)
             st.copy_src = 0xFF;                          /* the source let go: the copy ends */
         if (st.clear_clip == clip && !st.clear_sel)
             st.clear_clip = 0xFF;                        /* HOME + a released pad: cancel the clear */
-        if (st.tap_key == (uint8_t)k) {                  /* HOME + a tap: launch it now, not quantized */
-            st.tap_key = 0xFF;
-            if ((ui.btn & (1u << B_HOME)) && live_bridge_clip_used(clip))
-                live_bridge_launch_now((uint8_t)clip);
+        if (st.tap != ST_TAP_NONE && st.tap_key == (uint8_t)k) {
+            int launch = st.tap == ST_TAP_PENDING &&
+                         (uint32_t)(plat_ms() - st.tap_t0) < ST_TAP_MS;   /* a tap, not a hold */
+            studio_drop_tap();
+            if (launch && live_bridge_clip_used(clip))
+                live_bridge_launch_now((uint8_t)clip);   /* the pad was released first: launch now */
         }
         return;
     }
@@ -257,9 +286,12 @@ static void studio_handle_key(int k, int down)
         return;
     if (ui.btn & (1u << B_HOME)) {                       /* HOME + a pad: tap launches now, hold clears */
         ui.btn_used |= 1u << B_HOME;
-        if (used)
+        if (used) {                                      /* pending until the release (or 250 ms) */
+            st.tap = ST_TAP_PENDING;
             st.tap_key = (uint8_t)k;
-        st_clear_start(clip, 0, k);
+            st.tap_clip = (uint8_t)clip;
+            st.tap_t0 = plat_ms();
+        }
         return;
     }
     if (st.copy_src != 0xFF) {                           /* a target while the source is held */
@@ -387,6 +419,11 @@ static void studio_input(void)
     for (i = 0; i < 4; i++) {
         if ((e = enc(EN_K1 + i)) == 0)
             continue;
+        if (ui.btn & (1u << B_HOME)) {                   /* no motion lane here: the value stays put */
+            ui.btn_used |= 1u << B_HOME;
+            say("NO LANES HERE", 0);
+            continue;
+        }
         turn_ref(pg.r[cur_page()][i], e, EN_K1 + i);
         ui.touched = (int8_t)i;
         ui.touch_until = plat_ms() + 900u;
