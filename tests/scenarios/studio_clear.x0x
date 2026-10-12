@@ -5,13 +5,18 @@ tap SEQ
 tap HOME
 wait 1400
 expect clipused0 1
-# releasing early cancels
+# releasing early cancels the clear, and (TPOL) HOME + tap launches the clip now
 press HOME
 key w0 down
 wait 400
 key w0 up
 release HOME
+wait 100
 expect clipused0 1
+expect liveque0 0
+# a plain tap cancels the queued launch again, so the rest of the test starts clean
+tapkey 0
+expect liveque0 -1
 # HOME + hold the pad: the ring fills over ~1.5 s
 press HOME
 key w0 down

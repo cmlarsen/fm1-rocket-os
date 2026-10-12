@@ -41,7 +41,7 @@ Related: [requirements](requirements.md) · [interaction model](interaction-mode
 ## 7. Recording is playing
 - You start recording by playing, with no setup. An empty clip plus REC records from the next bar, and pressing again closes the loop.
 - **Capture after the fact:** you can keep what you just played even if REC was off (GrooveOS, Melodee, Ableton Capture).
-- Knob moves made while recording are stored. Each recorded knob lane can be seen and can be cleared on its own (modifier + touch the knob).
+- Knob moves made while recording are stored. Each recorded knob lane can be seen and can be cleared on its own (HOME + the knob).
 
 ## 8. Saving is boring and reliable
 - **One state per song.** The song on screen is the song. It autosaves while stopped and silent, because flash writes stall audio, and SAVE tap writes it immediately. There is no separate "saved copy" that can disagree with what you hear. Undo is the safety net.

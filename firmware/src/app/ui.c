@@ -3631,7 +3631,10 @@ static uint16_t footer_text(const char **a, const char **b, const char **c)
     }
     return C_DIM;
 }
-#define FOOT_Y 71                     /* in the knob row: its last line, in the tiny face */
+#define FOOT_Y 70                     /* in the knob row: its last line, in the tiny face. One row
+                                       * higher than the caps alone need, so a lowercase descender
+                                       * reaches row 82, not past the 82 px knob strip
+                                       * (tests/lint/check_layout.py). */
 static void draw_footer(void)
 {
     const char *a, *b, *c;

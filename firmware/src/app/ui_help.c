@@ -19,7 +19,7 @@ typedef struct { const char *l[HELP_CARD_LINES]; } help_card_t;
  * the report lists where the two disagree (the text follows the model, the code is unchanged). */
 static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
 [HELP_CTX_STUDIO] = {
-    [B_FX]   = {{"the FX page", "tap again: next page", "HOME+FX: reset all FX"}},
+    [B_FX]   = {{"the FX page", "tap again: next page", "the punch FX are in LIVE"}},
     [B_SEL]  = {{"launch the cursor clip", "hold 1.5 s: clear it", "in a list: run the row"}},
     [B_ENV]  = {{"no action here", "the sound lives on EDIT"}},
     [B_LFO]  = {{"the mixer and master", "tap again: next page"}},
@@ -39,7 +39,7 @@ static const help_card_t HELP_CARD[HELP_NCTX][NB] = {
     [B_SEL]  = {{"SEL toggles the layers", "off: PADS, lit: PLAY", "in SETUP: open the row"}},
     [B_ENV]  = {{"no action in LIVE"}},
     [B_LFO]  = {{"no action in LIVE"}},
-    [B_EDIT] = {{"EDIT: setup / EDIT again: done", "hold key + PRESETS: assign", "ALGO: change row value", "MIDI, clock, lock, take"}},
+    [B_EDIT] = {{"EDIT: setup, EDIT: done", "SELECT row, ALGO value", "SEL: assign keys or take", "clock, MIDI, lock, take"}},
     [B_GLO]  = {{"GLO + a button: its card", "nothing else in LIVE"}},
     [B_HOME] = {{"HOME + tap a pad:", "launch it now", "hold: the cheat sheet", "HOME never exits LIVE"}},
     [B_SAVE] = {{"no action in LIVE", "the song saves when stopped"}},
@@ -76,8 +76,7 @@ static const help_row_t SHEET_STUDIO[] = {
     {"PLAY",   "tap",   "redo"},
     {"PAD",    "tap",   "launch now"},
     {"PAD",    "hold",  "clear clip"},
-    {"K1-K4",  "touch", "clear knob lane"},
-    {"FX",     "tap",   "reset all FX"}
+    {"K1-K4",  "touch", "clear knob lane"}
 };
 static const help_row_t SHEET_LIVE[] = {
     {"REC",  "tap", "undo"},
@@ -279,7 +278,6 @@ void help_draw_songs(void)
 
 int help_footer(const char **a, const char **b, const char **c)
 {
-    /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
     if (hlp.sheet) {
         *a = "HOLDING HOME";
         *b = "TAP HOME: BACK";

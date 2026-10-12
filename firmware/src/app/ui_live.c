@@ -644,7 +644,7 @@ static void live_draw_header(void)
 
 static uint16_t live_footer(const char **a, const char **b, const char **c)
 {
-    /* uppercase: a lowercase descender would reach past the 82 px knob strip (screens-lint) */
+    /* the design's lowercase; FOOT_Y leaves room for the descenders (ui.c) */
     *a = *b = *c = 0;
     if (live_bridge_take_recording() || live_bridge_take_armed()) {
         *a = "REC STOP";
@@ -668,18 +668,18 @@ static uint16_t live_footer(const char **a, const char **b, const char **c)
         return C_DIM;
     }
     if (fx_layer_active()) {
-        *a = "TAP LATCH";
-        *b = "HOME+FX RESET";
+        *a = "tap latch hold moment";
+        *b = "HOME+FX reset";
     } else if (live.layer == LIVE_PLAY) {
         static char t[24];
         char *q;
-        q = put_s(t, "KEYS PLAY ");
+        q = put_s(t, "keys play ");
         put_s(q, LV_ROLE_L[live.focus]);
         *a = t;
-        *b = "SEL PADS";
+        *b = "SEL pads";
     } else {
-        *a = "SEL PLAY";
-        *b = "HOLD PLAY EXIT";
+        *a = "SEL play";
+        *b = "hold PLAY exit";
     }
     return C_DIM;
 }
