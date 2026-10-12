@@ -30,6 +30,10 @@
 #define CLIP_ENGINE_FS 48000u
 #endif
 #define CLIP_STEP_NUM ((uint32_t)CLIP_ENGINE_FS * 150u)
+/* At supported rates, phase and new_l are <= 36000, so their product fits u32. */
+#if CLIP_ENGINE_FS > 48000u
+#error "tempo phase arithmetic requires CLIP_ENGINE_FS <= 48000"
+#endif
 /* publish we have written the slot / read the head before the slot */
 #define CLIP_BARRIER() __asm__ volatile("" ::: "memory")
 
@@ -63,7 +67,7 @@ static void set_bpm(clip_engine_t *e, uint16_t bpm_x10)
         if (phase > e->step_L)
             phase = e->step_L;
         /* keep the same fraction of the step, so the next boundary is exactly one step away */
-        scaled = (uint32_t)((uint64_t)phase * new_l / e->step_L);
+        scaled = phase * new_l / e->step_L;
         e->step_sample = e->elapsed - scaled;
         e->step_frac = 0;
     } else {
@@ -259,7 +263,7 @@ static void step_events(clip_engine_t *e, uint8_t role, uint8_t clip, uint8_t st
             if (nt->len == 0 || nt->step != step)
                 continue;
             release_pitch(e, role, nt->note, off, sink);   /* a retrigger cuts the old one */
-            dur = (uint32_t)((uint64_t)nt->len * e->step_L);
+            dur = (uint32_t)nt->len * e->step_L;
             if (dur == 0)
                 dur = 1;
             end = abs + dur;
