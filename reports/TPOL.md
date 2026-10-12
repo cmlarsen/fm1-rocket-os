@@ -136,6 +136,95 @@ Both clear the 8,192 B rule. No hardware was flashed.
   always 0 and `motion_touch` can never allocate an X0X lane; the sound-page HOME + knob therefore
   answers "NO MOTION ON …". The live lane is the clip's (T7b), and item 1's scenario pins the
   gesture on both. If a sound-page lane is ever wanted again, `motion_touch` needs a transport.
-- **HOME + tap vs HOME + hold.** A release before the 1.5 s clear completes is a tap and launches;
-  a completed hold clears. This is the model's "HOME + tap launches now / HOME + hold clears"
-  applied to the one HOME + pad gesture. `studio_clear` is updated to say so.
+  Both `motion_forget` and `motion_touch` stay in the tree **unused**, under the X0X layout rule
+  (the firmware keeps X0X's own code; the app around it changed).
+- **HOME + tap vs HOME + hold (r1).** A release before the 250 ms tap threshold launches now; past
+  it the ring shows, and a release before the fill keeps the clip with no launch. This is the
+  model's "HOME + tap launches now / HOME + hold clears" applied to the one HOME + pad gesture; the
+  r1 section below has the detail.
+
+## r1 (the Opus review)
+
+The review found four STUDIO HOME-gesture bugs and some doc nits. Each behaviour change starts from
+a scenario that fails on the pre-r1 tree; the reviewer's scratch repros (`repro_r1/`) are folded
+into `tests/scenarios/` and deleted.
+
+### 1 + 2 + 4. The HOME + pad clear / tap (`ui_studio.c`)
+
+Before, a HOME + pad press started the ring at the press and the release always launched, so a
+100 ms tap flashed the red clear ring and a clear abandoned at 1.4 s — the ring read "release:
+keep" — launched the clip mid-set. A HOME + pad is now **pending** until the 250 ms threshold the
+SEL clear already uses: a release under 250 ms is a tap that launches the clip now
+(`live_bridge_launch_now`), and past 250 ms the ring shows and a release before the fill keeps the
+clip with no launch. The stage lock is checked — and the LOCKED toast shown — only once the hold
+passes 250 ms, so a HOME + tap launches with the lock on and no toast, and a refused hold never
+launches. The pending tap resolves on whichever of HOME and the pad is released first, inside the
+window (`studio_tick` plus the pad's release in `studio_handle_key`); it is dropped on entering
+STUDIO and on the clip-settings hop that does not run `studio_enter`.
+
+- `tests/scenarios/studio_clear_abort.x0x` (new) — HOME + hold a pad 1.4 s, then release: the clip
+  stays and `liveclip0` is -1. Fails on the pre-r1 tree (`liveclip0` 1).
+- `tests/scenarios/studio_tap_home_first.x0x` (new) — HOME + pad, releasing HOME first: `liveclip0`
+  is 1. Fails before (`liveclip0` -1).
+- `tests/scenarios/tlset_lock.x0x` — now pins that a HOME + tap launches with the lock on and shows
+  no LOCKED toast (`expect sttoast 0`), and that a refused hold neither clears nor launches
+  (`clipused0` 1, `liveclip0` 1).
+- `tests/scenarios/studio_clear.x0x` — its early release is a real sub-250 ms tap, and a 400 ms
+  hold is pinned to keep the clip with no launch (`liveque0` -1).
+- `host/x0x_host.c` gains `expect sttoast` (the STUDIO toast is up), so the LOCKED-toast timing is
+  testable.
+
+### 3. HOME + a knob on the song home (`ui_studio.c`, `ui_help.c`)
+
+The song home's K1–K4 edit the cursor clip (length, mode, launch, swing), so it has no motion lane;
+the cheat sheet still claimed "K1-K4 touch: clear knob lane". `studio_input` now leaves the value
+alone on HOME + a knob there, marks HOME used and says "NO LANES HERE"; `ui_help.c` draws the
+sheet's lane row only where a lane exists (the sound pages and the clip MOTION page).
+
+- `tests/scenarios/studio_home_knob.x0x` (new) — HOME + K1 on the song home keeps `cliplen0` 16
+  (it was 36) and `expect msg 1`; its shot shows the sheet without the lane row.
+- interaction-model.md's STUDIO task row and the README glossary now say where the gesture applies.
+
+### NITs
+
+- ux-principles.md calls SEL's LIVE layer toggle the one exception to "the same control does the
+  same job".
+- `ui_help.c`'s sheet comment says five rows, not six.
+- `plat.h` names Felucca's **SCL** for the second button (SEL stays the project's name when porting
+  `panel.c`); `fm1-hardware.md` keeps the sources' SCL in the Buttons row with the same note.
+- build-plan.md's TPOL bullet drops the Classic exception (Classic is gone) and says where HOME + a
+  knob clears a lane.
+- The README glossary's role line is DRUMS…FX (no NOISE engine mixed in) and stage lock drops "from
+  launch mode".
+- The notes above record that `motion_forget` / `motion_touch` are kept unused.
+
+### Goldens (GOLDEN_UPDATE=1, viewed at 1:1)
+
+- `help_cards/help_sheet_studio.png`, `help_sheet_undo.png`: the STUDIO sheet drops its K1–K4 lane
+  row (4634 px, the last row at y 111); every other row is pixel-identical.
+- `studio_clear/studio_clear_ring.png`: the arc's leading edge moves 19 px (the scenario's added
+  steps shift the render frame); the ring's content is unchanged. `studio_clear/studio_clear.json`:
+  the absolute `transport.sample` moves (389120 → 400640).
+- New: `studio_home_knob/` (json + `studio_home_knob_sheet.png`), `studio_clear_abort/` (json +
+  `studio_clear_abort_ring.png`), `studio_tap_home_first/` (json).
+
+### Ladder (committed tree)
+
+| Step | Result |
+|---|---|
+| `make unit` | pass |
+| `make unit-core` | pass |
+| `make scenarios` | pass |
+| `make screens-lint` | pass: 0 clipped, 0 overlap, 0 tiny (1585 frames, 3224 canvases) |
+| `make fuzz-ui` | pass: 200 seeds × 2000 events |
+| `make check` | pass |
+| `make fw` | pass: image 550,280 B; pool 301,940 / 344,064 (spare **42,124 B**) |
+| `make fw-debug` | pass: image 554,840 B; pool 301,940 / 344,064 (spare **42,124 B**) |
+| `tools/check_loader.sh build/x0x.fwsc` | ok: X0X 1.0.5's loader |
+| `tools/check_loader.sh build/debug/x0x.fwsc` | ok: X0X 1.0.5's loader |
+
+Both builds clear the 8,192 B pool rule. No hardware was flashed.
+
+Note (r1): the review's NITs put **SCL** back in `plat.h` and `fm1-hardware.md` as historical
+sources' spelling, so the original TPOL done-when's `grep -rw SCL` is now expected to find those
+two notes (plus `web/test_web.mjs`); the button is still **SEL** everywhere the project names it.
