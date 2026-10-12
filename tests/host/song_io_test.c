@@ -314,8 +314,8 @@ static void test_clip_editor_ops(void)
     /* motion: two lanes at most; the same param reuses its lane */
     song_io_clip_create(7, 16, 0, 0);
     song_io_edit_begin(7);
-    CHECK(song_io_motion_lane(7, 0x6001, 1) == 0);
-    CHECK(song_io_motion_lane(7, 0x6001, 1) == 0);
+    CHECK(song_io_motion_lane(7, 0x600d, 1) == 0);
+    CHECK(song_io_motion_lane(7, 0x600d, 1) == 0);
     CHECK(song_io_motion_lane(7, 0x4002, 1) == 1);
     CHECK(song_io_motion_lane(7, 0x5003, 1) == -1);        /* two lanes at most */
     song_io_motion_set(7, 0, 3, 99);
@@ -501,6 +501,64 @@ static void test_take_undo_order_flush(void)
     CHECK(song_io_undo_type() == 4 /* UNDO_REPLACE_TAKE */);    /* ... then the take */
 }
 
+/* TFIXS: every motion-page knob can persist and reload, and invalid IDs stay rejected. */
+static void test_motion_persistence(void)
+{
+    static const int params[] = {0x600d, 0x4007, 0x400b, 0x4002};
+    int i;
+    for (i = 0; i < 4; i++) {
+        reset_flash(); boot();
+        song_io_edit_begin(7);
+        CHECK(song_io_motion_lane(7, params[i], 1) == 0);
+        song_io_motion_set(7, 0, 3, 99);
+        song_io_edit_end();
+        CHECK(song_validate(&g_song) == 0);
+        CHECK(song_io_save() == 0);
+        boot();
+        CHECK(song_io_loaded());
+        CHECK(song_io_motion_param(7, 0) == params[i]);
+        CHECK(song_io_motion_get(7, 0, 3) == 99);
+    }
+    CHECK(song_io_motion_lane(7, 0x7000, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x4100, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x6010, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x10000, 1) == -1);
+    CHECK(song_io_motion_lane(7, 0x6001, 1) == 1);
+    song_io_motion_set(7, 1, 0, 99); /* RATIO has max 9 */
+    CHECK(song_io_motion_get(7, 1, 0) == 9);
+    CHECK(song_validate(&g_song) == 0);
+    g_song.clip[7].motion[1].v[0] = 10;
+    CHECK(song_validate(&g_song) < 0);
+}
+
+static void test_shorten_persistence(void)
+{
+    clip_t before;
+    int n;
+    reset_flash(); boot();
+    before = g_song.clip[7];
+    song_io_clip_set_len(7, 8);
+    for (n = 0; n < g_song.clip[7].nnotes; n++)
+        CHECK(g_song.clip[7].d.notes[n].step < 8);
+    CHECK(song_validate(&g_song) == 0);
+    CHECK(song_io_undo() == UNDO_DONE);
+    CHECK(memcmp(&before, &g_song.clip[7], sizeof before) == 0);
+    CHECK(song_io_redo() == UNDO_DONE);
+    CHECK(song_io_save() == 0);
+    boot();
+    CHECK(song_io_loaded() && g_song.clip[7].len == 8);
+    CHECK(song_validate(&g_song) == 0);
+    n = song_io_note_add(7, 63, 77, 100, 64);
+    CHECK(n >= 0 && g_song.clip[7].d.notes[n].step == 7);
+    CHECK(g_song.clip[7].d.notes[n].len == 8);
+    CHECK(song_io_note_add(7, 63, 77, 100, 64) == n);
+    song_io_note_set(7, n, 60, -1, -1, 60);
+    CHECK(g_song.clip[7].d.notes[n].step == 7 && g_song.clip[7].d.notes[n].len == 8);
+    CHECK(song_io_save() == 0);
+    boot();
+    CHECK(song_validate(&g_song) == 0);
+}
+
 int main(void)
 {
     test_boot_empty_builds();
@@ -516,6 +574,8 @@ int main(void)
     test_corrupt_record_falls_back();
     test_take_undo_order_full_ring();
     test_take_undo_order_flush();
+    test_motion_persistence();
+    test_shorten_persistence();
     if (fails) {
         printf("song_io: %d FAILED\n", fails);
         return 1;

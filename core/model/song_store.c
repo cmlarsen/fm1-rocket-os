@@ -1,3 +1,4 @@
+#include "motion_contract.h"
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Song and take storage (T6c). See core/model/song_store.h for the format and
  * the region. Integer only, no heap, bounded time per call.
@@ -566,10 +567,11 @@ int song_validate(const song_t *s)
             }
         }
         for (j = 0; j < (int)CLIP_MOTION_LANES; j++) {
-            if (c->motion[j].param != PARAM_NONE && c->motion[j].param >= 0x0800u)
-                return -1;                    /* a T5i range check tightens this later */
+            int max = c->motion[j].param == PARAM_NONE ? 127 : motion_param_max(c->motion[j].param);
+            if (max < 0)
+                return -1;
             for (k = 0; k < (int)CLIP_MAX_STEPS; k++)
-                if (c->motion[j].v[k] != MOTION_NONE && c->motion[j].v[k] > 127)
+                if (c->motion[j].v[k] != MOTION_NONE && c->motion[j].v[k] > max)
                     return -1;
         }
     }

@@ -293,7 +293,7 @@ unit-take:
 	build/host/take_test_san
 
 .PHONY: unit-core
-unit-core: unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-delay unit-name unit-songs
+unit-core: unit-motion-contract unit-crit unit-clip unit-live unit-engines unit-fm6bank unit-store unit-songio unit-take unit-midi unit-midilive unit-sampleclk unit-fx unit-delay unit-name unit-songs
 
 # T7b re-review: the host plat_crit nesting (host/plat_crit_host.c).
 .PHONY: unit-crit
@@ -410,3 +410,8 @@ unit-songs:
 	build/host/ui_songs_test_san
 
 
+
+.PHONY: unit-motion-contract unit-stack
+unit-motion-contract:
+	@X0X_HOST_SRC=tests/host/motion_contract_test.c X0X_HOST_OUT=build/host/motion_contract_test sh host/build_host.sh
+	@build/host/motion_contract_test

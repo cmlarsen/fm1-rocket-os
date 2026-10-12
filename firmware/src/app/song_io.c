@@ -17,6 +17,7 @@
 #include "song_templates.h"             /* T8i: the Empty/Starter templates */
 /* T8i: the songs_ops_t / song_row_t seam (songs_seam.h, pulled by song_io.h) */
 #include "song_io.h"
+#include "core/model/motion_contract.h"
 
 /* the device's .pool section, as live_bridge.c/engine.c spell it (plat.h's X0X_POOL without the
  * NKEYS collision) */
@@ -271,12 +272,25 @@ void song_io_clip_copy(int dst, int src)
     synced(dst);
 }
 
+static void clip_edit_snapshot(int c);
+
 void song_io_clip_set_len(int c, int v)
 {
     clip_t *k = clip_at(c);
     if (!k || !k->used)
         return;
-    k->len = (uint8_t)(v < 1 ? 1 : v > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : v);
+    int i, n = 0;
+    uint8_t len = (uint8_t)(v < 1 ? 1 : v > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : v);
+    if (k->len == len)
+        return;
+    clip_edit_snapshot(c);
+    if (clip_role((uint8_t)c) != ROLE_DRUMS) {
+        for (i = 0; i < k->nnotes; i++)
+            if (k->d.notes[i].step < len)
+                k->d.notes[n++] = k->d.notes[i];
+        k->nnotes = (uint8_t)n;
+    }
+    k->len = len;
     edited();
     synced(c);
 }
@@ -338,6 +352,14 @@ void song_io_edit_push(void)
         return;
     song_io_push_record(edit_open, &song()->clip[edit_open]);   /* the pre-session clip */
     edit_pushed = 1;
+}
+
+static void clip_edit_snapshot(int c)
+{
+    if (edit_open == c)
+        song_io_edit_push();
+    else
+        song_io_push_record(c, &song()->clip[c]);
 }
 
 int song_io_clip_is_drum(int c) { return clip_role((uint8_t)c) == ROLE_DRUMS; }
@@ -418,19 +440,22 @@ int song_io_note_add(int c, int step, int note, int vel, int len)
 {
     clip_t *k = clip_at(c);
     note_t *nt;
-    int i = song_io_note_index(c, step, note);
-    if (i >= 0)
-        return i;                                  /* the same note is already there */
+    int i;
     if (!k || !k->used || clip_role((uint8_t)c) == ROLE_DRUMS)
         return -1;
-    if (k->nnotes >= (uint8_t)CLIP_MAX_NOTES || step < 0 || step >= (int)CLIP_MAX_STEPS)
+    step = step < 0 ? 0 : step >= k->len ? k->len - 1 : step;
+    note = note < 0 ? 0 : note > 127 ? 127 : note;
+    i = song_io_note_index(c, step, note);
+    if (i >= 0)
+        return i;
+    if (k->nnotes >= (uint8_t)CLIP_MAX_NOTES)
         return -1;
     song_io_edit_push();
     nt = &k->d.notes[k->nnotes++];
     nt->step = (uint8_t)step;
     nt->note = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
     nt->vel = (uint8_t)(vel < 1 ? 100 : vel > 127 ? 127 : vel);
-    nt->len = (uint8_t)(len < 1 ? 1 : len > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : len);
+    nt->len = (uint8_t)(len < 1 ? 1 : len > k->len ? k->len : len);
     edited();
     synced(c);
     return (int)k->nnotes - 1;
@@ -457,10 +482,10 @@ void song_io_note_set(int c, int i, int step, int note, int vel, int len)
         return;
     song_io_edit_push();
     nt = &k->d.notes[i];
-    if (step >= 0 && step < (int)CLIP_MAX_STEPS) nt->step = (uint8_t)step;
+    if (step >= 0) nt->step = (uint8_t)(step >= k->len ? k->len - 1 : step);
     if (note >= 0) nt->note = (uint8_t)(note > 127 ? 127 : note);
     if (vel >= 0)  nt->vel  = (uint8_t)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
-    if (len >= 0)  nt->len  = (uint8_t)(len < 1 ? 1 : len > (int)CLIP_MAX_STEPS ? (int)CLIP_MAX_STEPS : len);
+    if (len >= 0)  nt->len  = (uint8_t)(len < 1 ? 1 : len > k->len ? k->len : len);
     edited();
     synced(c);
 }
@@ -476,7 +501,7 @@ int song_io_motion_lane(int c, int param, int create)
 {
     clip_t *k = clip_at(c);
     int i;
-    if (!k || !k->used || param < 0 || param == (int)PARAM_NONE)
+    if (!k || !k->used || param < 0 || motion_param_max((unsigned)param) < 0)
         return -1;
     for (i = 0; i < (int)CLIP_MOTION_LANES; i++)
         if (k->motion[i].param == (uint16_t)param)
@@ -508,10 +533,11 @@ void song_io_motion_set(int c, int lane, int step, int v)
     if (!k || !k->used || lane < 0 || lane >= (int)CLIP_MOTION_LANES ||
         step < 0 || step >= (int)CLIP_MAX_STEPS)
         return;
-    if (k->motion[lane].param == PARAM_NONE)
+    if (motion_param_max(k->motion[lane].param) < 0)
         return;                                        /* the lane must be claimed first */
     song_io_edit_push();
-    k->motion[lane].v[step] = (uint8_t)(v < 0 ? MOTION_NONE : v > 127 ? 127 : v);
+    k->motion[lane].v[step] = (uint8_t)(v < 0 ? MOTION_NONE :
+        v > motion_param_max(k->motion[lane].param) ? motion_param_max(k->motion[lane].param) : v);
     edited();
     synced(c);
 }
@@ -521,7 +547,7 @@ void song_io_motion_clear(int c, int lane)
     int s;
     if (!k || !k->used || lane < 0 || lane >= (int)CLIP_MOTION_LANES)
         return;
-    if (k->motion[lane].param == PARAM_NONE)
+    if (motion_param_max(k->motion[lane].param) < 0)
         return;
     song_io_edit_push();
     k->motion[lane].param = PARAM_NONE;
