@@ -1,0 +1,62 @@
+# TDOC: the README's "Erase a clip" section. HOME + hold a pad fills a ring that names the clip;
+# releasing early keeps it. HOME+REC undoes the clear. Stage lock refuses a clear while the
+# transport plays. Shots: the ring, the undo, and the refused clear.
+wait 300
+newsong 1
+cursor 0 0
+expect clipused0 1
+
+# --- HOME + hold the pad: the ring fills over ~1.5 s ---
+press HOME
+key w0 down
+wait 700
+shot readme_erase_ring.png
+# releasing before the fill keeps the clip
+key w0 up
+release HOME
+wait 200
+expect clipused0 1
+
+# --- hold to the end: the clip clears ---
+press HOME
+key w0 down
+wait 1600
+key w0 up
+release HOME
+expect clipused0 0
+expect undodepth 1
+
+# --- HOME+REC undoes the clear and names it ---
+press HOME
+tap REC
+release HOME
+expect clipused0 1
+wait 1400
+shot readme_erase_undo.png
+
+# --- stage lock: turn it on in LIVE SETUP, then a clear while playing is refused ---
+press PLAY
+wait 700
+release PLAY
+wait 1400
+tap EDIT
+turn SELECT 2
+turn ALGO 1
+expect stagelock 1
+tap EDIT
+press PLAY
+wait 700
+release PLAY
+wait 1400
+tap PLAY
+wait-bar 1
+press HOME
+key w0 down
+wait 700
+shot readme_erase_locked.png
+key w0 up
+release HOME
+expect clipused0 1
+tap PLAY
+expect playing 0
+dump readme_erase.json

@@ -1,0 +1,65 @@
+# TDOC: the README's "Play clips together, and in order" section. One clip plays per role and
+# the roles play together (a second launch on a role replaces the first). There is no chain:
+# to play clips in order you launch them in LIVE and record a take, which replays the sequence.
+# Shots: three roles playing together, and the take card.
+wait 300
+newsong 1
+tap PLAY
+# launch one clip on DRUMS, BASS and LEAD: they all play together
+cursor 0 0
+tap SEL
+wait-bar 1
+cursor 1 0
+tap SEL
+wait-bar 1
+cursor 2 0
+tap SEL
+wait-bar 1
+expect liveclip0 0
+expect liveclip1 7
+expect liveclip2 12
+# a second launch on a role replaces the first, so a role never plays two clips at once
+cursor 0 1
+tap SEL
+wait-bar 1
+expect liveclip0 1
+
+# --- LIVE, PADS: three roles playing at once ---
+press PLAY
+wait 700
+release PLAY
+wait 1400
+expect mode 1
+shot readme_together_live.png
+
+# --- record a take that launches the clips in order, then replay it ---
+tap REC
+tapkey 0
+wait 800
+tapkey 7
+wait 800
+tapkey 12
+wait 800
+tap REC
+wait-bar 2
+expect takehas 1
+# the take card lives in LIVE SETUP (EDIT, then the Take row)
+tap EDIT
+turn SELECT 6
+tap SEL
+wait 300
+shot readme_together_take.png
+tap SEL
+wait 400
+expect takeplaying 1
+tap PLAY
+wait 400
+expect takeplaying 0
+tap EDIT
+wait 1400
+press PLAY
+wait 700
+release PLAY
+wait 1400
+expect mode 0
+dump readme_play_together.json

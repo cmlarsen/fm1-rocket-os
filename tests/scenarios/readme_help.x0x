@@ -1,0 +1,24 @@
+# TDOC: the README's "cheat sheet and help" section. Holding HOME shows the shift cheat sheet;
+# GLO + any button shows that button's help card. Shots: the sheet and a card.
+wait 300
+newsong 1
+# --- hold HOME for the cheat sheet (a short HOME tap still goes back) ---
+press HOME
+wait 450
+expect sheet 1
+shot readme_help_sheet.png
+release HOME
+wait 100
+expect sheet 0
+# --- GLO + any button shows that button's card ---
+press GLO
+wait 60
+press REC
+wait 60
+expect card 12                    # REC is button 11, +1 as the help card reports it
+shot readme_help_card.png
+release REC
+release GLO
+wait 100
+expect card 0
+dump readme_help.json
