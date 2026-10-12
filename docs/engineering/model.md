@@ -43,3 +43,28 @@ FM6 and NOISE (T5i) use the existing parameter-target and note-on/off types with
 - **Pending take:** a record/clear that has not been written yet is undone by cancelling the pending write and reloading the stored take. A clip edit newer than the pending take is undone first (chronological order, T9i r1/S6); a take undo is refused while a take is armed, recording or playing.
 - **Delete song:** undo works until another save reuses that storage. After that it says "can't undo" rather than restoring something wrong.
 - **Deletes and take undos are durable:** they are written as new records, so a reboot keeps the result.
+
+## TFIXS save contract (2026-10-11)
+
+Motion lane IDs use `target << 12 | voice << 8 | index`. Both lane creation and
+song validation use `core/model/motion_contract.h` to reject nonexistent targets,
+voices and indices; recorded values clamp to the parameter's pot maximum.
+`make unit-motion-contract` compares every ID and maximum with the engine's
+parameter descriptors, so changes to those descriptors require a contract update.
+
+Shortening a melodic clip removes notes whose start is outside its new length.
+The length and notes share one clip snapshot for undo/redo, or the editor's existing
+session snapshot when recording. Adding or moving a note clamps its start to
+`0..len-1` and its duration to `1..len`; negative fields in `song_io_note_set` still
+mean leave that field alone. Lengthening does not resurrect trimmed notes.
+
+A flush with a dirty, failed song returns an error without retrying the flash.
+SONGS keeps that song in RAM and refuses an open with a SAVE FAILED toast until
+an explicit SAVE succeeds or another edit re-enables saving. Failed empty-take
+commits return their storage error, keep the deferred request and add no durable
+undo entry; an explicit retry can commit the pending clear.
+
+Templates build in their destination. Create, Copy and noncurrent Rename use the
+existing guarded shared song scratch and release it on every return path. The
+device build checks linked stack frames and conservative callback call chains;
+see `tools/check_stack.py` and [TFIXS report](../../reports/TFIXS.md).

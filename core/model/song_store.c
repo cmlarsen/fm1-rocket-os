@@ -1,4 +1,3 @@
-#include "motion_contract.h"
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Song and take storage (T6c). See core/model/song_store.h for the format and
  * the region. Integer only, no heap, bounded time per call.
@@ -9,6 +8,7 @@
  * already includes lz.c. */
 #include <stdint.h>
 #include "song_store.h"
+#include "motion_contract.h"
 
 /* T6i: this unit carries its own copy of lz.c (project.c has the other). On the device its 4 KB
  * lz_head goes to the shared .pool instead of .bss, so the table is not paid for twice in the
