@@ -115,6 +115,7 @@ static int  live_take_knob_moved(int i);     /* T9i: K1-K4's recorded-move dots 
 int  live_layer(void);
 int  live_focus(void);
 int  live_fx_layer(void);                    /* T10i: the FX layer is showing */
+int  live_play_note_for(int k, int octv);    /* TFIXU 9: key k's note in the song's key/scale */
 
 /* ============================================================ T7a: STUDIO === */
 /* ui_studio.c is included near the bottom (after ui_live.c). The song home is the default view:

@@ -83,7 +83,7 @@ are still read at boot, and the inherited sound/FX/MIX/GLOBAL pages survive.
 | Layer | Keys do | Screen |
 |---|---|---|
 | **PADS** (the default) | Launch clips, laid out by the pad map | Role × clip grid with clip states |
-| **PLAY** | Play the **focused role** live. **OPEN/DEFERRED (owner decision):** the keys currently play chromatically from F3; how they map to the song's key and scale is not yet decided (see reports/TFIXU.md). OCT−/OCT+ transpose. | Role name, sound, scale, and a strip showing clip status |
+| **PLAY** | Play the **focused role** live, in the song's key and scale. The keys are a **scale-degree keyboard** (owner decision, 2026-10-11): key *k* steps up the scale, wrapping into the next octave, with the tonic at `12*(3+octv) + song_key` (C2 for C major); the mapped Live notes in PADS use the same mapping. OCT−/OCT+ transpose. | Role name, sound, key and scale, and a strip showing clip status |
 
 - The SEL LED shows the layer: off means PADS, lit means PLAY. A header badge says the same. Switching layers never changes what's playing.
 - **Focused role:** whichever role launched most recently. Turn ALGORITHM to step to another role.

@@ -358,6 +358,41 @@ static void live_mapped_release_all(void)
 }
 #include "ui_live_setup.c"
 
+/* TFIXU 5 / ui 9 (owner decision, 2026-10-11): the PLAY keyboard is a scale-degree keyboard in
+ * the song's key and scale. Key k steps up the scale (wrapping into the next octave when it passes
+ * the last degree); the tonic sits at 12*(3+octv) + the song key, i.e. C2 for C major. The mapped
+ * Live-note keys in PADS use the same mapping. */
+static const char *const LV_KEY[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *const LV_SCALE[5] = {"major", "minor", "dorian", "penta", "chromatic"};
+static int live_scale_step(int k, int scale)
+{
+    static const int8_t IV[5][12] = {
+        {0, 2, 4, 5, 7, 9, 11, 0, 0, 0, 0, 0},    /* major */
+        {0, 2, 3, 5, 7, 8, 10, 0, 0, 0, 0, 0},    /* minor */
+        {0, 2, 3, 5, 7, 9, 10, 0, 0, 0, 0, 0},    /* dorian */
+        {0, 2, 4, 7, 9, 0, 0, 0, 0, 0, 0, 0},     /* penta */
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},   /* chromatic */
+    };
+    static const int8_t LEN[5] = {7, 7, 7, 5, 12};
+    int s = scale < 0 ? 0 : scale > 4 ? 4 : scale;
+    return 12 * (k / LEN[s]) + IV[s][k % LEN[s]];
+}
+static int live_song_scale(void)
+{
+    int s = song_io_scale();
+    return s < 0 ? 0 : s > 4 ? 4 : s;
+}
+/* key k at the current octave, in the song's key/scale (the host test reads this too) */
+int live_play_note_for(int k, int octv)
+{
+    int note = 12 * (3 + octv) + song_io_key() + live_scale_step(k, live_song_scale());
+    if (note < 0)
+        note = 0;
+    if (note > 127)
+        note = 127;
+    return note;
+}
+
 static int live_handle_key(int k, int down)
 {
     if (!down && mapped_fx[k]) {
@@ -393,14 +428,9 @@ static int live_handle_key(int k, int down)
     }
     if (!down)
         return 1;                         /* the release is done by the shared table (ui.c) */
-    if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, chromatically */
-        int note = 41 + k + 12 * live.octv;
-        if (note < 0)
-            note = 0;
-        if (note > 127)
-            note = 127;
-        note_key_down(k, live.focus, (uint8_t)note);   /* the layer/focus may change while it is held */
-        return 1;
+    if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, in the song's scale */
+        note_key_down(k, live.focus, (uint8_t)live_play_note_for(k, live.octv));
+        return 1;                          /* the layer/focus may change while it is held */
     }
     {                                     /* PADS: each key is a clip in its zone (press only) */
         int clip = live_bridge_key_clip(k);
@@ -417,9 +447,8 @@ static int live_handle_key(int k, int down)
             return 1;
         }
         if (clip == LIVE_ASSIGN_NOTE) {
-            int note = 41 + k + 12 * live.octv;
-            note_key_down(k, live.focus, (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note));
-            return 1;
+            note_key_down(k, live.focus, (uint8_t)live_play_note_for(k, live.octv));
+            return 1;                      /* a mapped Live note: the same key/scale mapping */
         }
         role = live_bridge_role_of(clip);
         if (clip < 0 || role < 0)
@@ -818,7 +847,11 @@ static void live_draw_play(int band)
         put_s(q, LV_SOUND[r]);
         cv_text(8, vc(&AF_M, 36, 18), &AF_M, t, TOK_TEXT);
         q = put_s(t, "octave ");
-        put_i(q, live.octv);
+        q = put_i(q, live.octv);
+        q = put_s(q, " - ");
+        q = put_s(q, LV_KEY[song_io_key() % 12]);
+        *q++ = ' ';
+        put_s(q, LV_SCALE[live_song_scale()]);              /* TFIXU 9: the song's key and scale */
         cv_text(8, vc(&AF_S, 54, 14), &AF_S, t, TOK_MID);   /* fully inside the band */
     } else {
         int i;

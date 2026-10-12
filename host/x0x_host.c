@@ -1061,7 +1061,11 @@ static int expect(const char *what, const char *val)
         got = seq.playing ? 1 : 0;
     else if (!strcmp(what, "liveplaying"))            /* T2c: the clip engine's transport */
         got = live_bridge_transport_playing();
-    else if (!strcmp(what, "fm6held"))              /* T5i: FM6's held (not released) count */
+    else if (!strncmp(what, "playnote", 8)) {       /* TFIXU 9: key K's note in the song's key/scale */
+        int k, o = 0;
+        sscanf(what, "playnote%d.%d", &k, &o);
+        got = live_play_note_for(k, o);
+    } else if (!strcmp(what, "fm6held"))            /* T5i: FM6's held (not released) count */
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
         got = eng_noise_voices_active();

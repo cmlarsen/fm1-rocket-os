@@ -23,6 +23,13 @@ These questions are still unresolved. When one is answered, record the answer in
 - **Save model.** One state per song, autosaved while stopped, and undo is the safety net.
 - **Scope cuts:** quantize is Bar, Beat or End; modes are Loop or Once; six punch FX; one pad map; no scenes. The full list is in [build-plan](engineering/build-plan.md#deferred-past-v1).
 
+## Resolved 2026-10-11 (TFIXU)
+- **LIVE PLAY key/scale mapping** (owner, 2026-10-11): option (a), a **scale-degree keyboard** in
+  the song's key and scale. Key *k* steps up the scale and wraps into the next octave; the tonic
+  sits at `12*(3+octv) + song_key` (C2 for C major). The mapped Live notes in PADS share the
+  mapping, and the PLAY card shows the key and scale. See the
+  [interaction model](product/interaction-model.md#live-mode).
+
 ## Resolved 2026-10-11 (T8 review)
 - **The song's key and scale.** `song_t` gained `key` (0–11) and `scale` (`SCALE_*`) in the former `rsv[2]`, validated on load; the New-song screen stores them and the Starter's chords follow progressions in them. See [model](engineering/model.md).
 
