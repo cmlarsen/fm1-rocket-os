@@ -1124,7 +1124,7 @@ void live_bridge_play_key(uint8_t role, uint8_t note, int down, uint8_t vel)
         if (down)
             engine_bass_on(part, note, vel >= 100, 0);
         else
-            engine_bass_off(part);
+            engine_note_off(part, note);
         return;
     }
     if (role == ROLE_CHORDS) {                         /* T5i: FM6 */

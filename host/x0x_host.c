@@ -1968,6 +1968,11 @@ int main(int argc, char **argv)
                 else
                     fails++;
             }
+        } else if (!strcmp(cmd, "tfixaengine")) {
+            extern int engine_test_tfixa(void);
+            int nfail = engine_test_tfixa();
+            printf("TFIXA engine failures: %d\n", nfail);
+            fails += nfail;
         } else if (!strcmp(cmd, "takefill")) {           /* T9i: feed N FM6 notes to fill the buffer */
             int n = atoi(a), k;
             for (k = 0; k < n; k++) {

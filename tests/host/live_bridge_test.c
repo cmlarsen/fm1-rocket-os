@@ -33,12 +33,12 @@ static uint32_t g_now;
 
 /* ---- stubs the bridge links against ---- */
 seq_t seq;
-void engine_drum(int kit, int v, float vel) { (void)kit; (void)v; (void)vel; }
-void engine_bass_on(int p, int n, int a, int s) { (void)p; (void)n; (void)a; (void)s; }
-void engine_bass_off(int p) { (void)p; }
-void engine_note_on(int part, int note, int vel) { (void)part; (void)note; (void)vel; }
-void engine_note_off(int part, int note) { (void)part; (void)note; }
-void engine_set(int t, int v, int i, int val) { (void)t; (void)v; (void)i; (void)val; }
+int engine_drum(int kit, int v, float vel) { (void)kit; (void)v; (void)vel;  return 0; }
+int engine_bass_on(int p, int n, int a, int s) { (void)p; (void)n; (void)a; (void)s;  return 0; }
+int engine_bass_off(int p) { (void)p;  return 0; }
+int engine_note_on(int part, int note, int vel) { (void)part; (void)note; (void)vel;  return 0; }
+int engine_note_off(int part, int note) { (void)part; (void)note;  return 0; }
+int engine_set(int t, int v, int i, int val) { (void)t; (void)v; (void)i; (void)val;  return 0; }
 void engine_all_off(void) {}
 /* T9i: the take hooks the bridge links against */
 void (*engine_tap)(uint32_t sample, uint32_t cmd);

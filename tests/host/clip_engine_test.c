@@ -425,6 +425,51 @@ static void window_check(void)
     printf("  ok   window (1-sample == block, %d events)\n", an);
 }
 
+/* TFIXA regressions: assertions do not change the event goldens. */
+static void tfixa_checks(void)
+{
+    int i;
+    song_defaults();
+    clip_config(12, 32, CLIP_LOOP, Q_BAR);
+    clip_config(13, 32, CLIP_LOOP, Q_BAR);
+    clip_engine_init(&eng, &song);
+    clip_engine_restart(&eng);
+    for (i = 0; i < 14; i++) clip_engine_launch_quant(&eng, 12, Q_BEAT);
+    clip_engine_transport_stop(&eng);
+    clip_engine_render(&eng, 1, &SINK);
+    if (eng.playing) { puts("TFIXA FAIL saturated Stop"); case_fail++; }
+
+    for (i = 0; i < 2; i++) {
+        clip_engine_init(&eng, &song);
+        clip_engine_launch_now(&eng, 12);
+        clip_engine_start(&eng);
+        clip_engine_render(&eng, 100, &SINK);
+        if (i) { clip_engine_transport_stop(&eng); clip_engine_render(&eng, 1, &SINK); }
+        clip_engine_launch_now(&eng, 13);
+        if (i) clip_engine_continue(&eng); else clip_engine_restart(&eng);
+        clip_engine_render(&eng, 30000, &SINK);
+        if (eng.cur[ROLE_LEAD] != 13) { puts("TFIXA FAIL relaunch staging"); case_fail++; }
+    }
+    clip_engine_init(&eng, &song);
+    clip_engine_launch_now(&eng, 12);
+    clip_engine_start(&eng);
+    clip_engine_render(&eng, 100, &SINK);
+    clip_engine_transport_stop(&eng);
+    clip_engine_start(&eng);
+    clip_engine_render(&eng, 1, &SINK);
+    if (eng.elapsed != 1) { puts("TFIXA FAIL Stop then Start"); case_fail++; }
+
+    clip_engine_init(&eng, &song);
+    eng.playing = eng.was_playing = 1;
+    eng.elapsed = eng.step_sample = 0xFFFFFF00u;
+    eng.note[0].used = 1; eng.note[0].role = ROLE_LEAD;
+    eng.note[0].note = 60; eng.note[0].end = 0xFFFFFFFFu;
+    nrec = 0;
+    clip_engine_render(&eng, 512, &SINK);
+    if (eng.note[0].used || nrec != 1 || recs[0].kind != CLIPEV_NOTE_OFF ||
+        recs[0].sample - win_base != 255) { puts("TFIXA FAIL max deadline"); case_fail++; }
+}
+
 int main(void)
 {
     printf("clip_engine test\n");
@@ -836,6 +881,7 @@ int main(void)
         "hit 0 0 15\nchanged 0\nrun 3000\n"
         "runto 400000\n");
 
+    tfixa_checks();
     drift_check();
     window_check();
 
