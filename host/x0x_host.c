@@ -1968,6 +1968,10 @@ int main(int argc, char **argv)
                 else
                     fails++;
             }
+        } else if (!strcmp(cmd, "tfixamidimono")) {
+            extern int engine_test_tfixa_midi(int part);
+            live.focus = LIVE_BASS; fails += engine_test_tfixa_midi(0);
+            live.focus = LIVE_LEAD; fails += engine_test_tfixa_midi(1);
         } else if (!strcmp(cmd, "tfixaphase")) {
             extern int engine_test_tfixa_phase(const char *dir);
             fails += engine_test_tfixa_phase(dir);

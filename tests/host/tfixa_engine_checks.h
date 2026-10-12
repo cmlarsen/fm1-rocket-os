@@ -81,3 +81,19 @@ int engine_test_tfixa_phase(const char *dir)
     fclose(phase_log); engine_tap = 0;
     return 0;
 }
+
+#include "firmware/src/app/midi_live.h"
+int engine_test_tfixa_midi(int part)
+{
+    int fails = 0;
+    cq_w = cq_r = 0;
+    midi_live_reset(); midi_live_set_song_cfg(0, 0);
+    midi_live_feed(0x643C9009u, 0); /* On 60, velocity 100 */
+    midi_live_feed(0x64409009u, 0); /* On 64 */
+    midi_live_feed(0x003C8008u, 0); /* Off 60 */
+    drain(0);
+    if (!b303[part].gate) fails++;
+    midi_live_feed(0x00408008u, 0); drain(0);
+    if (b303[part].gate || midi_live_held()) fails++;
+    return fails;
+}
