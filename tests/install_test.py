@@ -7,6 +7,7 @@ then "device asks, host answers" reads of the logical image. Run from the repo r
   python3 tests/install_test.py
 Also checks logical_image/product_of against web/fm1pkg.js (needs node and
 build/x0x.fwsc, skipped otherwise)."""
+import hashlib
 import io
 import queue
 import shutil
@@ -19,7 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-import fm1_install as I  # noqa: E402
+import fm1_install as I       # noqa: E402
+import fm1pkg_make as F       # noqa: E402
 
 I.DELAY.update(open=0, start=0.01, reply=0, loader=0.01, reboot=0.01, retry=0.02, poll=0.05, hs=0.1,
                idle_check=0.4, idle_write=0.4, wait_loader=2, wait_reboot=2)
@@ -140,15 +142,25 @@ class FakeFM1:
 
 # ----------------------------------------------------------------- helpers ---
 
-def package(product="FM-1_900", marker=True, size=0x2000):
-    raw = bytearray((i * 7) & 0xFF for i in range(size + I.BLOCKS))
-    for i in range(I.BLOCKS):
-        raw[i * I.BLK + I.KEEP] = (ord(product[i]) + i + 1) & 0xFF if i < len(product) else 0x7D
-    raw[0x1800:0x1800 + 16] = I.LOADER_MARK if marker else bytes(16)
-    return bytes(raw)
+def package(product="FM-1_900", loader=None, flash=None):
+    """a genuine UFW .fwsc (tools/fm1pkg_make.py): a real type-100 loader entry, not just
+    FM-1 identity markers, so the approved-loader gate has something to parse"""
+    if loader is None:
+        loader = APPROVED_LOADER
+    if flash is None:
+        flash = bytes((i * 3) & 0xFF for i in range(0x1000))
+    return F.ufw(flash, loader, product)
 
 
 TMP = Path(tempfile.mkdtemp(prefix="felucca-install-"))
+
+# The approved loader (any bytes; these tests own the sha file) and a same-length tamper that
+# keeps the FELUCCA-LOADER-1 marker, so only the strict type-100 sha check tells them apart.
+APPROVED_LOADER = I.LOADER_MARK + bytes(range(64)) + b"\xF7"
+TAMPERED_LOADER = APPROVED_LOADER[:-1] + b"\xF6"
+SHA = TMP / "x0x_loader.sha256"
+SHA.write_text(hashlib.sha256(APPROVED_LOADER).hexdigest() + "  loader/ota.bin\n")
+I.X0X_LOADER_SHA = SHA          # point the installer gate at the temporary approved loader
 
 
 def pkgfile(name, raw):
@@ -177,7 +189,7 @@ def wire():
     ok(u[:3] == b"\x00\x59\x30" and int.from_bytes(u[7:11], "little") == 0x12345 and u[14:17] == b"\x01\x02\x03"
        and ~sum(u[6:17]) & 0xFF == u[17], "response: header, address, data, checksum")
     raw = package("FM-1_906")
-    ok(I.product_of(raw) == "FM-1_906" and len(I.logical_image(raw)) == len(raw) - 20, "product_of / logical_image (synthetic)")
+    ok(I.product_of(raw) == "FM-1_906" and len(I.logical_image(raw)) == len(raw) - 20, "product_of / logical_image (UFW)")
     raw = package("FM-1_9001000")                  # X0X from 0.10: major, minor, patch, two digits each
     ok(I.product_of(raw) == "FM-1_9001000", "product_of: a 12-character identity")
 
@@ -255,17 +267,47 @@ def errors():
     rc, out, err = cli([p, "--yes"], Stuck(image))
     ok(rc == 5 and "loader did not appear" in err, "no loader after step 1 -> exit 5")
 
-    plain = pkgfile("plain.fwsc", package(marker=False))
-    dev = FakeFM1(image)
-    rc, out, err = cli([plain, "--yes"], dev)
-    ok(rc == 2 and "no Felucca update loader" in err and dev.sent == [], "package without the loader marker -> exit 2, no MIDI")
-    dev = FakeFM1(I.logical_image(package(marker=False)))
-    rc, out, err = cli([plain, "--yes", "--force"], dev)
-    ok(rc == 0 and dev.bad == 0, "... installs with --force")
     rc, out, err = cli([pkgfile("short.fwsc", b"\0" * 100), "--yes"], FakeFM1(image))
     ok(rc == 2 and "too short" in err, "not a package -> exit 2")
     rc, out, err = cli([str(TMP / "missing.fwsc"), "--yes"], FakeFM1(image))
     ok(rc == 2, "missing file -> exit 2")
+
+
+def loader_gate():
+    """the installer enforces the approved loader before any device is opened (tests.md #1)"""
+    good = pkgfile("approved.fwsc", package(loader=APPROVED_LOADER))
+    bad = pkgfile("tampered.fwsc", package(loader=TAMPERED_LOADER))
+    good_image = I.logical_image(Path(good).read_bytes())
+    bad_image = I.logical_image(Path(bad).read_bytes())
+    ok(I.LOADER_MARK in Path(bad).read_bytes(), "the tampered package keeps the FELUCCA-LOADER-1 marker")
+
+    dev = FakeFM1(good_image)
+    rc, out, err = cli([good, "--yes"], dev)
+    ok(rc == 0 and dev.bad == 0 and dev.upgrades == 2 and "done: the FM-1 runs FM-1_900" in out,
+       "the approved loader installs (type-100 sha matches)")
+
+    dev = FakeFM1(bad_image)
+    rc, out, err = cli([bad, "--yes"], dev)
+    ok(rc == 2 and dev.upgrades == 0 and dev.sent == [] and "not the approved X0X 1.0.5 loader" in err,
+       "a different loader is refused before any MIDI (exit 2, nothing sent)")
+
+    dev = FakeFM1(bad_image)
+    rc, out, err = cli([bad, "--yes", "--force"], dev)
+    ok(rc == 0 and dev.bad == 0 and "approved-loader" in err and "--force" in err,
+       "the same package installs with --force and a warning (stock-rescue path)")
+
+    broken = bytearray(Path(bad).read_bytes())
+    broken[16] ^= 0xFF                                     # corrupt the encrypted chip tag
+    dev = FakeFM1(bad_image)
+    rc, out, err = cli([pkgfile("broken.fwsc", bytes(broken)), "--yes", "--force"], dev)
+    ok(rc == 2 and dev.sent == [] and "chip" in err, "a structurally broken package fails closed even with --force")
+
+    old = I.X0X_LOADER_SHA
+    I.X0X_LOADER_SHA = TMP / "missing.sha256"
+    dev = FakeFM1(good_image)
+    rc, out, err = cli([good, "--yes"], dev)
+    ok(rc == 2 and dev.sent == [] and "approved loader hashes" in err, "a missing approved-loader sha file fails closed")
+    I.X0X_LOADER_SHA = old
 
 
 def against_js():
@@ -286,6 +328,7 @@ def against_js():
 wire()
 installs()
 errors()
+loader_gate()
 against_js()
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"INSTALL TESTS FAILED ({failed})" if failed else "install tests passed")

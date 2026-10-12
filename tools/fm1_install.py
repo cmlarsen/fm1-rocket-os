@@ -24,6 +24,9 @@ import queue
 import re
 import sys
 import time
+from pathlib import Path
+
+import loader_check   # tools/loader_check.py: the one UFW / approved-loader implementation
 
 HS_QUERY = bytes([0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7])
 UPGRADE = bytes([0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7])
@@ -31,6 +34,10 @@ FINISH_CHECK, FINISH_WRITE = 0xE0000000, 0xF0000000
 MAXDATA = 512
 BLOCKS, BLK, KEEP = 20, 0x30, 0x2F
 LOADER_MARK = b"FELUCCA-LOADER-1"
+# The approved loader's sha256 (X0X 1.0.5's, the only loader the unattended-flashing rule in
+# docs/engineering/build-plan.md permits). Tests override this module variable to point at a
+# temporary sha file.
+X0X_LOADER_SHA = Path(__file__).resolve().parent / "x0x_loader.sha256"
 PORT_RE = re.compile(r"fm-1|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
 
 # seconds; the tests shorten them
@@ -362,6 +369,15 @@ class Updater:
 # ------------------------------------------------------------------- CLI ---
 
 def load_package(path, force):
+    """Read and vet a package before any device is opened.
+
+    The ordinary path refuses any package that is not a structurally valid FM-1 UFW package
+    carrying exactly X0X 1.0.5's approved loader (the same type-100 parse tools/check_loader.sh
+    runs, shared through tools/loader_check.py). --force is the stock-rescue path: it bypasses
+    ONLY the approved-loader sha comparison, because stock packages carry a different loader. It
+    still validates the FM-1 identity and requires a structurally valid type-100 UFW package, so
+    it can never serve arbitrary bytes. The bypass prints a warning. Missing or unreadable
+    package/sha files and structural failures fail closed with badpkg (exit 2)."""
     try:
         raw = open(path, "rb").read()
     except OSError as e:
@@ -369,9 +385,27 @@ def load_package(path, force):
     product = product_of(raw)
     if not re.fullmatch(r"[^_]+_\d+", product):
         raise InstallError("badpkg", f"{path}: not an FM-1 package (identity {product!r})")
-    if LOADER_MARK not in raw and not force:
-        raise InstallError("badpkg", f"{path}: no Felucca update loader in this package; "
-                                     "only Felucca's own packages are installed (--force overrides)")
+    if force:
+        print("warning: --force is the stock-rescue path: skipping the approved-loader check",
+              file=sys.stderr)
+        try:
+            loader_check.ota_of(raw)                 # still require a real type-100 UFW package
+        except ValueError as e:
+            raise InstallError("badpkg", f"{path}: {e}")
+        return product, logical_image(raw)
+    try:
+        want = loader_check.read_want(X0X_LOADER_SHA)
+    except OSError as e:
+        raise InstallError("badpkg", f"cannot read the approved loader hashes {X0X_LOADER_SHA}: {e.strerror}")
+    try:
+        got = loader_check.loader_sha(loader_check.ota_of(raw))
+    except ValueError as e:                          # a structurally bad package fails closed
+        raise InstallError("badpkg", f"{path}: {e}")
+    if got != want:
+        raise InstallError("badpkg",
+                           f"{path}: the loader is not the approved X0X 1.0.5 loader "
+                           f"(expected {want[:16]}..., got {got[:16]}...); only X0X 1.0.5's loader "
+                           "may be installed unattended (--force is the stock-rescue path)")
     return product, logical_image(raw)
 
 
@@ -449,7 +483,9 @@ def main(argv=None, backend=None, out=sys.stdout, ask=ask_tty):
     ap.add_argument("--info", action="store_true", help="print the identity of the connected FM-1")
     ap.add_argument("--port", metavar="NAME", help="MIDI port to use (part of its name)")
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
-    ap.add_argument("--force", action="store_true", help="install a package without the Felucca loader marker")
+    ap.add_argument("--force", action="store_true",
+                    help="stock-rescue path: skip the approved-loader check (warns; the package "
+                         "must still be a structurally valid FM-1 package)")
     a = ap.parse_args(argv)
     if bool(a.info) == bool(a.package):
         ap.error("give a PACKAGE.fwsc or --info")

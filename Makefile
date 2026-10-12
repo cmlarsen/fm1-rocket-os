@@ -125,7 +125,7 @@ unit:
 # every scenario, each into its own directory, compared with its golden where one exists
 scenarios: host
 	@fail=0; for s in tests/scenarios/*.x0x; do n=$$(basename $$s .x0x); \
-		mkdir -p "build/scenarios/$$n"; \
+		rm -rf "build/scenarios/$$n"; mkdir -p "build/scenarios/$$n"; \
 		if build/host/x0x_host "$$s" "build/scenarios/$$n" > "build/scenarios/$$n.log" 2>&1; then \
 			echo "  ok   scenario $$n"; \
 		else \
@@ -170,6 +170,8 @@ check: fw host
 	@sh tests/lint/flash_guard_test.sh
 	@echo "check: the user-sample upload (a second writer in the song region) is gone"
 	@sh tests/lint/no_sample_writers_test.sh
+	@echo "check: the package carries the approved X0X 1.0.5 loader"
+	@sh tools/check_loader.sh build
 	@echo "check: every gesture-table button has a help card"
 	@python3 tools/check_help.py
 	@echo "check: make fw passed the build's own checks (soft-double routines, image/RAM/pool size)"

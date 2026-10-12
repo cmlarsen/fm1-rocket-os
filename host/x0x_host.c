@@ -436,6 +436,9 @@ static void host_log_seq(void)
 }
 
 /* ---------------------------------------------------------- outputs --- */
+/* T4 review: a failed artifact open, write or close must fail the run (main folds this in).
+ * png_write / dump_json / wav_open used to only log and return while main still exited 0. */
+static int artifact_fails;
 static void png_write(const char *path)
 {
     /* RGB PNG with stored (uncompressed) deflate blocks: no zlib needed */
@@ -445,6 +448,7 @@ static void png_write(const char *path)
     uint8_t hdr[8] = {137, 80, 78, 71, 13, 10, 26, 10};
     if (!f) {
         fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
         return;
     }
     for (i = 0; i < 256; i++) {
@@ -516,7 +520,10 @@ static void png_write(const char *path)
             c = crc_t[(c ^ ie[i]) & 255] ^ (c >> 8);
         PUT32(~c);
     }
-    fclose(f);
+    if (ferror(f) || fclose(f) != 0) {
+        fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
+    }
 }
 
 static FILE *wav;
@@ -526,8 +533,13 @@ static void wav_open(const char *path)
 {
     static const uint8_t h[44] = {0};
     wav = fopen(path, "wb");
-    if (wav)
-        fwrite(h, 1, 44, wav);
+    if (!wav) {
+        fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
+    } else if (fwrite(h, 1, 44, wav) != 44) {
+        fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
+    }
     wav_frames = 0;
 }
 static void wav_close(void)
@@ -552,7 +564,8 @@ static void wav_close(void)
     }
     fwrite("data", 1, 4, wav);
     fwrite(&bytes, 4, 1, wav);
-    fclose(wav);
+    if (ferror(wav) || fclose(wav) != 0)
+        artifact_fails++;                            /* a short write or failed close fails the run */
     wav = 0;
 }
 
@@ -1136,6 +1149,7 @@ static void dump_json(const char *path)
     int p, i, n, lv = live_bridge_active();
     if (!f) {
         printf("cannot write %s\n", path);
+        artifact_fails++;
         return;
     }
     if (lv) {
@@ -1195,7 +1209,10 @@ static void dump_json(const char *path)
         if (lit_btn >> i & 1u)
             fprintf(f, "%s\"%s\": 1", n++ ? ", " : "", BTN_N[i]);
     fprintf(f, "}\n  }\n}\n");
-    fclose(f);
+    if (ferror(f) || fclose(f) != 0) {
+        printf("cannot write %s\n", path);
+        artifact_fails++;
+    }
 }
 
 /* T11i: a deterministic MIDI fuzz. Feeds N random MIDI messages (notes on/off, Program Change and
@@ -2101,6 +2118,7 @@ int main(int argc, char **argv)
     if (events_log)
         fclose(events_log);
     engine_tap = 0;
+    fails += artifact_fails;                          /* T4 review: missing/failed PNG, JSON or WAV */
     printf("host: %u ms simulated, %u blits, render %.1f%% of real time (host CPU)%s\n", now_ms, blits,
            render_budget_ns_total > 0 ? 100.0 * render_ns_total / render_budget_ns_total : 0.0,
            fails ? ", EXPECTATIONS FAILED" : "");

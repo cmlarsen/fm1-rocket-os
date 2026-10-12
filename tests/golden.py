@@ -6,8 +6,9 @@
     GOLDEN_UPDATE=1 tests/golden.py OUT GOLD  # write OUT's artefacts into GOLD
 
 Every file in GOLDENDIR is checked against the same name in OUTDIR: *.png by decoded pixels,
-*.json by parsed structure, anything else by text. Each *.wav in OUTDIR is measured (frames,
-peak, rms) and compared within loose bounds against GOLDENDIR/audio.json, so a DSP change does
+*.json by parsed structure, anything else by text. Each *.wav named in GOLDENDIR/audio.json must
+exist in OUTDIR; it is measured (frames,
+peak, rms) and compared within loose bounds, so a DSP change does
 not churn a golden by its exact bytes. The first mismatch of every file is printed; exit 1 on
 any. A scenario without a golden directory is simply not compared (the caller skips it)."""
 import json
@@ -164,10 +165,17 @@ def wav_metrics(path):
 
 
 def cmp_audio(golden_json, outdir):
-    """first mismatch of every WAV in OUTDIR against the golden metrics"""
+    """every WAV named in audio.json must exist in OUTDIR and match its golden metrics"""
     want = json.load(open(golden_json))
     problems = []
-    for name in sorted(f for f in os.listdir(outdir) if f.endswith(".wav")):
+    actual = sorted(f for f in os.listdir(outdir) if f.endswith(".wav"))
+    # T4 review: compare the expected and actual filename sets first. Iterating the WAVs on disk
+    # let a missing expected file eliminate its own comparison (audio.json is skipped by the
+    # ordinary file loop), so a scenario that stopped producing audio still passed.
+    for name in sorted(want):
+        if name not in actual:
+            problems.append(f"{name}: MISSING from {outdir}")
+    for name in actual:
         if name not in want:
             problems.append(f"{name}: no golden metric")
             continue

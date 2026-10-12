@@ -100,7 +100,8 @@ static void expect_golden(const char *name)
     snprintf(path, sizeof path, "%s/%s.txt",
              getenv("GOLDEN_DIR") ? getenv("GOLDEN_DIR") : "tests/golden/take", name);
 
-    if (getenv("GOLDEN_UPDATE")) {
+    const char *gu = getenv("GOLDEN_UPDATE");   /* T4 review: exactly "1", as tests/golden.py */
+    if (gu && strcmp(gu, "1") == 0) {
         f = fopen(path, "w");
         if (!f) { failf("%s: cannot write %s", name, path); return; }
         fwrite(out, 1, outn, f);

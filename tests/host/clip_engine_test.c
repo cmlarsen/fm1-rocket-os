@@ -324,7 +324,8 @@ static void run_case(const char *name, const char *script)
         total = (size_t)m + outn;
         full[total] = 0;
 
-        if (getenv("GOLDEN_UPDATE")) {
+        const char *gu = getenv("GOLDEN_UPDATE");   /* T4 review: exactly "1", as tests/golden.py */
+        if (gu && strcmp(gu, "1") == 0) {
             f = fopen(path, "w");
             if (!f) { printf("  FAIL %s: cannot write %s\n", name, path); case_fail = 1; return; }
             fwrite(full, 1, total, f);
