@@ -1,0 +1,21 @@
+# One MIDI poll: Start + 14 Program Changes + Stop must leave transport stopped.
+wait 300
+midicfg 0 1
+midi FA 00 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi C0 0C 00
+midi FC 00 00
+wait 30
+expect liveplaying 0
