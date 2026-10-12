@@ -97,3 +97,4 @@ int engine_test_tfixa_midi(int part)
     if (b303[part].gate || midi_live_held()) fails++;
     return fails;
 }
+int engine_test_bass_gate(int part) { return b303[part].gate; }
