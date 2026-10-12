@@ -33,7 +33,7 @@ CALLBACKS = {
     'lz_compress': ('sst_count_put', 'sst_wr_put', 'save_put'),
     'sst_wr_put': ('fb_program',),
     'midi_in_byte': MIDI, 'midi_in_tick': MIDI,
-    'fm1_c1_main': ('t5i_render',),
+    'fm1_c1_main': ('core2_job',),  # plat_cpu2_run(core2_job, ...) in engine.c
     # engine_tap is zero-initialized and never assigned in the device app.
     'engine_render': (), 'live_sink': (), 'take_sink_ev': (),
 }

@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools'))
-from check_stack import analyze
+from check_stack import analyze, CALLBACKS
 
 
 def dis(body):
@@ -78,6 +78,16 @@ class Gate(unittest.TestCase):
     def test_nonprologue_allocation_fails(self):
         self.assertTrue(analyze(dis({'root': ['call r3', 'sp += -9000', 'rts']}),
                                 callbacks={'root': ()}).errors)
+
+    def test_device_callback_audit(self):
+        import re
+        root = Path(__file__).resolve().parents[2]
+        engine = (root / 'firmware/src/app/engine.c').read_text()
+        jobs = tuple(sorted(set(re.findall(r'plat_cpu2_run\((\w+),', engine))))
+        self.assertEqual(tuple(sorted(CALLBACKS['fm1_c1_main'])), jobs)
+        for source in (root / 'firmware/src').rglob('*.c'):
+            self.assertIsNone(re.search(r'\bengine_tap\s*=', source.read_text()),
+                              f'device tap targets must be added to the stack allowlist: {source}')
 
 
 if __name__ == '__main__':
