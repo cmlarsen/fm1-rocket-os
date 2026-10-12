@@ -1,0 +1,36 @@
+# TFIXU 5 / ui 5: HOME + FX resets every punch effect AND every role mute (the interaction model
+# says "HOME+FX resets everything"). The reset press is consumed: it does not open the layer, and
+# holding it does not repeat the reset every frame.
+wait 300
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+# engage one effect and mute one role
+press FX
+wait 30
+tapkey w0
+tapkey b0
+expect fxlatch0 1
+expect fxmute0 1
+release FX
+wait 40
+expect fxlatch0 1
+expect fxmute0 1
+# HOME + FX resets both, and shows no layer
+press HOME
+press FX
+wait 100
+expect fxlatch0 0
+expect fxmute0 0
+expect fxlayer 0
+wait 300
+expect fxlatch0 0
+expect fxmute0 0
+expect fxlayer 0
+release FX
+release HOME
+wait 40
+expect fxlayer 0
+dump live_fx_reset.json

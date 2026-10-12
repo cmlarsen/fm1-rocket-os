@@ -12,6 +12,11 @@ the FM-1 restarts and the installed identity is checked.
   fm1_install.py PACKAGE.fwsc [--port NAME] [--yes] [--force]
   fm1_install.py --info [--port NAME]
 
+Every package must carry X0X 1.0.5's approved loader (tools/loader_check.py, the same check
+tools/check_loader.sh runs). --force is the stock-rescue path: it accepts only M-VAVE's FM-1 V15
+.fwsc, identified by its full sha256 (tools/fm1_rescue.py's STOCK_SHA256), ignores --yes and
+always asks for a typed confirmation.
+
 If the FM-1 is still in update mode (an earlier install was cut off), the
 install finishes the write. Needs mido with python-rtmidi.
 
@@ -20,10 +25,15 @@ Exit codes: 0 done, 1 cancelled or other error, 2 bad arguments or package,
 loader / no restart), 6 wrong model, or another identity after the install.
 """
 import argparse
+import hashlib
 import queue
 import re
 import sys
 import time
+from pathlib import Path
+
+import fm1_rescue     # tools/fm1_rescue.py: pins M-VAVE's stock V15 sha256 (the --force identity)
+import loader_check   # tools/loader_check.py: the one UFW / approved-loader implementation
 
 HS_QUERY = bytes([0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7])
 UPGRADE = bytes([0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7])
@@ -31,6 +41,14 @@ FINISH_CHECK, FINISH_WRITE = 0xE0000000, 0xF0000000
 MAXDATA = 512
 BLOCKS, BLK, KEEP = 20, 0x30, 0x2F
 LOADER_MARK = b"FELUCCA-LOADER-1"
+# The approved loader's sha256 (X0X 1.0.5's, the only loader the unattended-flashing rule in
+# docs/engineering/build-plan.md permits). Tests override this module variable to point at a
+# temporary sha file.
+X0X_LOADER_SHA = Path(__file__).resolve().parent / "x0x_loader.sha256"
+# M-VAVE's FM-1 V15 package sha256 (the one file --force, the stock-rescue path, accepts). It is
+# the constant tools/fm1_rescue.py already pins; tests override this module variable to inject a
+# stub hash and never touch a device.
+STOCK_SHA256 = fm1_rescue.STOCK_SHA256
 PORT_RE = re.compile(r"fm-1|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
 
 # seconds; the tests shorten them
@@ -362,6 +380,17 @@ class Updater:
 # ------------------------------------------------------------------- CLI ---
 
 def load_package(path, force):
+    """Read and vet a package before any device is opened.
+
+    The ordinary path refuses any package that is not a structurally valid FM-1 UFW package
+    carrying exactly X0X 1.0.5's approved loader (the same type-100 parse tools/check_loader.sh
+    runs, shared through tools/loader_check.py). --force is the stock-rescue path and accepts
+    ONLY M-VAVE's FM-1 V15 package, identified by its full sha256 (STOCK_SHA256, shared with
+    tools/fm1_rescue.py). Because --force trusts that one pinned file by hash, it does not depend
+    on the type-100 / AC791N parse at all: if V15's loader did not select the way check_loader.py
+    expects, this path would still work. The FM-1 identity is still validated. Missing or
+    unreadable package/sha files, an empty sha file and structural failures fail closed with
+    badpkg (exit 2)."""
     try:
         raw = open(path, "rb").read()
     except OSError as e:
@@ -369,9 +398,29 @@ def load_package(path, force):
     product = product_of(raw)
     if not re.fullmatch(r"[^_]+_\d+", product):
         raise InstallError("badpkg", f"{path}: not an FM-1 package (identity {product!r})")
-    if LOADER_MARK not in raw and not force:
-        raise InstallError("badpkg", f"{path}: no Felucca update loader in this package; "
-                                     "only Felucca's own packages are installed (--force overrides)")
+    if force:
+        got = hashlib.sha256(raw).hexdigest()
+        if got != STOCK_SHA256:
+            raise InstallError("badpkg",
+                               f"{path}: --force accepts only M-VAVE's stock FM-1 V15 rescue "
+                               f"package (expected sha256 {STOCK_SHA256[:16]}..., got "
+                               f"{got[:16]}...). An X0X package installs without --force")
+        return product, logical_image(raw)
+    try:
+        want = loader_check.read_want(X0X_LOADER_SHA)
+    except OSError as e:
+        raise InstallError("badpkg", f"cannot read the approved loader hashes {X0X_LOADER_SHA}: {e.strerror}")
+    except ValueError as e:                          # an empty/all-whitespace sha file
+        raise InstallError("badpkg", str(e))
+    try:
+        got = loader_check.loader_sha(loader_check.ota_of(raw))
+    except ValueError as e:                          # a structurally bad package fails closed
+        raise InstallError("badpkg", f"{path}: {e}")
+    if got != want:
+        raise InstallError("badpkg",
+                           f"{path}: the loader is not the approved X0X 1.0.5 loader "
+                           f"(expected {want[:16]}..., got {got[:16]}...); only X0X 1.0.5's loader "
+                           "may be installed unattended (--force is the stock-rescue path)")
     return product, logical_image(raw)
 
 
@@ -424,7 +473,15 @@ def run(a, backend, out, ask):
         raise not_found(up)
     print(f"device:  {dev.id.text}  ({dev.name})" + ("  in update mode: the write will be finished" if dev.id.loader else ""),
           file=out)
-    if not a.yes and not ask("Install? Do not unplug the FM-1 while writing. [y/N] "):
+    if a.force:
+        # the stock-rescue path ignores --yes: it always types a confirmation
+        asked = ask("--force rescue: this installs M-VAVE's stock FM-1 V15 package. "
+                    "Do not unplug the FM-1 while writing. Type yes to continue: ")
+    elif a.yes:
+        asked = True
+    else:
+        asked = ask("Install? Do not unplug the FM-1 while writing. [y/N] ")
+    if not asked:
         dev.link.close()
         print("cancelled", file=out)
         return 1
@@ -449,7 +506,9 @@ def main(argv=None, backend=None, out=sys.stdout, ask=ask_tty):
     ap.add_argument("--info", action="store_true", help="print the identity of the connected FM-1")
     ap.add_argument("--port", metavar="NAME", help="MIDI port to use (part of its name)")
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
-    ap.add_argument("--force", action="store_true", help="install a package without the Felucca loader marker")
+    ap.add_argument("--force", action="store_true",
+                    help="stock-rescue path: install M-VAVE's FM-1 V15 package only (checked by "
+                         "full sha256); ignores --yes and always asks for a typed confirmation")
     a = ap.parse_args(argv)
     if bool(a.info) == bool(a.package):
         ap.error("give a PACKAGE.fwsc or --info")

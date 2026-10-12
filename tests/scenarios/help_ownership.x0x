@@ -1,0 +1,73 @@
+# TFIXU 2 / ui 2,3: while GLO is held (a help card is up) PLAY, REC and FX belong to help, not the
+# instrument. PLAY must not start the transport or enter LIVE, FX must not open the punch layer,
+# and REC must not arm, stop or clear the take.
+wait 300
+# --- GLO + PLAY from boot: no transport, no LIVE ---
+press GLO
+wait 60
+tap PLAY
+expect liveplaying 0
+expect mode 0
+release GLO
+wait 60
+# --- GLO + PLAY held past the long press: still no LIVE ---
+press GLO
+wait 60
+press PLAY
+wait 700
+release PLAY
+release GLO
+wait 60
+expect mode 0
+expect liveplaying 0
+# --- enter LIVE ---
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+# --- GLO + FX in LIVE must not open the FX layer ---
+press GLO
+wait 60
+press FX
+wait 60
+expect fxlayer 0
+release FX
+release GLO
+wait 60
+expect fxlayer 0
+# --- record a take, then GLO + REC must leave it alone ---
+tap REC
+tap PLAY
+wait-bar 1
+tapkey 0
+wait-bar 2
+tap REC
+wait-bar 2
+expect takehas 1
+expect takestate 0
+press GLO
+wait 60
+press REC
+wait 1600                      # past the 1.5 s clear hold: the card owns REC, so nothing happens
+release REC
+release GLO
+wait 100
+expect takehas 1
+expect takearmed 0
+expect takestate 0
+# a short GLO + REC must not arm it either
+press GLO
+wait 60
+tap REC
+release GLO
+wait 100
+expect takearmed 0
+expect takestate 0
+# leave LIVE
+press PLAY
+wait 700
+release PLAY
+wait 60
+expect mode 0
+dump help_ownership.json

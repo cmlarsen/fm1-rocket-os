@@ -9,13 +9,13 @@ tap PLAY
 wait 200
 press FX
 wait 30
-key 2 down
+key w2 down
 wait 500
 expect fxactive2 1
 tap EDIT
 expect setup 1
 expect fxactive2 0
-key 2 up
+key w2 up
 release FX
 wait 100
 tap EDIT

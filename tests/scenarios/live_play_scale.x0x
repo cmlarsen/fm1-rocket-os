@@ -1,0 +1,43 @@
+# TFIXU 5 / ui 9 (owner decision, 2026-10-11): the LIVE PLAY keyboard is a scale-degree keyboard in
+# the song's key and scale (option a): note = 12*(3+octv) + song_key + scale_step(k), where
+# scale_step walks the scale across octaves as k rises.
+wait 300
+newsong 0                          # Empty: C major, so the values are absolute
+expect songkey 0
+expect songscale 0
+expect playnote0.0 36              # C2
+expect playnote1.0 38
+expect playnote3.0 41
+expect playnote4.0 43
+expect playnote7.0 48              # the next C at the octave
+expect playnote0.1 48              # OCT+ transposes by an octave
+# enter LIVE and play the scale on the panel keys
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+tap SEL
+expect layer 1
+events live_play_scale_events.txt
+tapkey w0
+tapkey w1
+tapkey w2
+eventsstop
+dump live_play_scale.json
+press PLAY
+wait 700
+release PLAY
+wait 60
+expect mode 0
+# r1 #3: the top of the range folds down by octaves instead of piling the high keys onto 127.
+songkeyscale 0 0                    # C major
+expect playnote26.4 117             # raw 129 -> 117 (the old code clamped to 127)
+songkeyscale 11 0                   # B major
+expect playnote26.4 116             # raw 140 -> 116
+songkeyscale 11 3                   # B penta
+expect playnote26.4 121             # raw 157 -> 121
+songkeyscale 1 4                    # C# chromatic
+expect playnote26.4 111             # raw 111: already in range, unchanged
+# every key of every scale, folded by whole octaves and in range (throws the scale table at it)
+scalecheck

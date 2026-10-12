@@ -18,6 +18,12 @@ CC="${CC:-cc}"
 FAIL=0
 OUT=build/host
 mkdir -p "$OUT" build/scenarios
+# The drum headers the DSP suites compile against (-Ibuild/gen) are generated before their first
+# consumer: drum-pan, stereo and delay_clamp run long before the host build at the end. A fresh
+# checkout otherwise fails with no x0x_drum_tables.h. The generator writes x0x_drum_tables.h next
+# to the samples header.
+mkdir -p build/gen
+[ -f build/gen/x0x_drum_samples.h ] || python3 tools/gen_drum_samples.py build/gen/x0x_drum_samples.h >/dev/null
 run() {
     name="$1"; shift
     if "$@" > "$OUT/$name.log" 2>&1; then
@@ -105,6 +111,7 @@ else
 fi
 for s in tests/scenarios/*.x0x; do
     n=$(basename "$s" .x0x)
+    rm -rf "build/scenarios/$n"           # no stale artifact from an earlier run survives
     mkdir -p "build/scenarios/$n"
     run "scenario-$n" build/host/x0x_host "$s" "build/scenarios/$n"
 done

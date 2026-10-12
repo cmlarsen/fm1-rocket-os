@@ -1,0 +1,22 @@
+# TFIXU 14 / ui 14: LIGHTS Off switches the key lighting off, but the LIVE transport and layer
+# button LEDs are not decoration: PLAY and SEL must still show.
+wait 300
+tap GLO
+expect view 5
+turn SELECT 8 80
+turn ALGO -2 80
+tap HOME
+wait 100
+expect view 10
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+tap PLAY
+expect liveplaying 1
+tap SEL
+expect layer 1
+expect button PLAY 1
+expect button SEL 1
+dump live_lights_off.json

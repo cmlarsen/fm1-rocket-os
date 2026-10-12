@@ -1,0 +1,11 @@
+# TFIXU 10 / ui 10: a recording longer than four bars clamps to the four-bar cap (64 steps), not
+# silently to two bars (32).
+wait 300
+newsong 0
+cursor 1 0
+tap REC
+wait-bar 5
+tap REC
+wait-bar 1
+expect cliplen7 64
+dump clip_over4bars.json

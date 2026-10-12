@@ -436,6 +436,9 @@ static void host_log_seq(void)
 }
 
 /* ---------------------------------------------------------- outputs --- */
+/* T4 review: a failed artifact open, write or close must fail the run (main folds this in).
+ * png_write / dump_json / wav_open used to only log and return while main still exited 0. */
+static int artifact_fails;
 static void png_write(const char *path)
 {
     /* RGB PNG with stored (uncompressed) deflate blocks: no zlib needed */
@@ -445,6 +448,7 @@ static void png_write(const char *path)
     uint8_t hdr[8] = {137, 80, 78, 71, 13, 10, 26, 10};
     if (!f) {
         fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
         return;
     }
     for (i = 0; i < 256; i++) {
@@ -516,7 +520,10 @@ static void png_write(const char *path)
             c = crc_t[(c ^ ie[i]) & 255] ^ (c >> 8);
         PUT32(~c);
     }
-    fclose(f);
+    if (ferror(f) || fclose(f) != 0) {
+        fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
+    }
 }
 
 static FILE *wav;
@@ -526,8 +533,13 @@ static void wav_open(const char *path)
 {
     static const uint8_t h[44] = {0};
     wav = fopen(path, "wb");
-    if (wav)
-        fwrite(h, 1, 44, wav);
+    if (!wav) {
+        fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
+    } else if (fwrite(h, 1, 44, wav) != 44) {
+        fprintf(stderr, "cannot write %s\n", path);
+        artifact_fails++;
+    }
     wav_frames = 0;
 }
 static void wav_close(void)
@@ -552,7 +564,8 @@ static void wav_close(void)
     }
     fwrite("data", 1, 4, wav);
     fwrite(&bytes, 4, 1, wav);
-    fclose(wav);
+    if (ferror(wav) || fclose(wav) != 0)
+        artifact_fails++;                            /* a short write or failed close fails the run */
     wav = 0;
 }
 
@@ -1048,7 +1061,11 @@ static int expect(const char *what, const char *val)
         got = seq.playing ? 1 : 0;
     else if (!strcmp(what, "liveplaying"))            /* T2c: the clip engine's transport */
         got = live_bridge_transport_playing();
-    else if (!strcmp(what, "fm6held"))              /* T5i: FM6's held (not released) count */
+    else if (!strncmp(what, "playnote", 8)) {       /* TFIXU 9: key K's note in the song's key/scale */
+        int k, o = 0;
+        sscanf(what, "playnote%d.%d", &k, &o);
+        got = live_play_note_for(k, o);
+    } else if (!strcmp(what, "fm6held"))            /* T5i: FM6's held (not released) count */
         got = eng_fm6_voices_held();
     else if (!strcmp(what, "nzvoices"))             /* T5i: NOISE's */
         got = eng_noise_voices_active();
@@ -1136,6 +1153,7 @@ static void dump_json(const char *path)
     int p, i, n, lv = live_bridge_active();
     if (!f) {
         printf("cannot write %s\n", path);
+        artifact_fails++;
         return;
     }
     if (lv) {
@@ -1195,7 +1213,10 @@ static void dump_json(const char *path)
         if (lit_btn >> i & 1u)
             fprintf(f, "%s\"%s\": 1", n++ ? ", " : "", BTN_N[i]);
     fprintf(f, "}\n  }\n}\n");
-    fclose(f);
+    if (ferror(f) || fclose(f) != 0) {
+        printf("cannot write %s\n", path);
+        artifact_fails++;
+    }
 }
 
 /* T11i: a deterministic MIDI fuzz. Feeds N random MIDI messages (notes on/off, Program Change and
@@ -2056,6 +2077,29 @@ int main(int argc, char **argv)
             plat_cpu2_set(atoi(a));
         } else if (!strcmp(cmd, "assignkey")) {         /* T6i: T10's assign-keys, through song_io */
             song_io_set_key_clip(atoi(a), atoi(b));
+        } else if (!strcmp(cmd, "songkeyscale")) {      /* r1: test setup: the song's key (0..11) and scale */
+            song_io_set_key_scale(atoi(a), b[0] ? atoi(b) : 0);
+        } else if (!strcmp(cmd, "scalecheck")) {        /* r1: every key of every scale folds in range */
+            int sc, kk, om, bad = 0, folds = 0;
+            for (sc = 0; sc < 5; sc++)
+                for (kk = 0; kk < 12; kk++)
+                    for (om = -3; om <= 4; om++) {
+                        int j;
+                        for (j = 0; j < 27; j++) {
+                            int raw = 12 * (3 + om) + kk + live_scale_step(j, sc);
+                            int n = live_play_note_scale(j, om, kk, sc);
+                            if (n < 0 || n > 127 || ((raw - n) % 12) != 0)
+                                bad++;
+                            if (raw != n)
+                                folds++;
+                        }
+                    }
+            if (bad || !folds) {
+                printf("FAIL scalecheck: %d out-of-range/non-octave folds (%d folded)\n", bad, folds);
+                fails++;
+            } else {
+                printf("  ok scalecheck (%d notes folded by octaves)\n", folds);
+            }
         } else if (!strcmp(cmd, "songseed")) {          /* TCLS: test setup; the boot song is already the
                                                          * Starter template, so this only marks it dirty */
             song_io_mark_dirty();
@@ -2101,6 +2145,7 @@ int main(int argc, char **argv)
     if (events_log)
         fclose(events_log);
     engine_tap = 0;
+    fails += artifact_fails;                          /* T4 review: missing/failed PNG, JSON or WAV */
     printf("host: %u ms simulated, %u blits, render %.1f%% of real time (host CPU)%s\n", now_ms, blits,
            render_budget_ns_total > 0 ? 100.0 * render_ns_total / render_budget_ns_total : 0.0,
            fails ? ", EXPECTATIONS FAILED" : "");

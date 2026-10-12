@@ -115,6 +115,7 @@ static int  live_take_knob_moved(int i);     /* T9i: K1-K4's recorded-move dots 
 int  live_layer(void);
 int  live_focus(void);
 int  live_fx_layer(void);                    /* T10i: the FX layer is showing */
+int  live_play_note_for(int k, int octv);    /* TFIXU 9: key k's note in the song's key/scale */
 
 /* ============================================================ T7a: STUDIO === */
 /* ui_studio.c is included near the bottom (after ui_live.c). The song home is the default view:
@@ -137,6 +138,8 @@ void studio_set_cursor(int role, int col);    /* the runner's test setup */
 static int  studio_holding(void);             /* a clear/copy hold is in progress */
 void studio_drop_tap(void);                   /* forget a pending HOME + pad tap (no late launch) */
 void studio_tick(void);                        /* the clear / copy hold timers */
+void studio_cancel_pending(void);              /* TFIXU 3: a view/mode change drops a pending clear or tap */
+void song_tempo_nudge(int detents);            /* TFIXU 5: the one song-tempo path (HOME + a knob) */
 int  studio_cursor(void);                      /* packed role<<8 | clip, for the runner */
 static void studio_sound_key(int k, int down); /* the sound page's keys audition the role */
 static void studio_undo(void);
@@ -1294,33 +1297,6 @@ static void clear_part(pattern_t *p, int part)
 static const char *const BTN_LABEL[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                           "PLAY / STOP", "REC", "OCT-", "OCT+"};
 
-/* SAVE held on its own a moment: the pattern is on the clipboard ("P1 COPIED"); a white key pastes it */
-#define COPY_HOLD 250u
-static void copy_tick(uint32_t btn, uint32_t keys)
-{
-    static uint8_t said;
-    uint32_t m = 1u << B_SAVE;
-    if (!(btn & m)) {
-        said = 0;
-        return;
-    }
-    if (!said && btn == m && !keys && !(ui.btn_used & m) && ui.overlay != O_ASK &&
-        plat_ms() - ui.down_t[B_SAVE] >= COPY_HOLD && (int32_t)(ui.turn_t - ui.down_t[B_SAVE]) <= 0) {
-        char t[16];
-        put_s(put_i(put_s(t, "P"), seq.ppat[PART_909] + 1), " COPIED");
-        say(t, 0);
-        said = 1;
-    }
-}
-
-/* TCLS: X0X's "hold one button ~1 s" help was the Classic help; it is gone, so this is off.
- * The reachable help is the GLO+button card and the HOME cheat sheet (ui_help.c). */
-static void help_tick(uint32_t btn, uint32_t keys)
-{
-    (void)btn;
-    (void)keys;
-}
-
 /* ================================================================ undo === */
 /* The X0X project diff-undo (undo.c). TCLS: with the pattern pages gone the reachable undo is the
  * clip undo (studio_undo/redo -> song_io); this inherited machinery still diffs the project after
@@ -1574,6 +1550,11 @@ static int32_t accel(int role, int32_t s, int range)
 static void set_view(int v)
 {
     note_release_all();                           /* T7a r2: a view change releases every held note */
+    studio_cancel_pending();                      /* TFIXU 3: a view change cancels a pending clear/tap */
+    ui.btn_used |= ui.btn;                         /* r1: a button held across the change belongs to the
+                                                   * old view; it must not act in the new one (a SEL
+                                                   * held while leaving LIVE once cleared a clip on
+                                                   * arrival, because studio_tick restarted its hold) */
     if (v != ui.view)
         ui.prev_view = ui.view;
     ui.view = (uint8_t)v;
@@ -2143,12 +2124,6 @@ static void button_tap(int b)
             ui.wpos[bidx()] = 0;
         say(ui.rec ? "RECORD ON: KEYS + KNOBS" : "RECORD OFF", 0);
         break;
-    case B_HOME:                                      /* the pattern; again: the song (a list: back) */
-        if (ui.overlay != O_NONE || ui.view == V_GLO)
-            close_overlay();
-        else
-            set_view(ui.view == V_HOME ? V_SONG : V_HOME);
-        break;
     case B_SEL:
         if (ui.overlay == O_LIST)
             list_enter();
@@ -2160,16 +2135,6 @@ static void button_tap(int b)
             *page_of(V_PART) = (uint8_t)((cur_page() + 1) % pg.n);
         else
             set_view(V_PART);
-        break;
-    case B_ARP:
-        if (!is_303()) {
-            say("TB-3PO: PICK 303A OR 303B", 0);
-            break;
-        }
-        if (ui.view == V_GEN && ui.overlay == O_NONE)  /* the generator; again: its next page */
-            *page_of(V_GEN) = (uint8_t)((cur_page() + 1) % pg.n);
-        else
-            set_view(V_GEN);
         break;
     case B_FX:
         if (ui.view == V_FX && ui.overlay == O_NONE)
@@ -2190,12 +2155,6 @@ static void button_tap(int b)
             set_view(V_GLO);
             open_global();
         }
-        break;
-    case B_SEQ:                                       /* the part's steps; again: the next page */
-        if (ui.view == V_SEQ && ui.overlay == O_NONE)
-            *page_of(V_SEQ) = (uint8_t)((cur_page() + 1) % pg.n);
-        else
-            set_view(V_SEQ);
         break;
     case B_SAVE: save_project(); break;
     case B_OCTUP:
@@ -2467,10 +2426,6 @@ static void input(void)
     }
     if (btn || keys || btn != ui.btn || keys != ui.keys)
         ui.act_t = plat_ms();                         /* held or changed: being played */
-    if (!(btn & (1u << B_SAVE))) {                 /* T8i: SAVE held in STUDIO: only SONGS' feedback */
-        copy_tick(btn, keys);
-        help_tick(btn, keys);
-    }
     help_overlay_tick(btn, keys);                      /* T11h: the HOME sheet, and the card's close */
     ui.btn = btn;
     ch = keys ^ ui.keys;
@@ -2501,12 +2456,10 @@ static void input(void)
         if (held_any_step() >= 0 && !(ui.btn & (1u << B_HOME))) {
             prob_turn(e);                             /* a step held: its chance */
         } else if (ui.btn & (1u << B_HOME)) {
-            float bpm = seq.bpm + (float)accel(EN_SELECT, e, 200);
-            seq.bpm = bpm < 20.0f ? 20.0f : bpm > 275.0f ? 275.0f : bpm;
+            /* TFIXU 5: the sound/FX/MIX pages' tempo gesture used to write the dead sequencer's
+             * seq.bpm; route it through the one song-tempo path (R_TEMPO / STUDIO's HOME+PRESETS). */
             ui.btn_used |= 1u << B_HOME;
-            ui.touched = 4;
-            ui.touch_until = plat_ms() + 900u;
-            mark_dirty();
+            song_tempo_nudge(accel(EN_SELECT, e, 200));
         } else if (ui.overlay == O_LIST) {
             list_move(e > 0 ? 1 : -1);
         } else {
@@ -3934,10 +3887,18 @@ static void leds(void)
         b |= 1u << B_OCTUP;
     if (ui.dirty && blink && ui.view == V_GLO)
         b |= 1u << B_SAVE;
-    if (proj.set.keyled) {                           /* bright: on / chosen; dim: there, not chosen */
-        if (ui.view == V_LIVE) {
-            live_leds(&b, &k, &d);                   /* T3: clip states on the keys, SEL shows the layer */
-        } else if (ui.view == V_STUDIO) {
+    /* TFIXU 14: LIVE's transport and layer button LEDs are not key-light decoration; with LIGHTS
+     * Off the panel must still show PLAY/SEL. Only the key/dim decoration is gated on keyled. */
+    if (ui.view == V_LIVE) {
+        uint32_t kb = 0, kk = 0, kd = 0;
+        live_leds(&kb, &kk, &kd);                    /* T3: clip states on the keys, SEL shows the layer */
+        b |= kb;
+        if (proj.set.keyled) {
+            k |= kk;
+            d |= kd;
+        }
+    } else if (proj.set.keyled) {                    /* bright: on / chosen; dim: there, not chosen */
+        if (ui.view == V_STUDIO) {
             studio_leds(&b, &k, &d);                 /* T7a: the clip grid's states on the keys */
         } else if (ui.view == V_CLIPEDIT || ui.view == V_CLIPMOTION) {
             clip_leds(&b, &k, &d);                   /* T7b: the editor's states on the keys */

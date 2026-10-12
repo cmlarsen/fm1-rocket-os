@@ -151,6 +151,31 @@ void studio_drop_tap(void)
     st.tap_clip = 0xFF;
 }
 
+/* TFIXU 3: a view or mode change abandons a pending clear/tap. Without this a destructive hold
+ * survived the user leaving the song home (opening a page or entering LIVE) and still committed. */
+void studio_cancel_pending(void)
+{
+    st.clear_clip = 0xFF;
+    studio_drop_tap();
+}
+
+/* TFIXU 5: the one song-tempo path. The sound/FX/MIX pages' HOME + SELECT gesture, STUDIO's
+ * HOME + PRESETS, and R_TEMPO all change the song's tempo through the bridge, not the dead
+ * sequencer's seq.bpm. detents is the (accelerated) encoder step count. */
+void song_tempo_nudge(int detents)
+{
+    int b = (int)live_bridge_bpm_x10() + detents * 10;
+    if (b < 200)
+        b = 200;
+    if (b > 3000)
+        b = 3000;
+    song_io_set_bpm(b);
+    live_bridge_set_bpm((uint16_t)b);
+    live_bridge_sync_tempo();
+    ui.touched = 4;
+    ui.touch_until = plat_ms() + 900u;
+}
+
 static void st_finish_clear(void)
 {
     int c = st.clear_clip, role = live_bridge_role_of(c);
@@ -193,6 +218,8 @@ void studio_tick(void)
                 st.clear_sel = 1;
                 st.clear_key = 0xFF;
                 st.clear_t0 = ui.down_t[B_SEL];
+                ui.btn_used |= 1u << B_SEL;   /* TFIXU 3: SEL is consumed at the hold; an early
+                                               * release must not fall through to a launch */
             }
         }
     }
@@ -222,7 +249,10 @@ void studio_tick(void)
         }
     }
     if (st.clear_clip != 0xFF) {
-        int held = st.clear_sel ? (ui.btn & (1u << B_SEL)) != 0 : ((ui.keys >> st.clear_key) & 1u) != 0;
+        /* TFIXU 3: a HOME clear needs HOME and the pad held the whole time. Releasing HOME (the
+         * modifier) cancels it, as releasing the pad always did. The SEL clear needs SEL held. */
+        int held = st.clear_sel ? (ui.btn & (1u << B_SEL)) != 0
+                                : ((ui.keys >> st.clear_key) & 1u) != 0 && (ui.btn & (1u << B_HOME)) != 0;
         if (!held)
             st.clear_clip = 0xFF;                        /* released early: cancel */
         else if (now - st.clear_t0 >= ST_CLEAR_MS)
@@ -430,17 +460,8 @@ static void studio_input(void)
     }
     if ((e = enc(EN_PRESET)) != 0) {                     /* HOME + PRESETS: the song's tempo */
         if (ui.btn & (1u << B_HOME)) {
-            int b = (int)live_bridge_bpm_x10() + e * 10;
             ui.btn_used |= 1u << B_HOME;
-            if (b < 200)
-                b = 200;
-            if (b > 3000)
-                b = 3000;
-            song_io_set_bpm(b);
-            live_bridge_set_bpm((uint16_t)b);
-            live_bridge_sync_tempo();
-            ui.touched = 4;
-            ui.touch_until = plat_ms() + 900u;
+            song_tempo_nudge(e);                        /* TFIXU 5: the shared song-tempo path */
         }
     }
 }

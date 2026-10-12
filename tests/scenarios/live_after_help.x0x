@@ -1,0 +1,60 @@
+# TFIXU r1: PLAY/REC/FX all work normally once a GLO help card has closed (a regression guard
+# around the help-ownership fix): the FX layer opens and latches, REC arms and stops, and the PLAY
+# transport starts and stops. Passed on the r1 tree; kept so the help path cannot regress it.
+wait 300
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1
+press GLO
+wait 60
+press FX
+wait 60
+release GLO
+wait 60
+release FX
+wait 60
+expect fxlayer 0                    # GLO + FX showed a card, no layer
+press FX
+wait 60
+expect fxlayer 1
+release FX
+wait 60
+tap FX
+wait 50
+tap FX
+wait 60
+expect fxlayer 1                    # double tap latches
+tap FX
+wait 50
+tap FX
+wait 60
+expect fxlayer 0
+press GLO
+wait 60
+tap REC
+release GLO
+wait 60
+tap REC
+wait 60
+expect takearmed 1
+tap REC
+wait 60
+expect takearmed 0
+press GLO
+wait 60
+press PLAY
+wait 60
+release GLO
+wait 800
+release PLAY
+wait 60
+expect mode 1                       # GLO + PLAY did not start or leave LIVE
+expect liveplaying 0
+tap PLAY
+wait 60
+expect liveplaying 1
+tap PLAY
+wait 60
+expect liveplaying 0

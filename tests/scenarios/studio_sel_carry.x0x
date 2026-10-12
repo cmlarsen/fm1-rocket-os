@@ -1,0 +1,25 @@
+# TFIXU r1 #4: a button held across a view change belongs to the view it was pressed in. SEL held
+# in LIVE and a long PLAY to leave starts no clear on arrival in STUDIO (studio_tick restarted the
+# SEL hold from down_t). Before the fix set_view did not mark the held buttons used, so the cursor
+# clip was cleared (the final expect got 0).
+wait 300
+tap SEQ
+tap HOME
+wait 1400
+expect clipused0 1                  # the boot song's first clip is loaded
+press PLAY
+wait 700
+release PLAY
+wait 50
+expect mode 1                       # in LIVE
+press SEL
+wait 100
+press PLAY                          # long press: leave LIVE with SEL still held
+wait 700
+release PLAY
+wait 50
+expect mode 0                       # back in STUDIO
+wait 1800                           # past the 250 ms SEL clear ring and the 1.5 s clear
+release SEL
+wait 100
+expect clipused0 1                  # still loaded: no clear started on arrival

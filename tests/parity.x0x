@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Shared native/WASM parity scenario (TFIXU 4, tests #3). Both surfaces run this one file:
+#   build/host/x0x_host tests/parity.x0x build/host   ->  build/host/emu_ref.wav
+#   node tests/host/emu_test.mjs build/emu/x0x.wasm build/host/emu_ref.wav tests/parity.x0x
+# so the same gestures happen at the same simulated times on the device and in the browser.
+# The boot song is the Starter template: start the transport, then launch a drum clip (a
+# non-silent signal through the clip engine).
+wav emu_ref.wav
+wait 500
+tap PLAY
+wait 200
+tapkey 0
+wait 2760
+wavstop

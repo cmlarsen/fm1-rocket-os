@@ -27,6 +27,9 @@
  * model.h beside plat.h (both define NKEYS). T8i asserts them equal at integration. */
 #define NAME_MAX 11u
 #define NAME_BUF (NAME_MAX + 1u)
+/* TFIXU 13: the name field's usable pixel width inside the 240-wide card (text starts at x=14,
+ * the card ends at 236), so a maximum-length name can be drawn without running off screen. */
+#define NAME_FIELD_W 216
 
 /* multi-tap, held repeat, and the HOME hold that clears the name */
 #define NAME_TAP_MS   800u
@@ -72,3 +75,6 @@ void name_edit_begin(name_edit_t *e, const char *initial);
 int  name_edit_input(name_edit_t *e, const name_event_t *event);
 uint32_t name_edit_result(const name_edit_t *e, char *out);   /* out must hold NAME_BUF */
 void name_edit_draw(const name_edit_t *e, uint32_t ms);
+/* TFIXU 13: the pixel width the field draws the whole name at (AF_L, or a smaller face when the
+ * full name would overflow NAME_FIELD_W). Exposed so the host test can assert the field fits. */
+int name_edit_width(const name_edit_t *e);

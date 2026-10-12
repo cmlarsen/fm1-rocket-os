@@ -1,0 +1,32 @@
+# TFIXU 3 / ui 1: a destructive hold must not survive leaving the song home. A view change
+# (EDIT opens the sound page) and a mode change (the long PLAY into LIVE) both cancel it.
+wait 300
+expect clipused0 1
+# --- a SEL clear abandoned by opening a page ---
+press SEL
+wait 350                       # the clear has started
+tap EDIT                       # the view change drops it
+wait 1300
+release SEL
+expect clipused0 1
+tap HOME                       # back to the song home
+wait 100
+# --- a HOME + pad clear abandoned by entering LIVE ---
+press HOME
+key w0 down
+wait 350                       # the clear has started
+press PLAY
+wait 700                       # the long press enters LIVE, which cancels the clear
+release PLAY
+wait 1300
+key w0 up
+release HOME
+expect clipused0 1
+# leave LIVE, back to the song home
+press PLAY
+wait 700
+release PLAY
+wait 60
+expect mode 0
+expect clipused0 1
+dump studio_clear_view_exit.json

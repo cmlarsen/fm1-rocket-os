@@ -49,7 +49,9 @@ int live_focus(void) { return live.focus; }
  * and the double-tap latch — lives here. */
 #define LIVE_FX_TAP_MS 250u          /* a tap (latch) vs a hold (momentary) */
 #define LIVE_FX_DBL_MS 320u          /* two FX taps inside this latch the FX layer on */
-static uint8_t fx_held;              /* the FX button is down */
+static uint8_t fx_held;              /* the FX layer is showing because FX is down */
+static uint8_t fx_press;             /* the FX button is physically down (even when not ours) */
+static uint8_t fx_consumed;          /* TFIXU 2/5: this press belongs to help or a reset: its release is inert */
 static uint8_t fx_layer_latch;       /* double-tapped: the FX layer stays on */
 static uint32_t fx_press_t, fx_last_tap;
 static uint32_t fx_key_t[6];         /* each FX key's press time */
@@ -59,6 +61,23 @@ static uint8_t fx_owner_key[6];      /* the key that engaged each effect, plus o
 
 static int fx_layer_active(void) { return fx_held || fx_layer_latch; }
 int live_fx_layer(void) { return fx_layer_active(); }
+
+/* TFIXU 4: the six punch FX are on the first six LOWER keys and the role mutes on the first five
+ * UPPER keys. Raw key indexes are chromatic, so translate by physical position (WHITE_KEY/
+ * BLACK_KEY, ui.c). This is the one mapping the input and the LED paths share. */
+static int live_key_white(int k) { int i; for (i = 0; i < 16; i++) if (WHITE_KEY[i] == k) return i; return -1; }
+static int live_key_black(int k) { int i; for (i = 0; i < 11; i++) if (BLACK_KEY[i] == k) return i; return -1; }
+static int live_fx_slot(int k) { int p = live_key_white(k); return (p >= 0 && p < 6) ? p : -1; }
+static int live_fx_role(int k) { int p = live_key_black(k); return (p >= 0 && p < LIVE_NROLES) ? p : -1; }
+
+/* TFIXU 2: while GLO is held (or its card is up) a button belongs to help, not the instrument:
+ * its edges and timers must not act, and its release is consumed. btn is the frame's buttons.
+ * (The GLO-held test also covers the frame help_glo_press claims the button: that runs after the
+ * timers, but GLO is already down.) */
+static int live_help_owns(uint32_t btn)
+{
+    return (btn & (1u << B_GLO)) != 0 || help_card_active();
+}
 static void live_fx_release_held(void)
 {
     int i;
@@ -74,7 +93,7 @@ static void live_fx_reset_ui(void)
 {
     int i;
     live_fx_release_held();
-    fx_held = fx_layer_latch = 0;
+    fx_held = fx_layer_latch = fx_press = fx_consumed = 0;
     fx_press_t = fx_last_tap = 0;
     for (i = 0; i < 6; i++)
         fx_key_dn[i] = fx_key_used[i] = fx_owner_key[i] = 0;
@@ -120,6 +139,12 @@ static void live_rec_tick(uint32_t btn)
     if (!live_mode()) {
         rec_pressed = 0;
         rec_cleared = 0;
+        return;
+    }
+    if (live_help_owns(btn)) {               /* TFIXU 2: GLO + REC shows a card; the take is not
+                                              * armed, stopped or cleared, and the press is consumed */
+        rec_pressed = 1;                     /* keep the release inert too */
+        rec_cleared = 1;
         return;
     }
     if (down && !rec_pressed) {
@@ -246,6 +271,12 @@ static void live_play_tick(uint32_t btn)
 {
     uint32_t now = plat_ms();
     int down = (int)((btn >> B_PLAY) & 1u);
+    if (live_help_owns(btn)) {           /* TFIXU 2: GLO + PLAY shows a card, never the transport */
+        live.play_down = (uint8_t)down;
+        live.holding = 0;
+        live.long_done = 1;              /* consume the release: no short press, no mode switch */
+        return;
+    }
     if (down && !live.play_down) {
         live.play_down = 1;
         live.long_done = 0;
@@ -327,6 +358,48 @@ static void live_mapped_release_all(void)
 }
 #include "ui_live_setup.c"
 
+/* TFIXU 5 / ui 9 (owner decision, 2026-10-11): the PLAY keyboard is a scale-degree keyboard in
+ * the song's key and scale. Key k steps up the scale (wrapping into the next octave when it passes
+ * the last degree); the tonic sits at 12*(3+octv) + the song key, i.e. C2 for C major. The mapped
+ * Live-note keys in PADS use the same mapping. */
+static const char *const LV_KEY[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *const LV_SCALE[5] = {"major", "minor", "dorian", "penta", "chromatic"};
+static int live_scale_step(int k, int scale)
+{
+    static const int8_t IV[5][12] = {
+        {0, 2, 4, 5, 7, 9, 11, 0, 0, 0, 0, 0},    /* major */
+        {0, 2, 3, 5, 7, 8, 10, 0, 0, 0, 0, 0},    /* minor */
+        {0, 2, 3, 5, 7, 9, 10, 0, 0, 0, 0, 0},    /* dorian */
+        {0, 2, 4, 7, 9, 0, 0, 0, 0, 0, 0, 0},     /* penta */
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},   /* chromatic */
+    };
+    static const int8_t LEN[5] = {7, 7, 7, 5, 12};
+    int s = scale < 0 ? 0 : scale > 4 ? 4 : scale;
+    return 12 * (k / LEN[s]) + IV[s][k % LEN[s]];
+}
+static int live_song_scale(void)
+{
+    int s = song_io_scale();
+    return s < 0 ? 0 : s > 4 ? 4 : s;
+}
+/* key k's note at octave octv in `key`/`scale` (live_play_note_for's core; the host test reads
+ * it too). r1: a note above 127 (or below 0) folds by whole octaves, so a high octave keeps
+ * every key on its own in-range pitch instead of piling the top keys onto 127. */
+int live_play_note_scale(int k, int octv, int key, int scale)
+{
+    int note = 12 * (3 + octv) + key + live_scale_step(k, scale);
+    while (note > 127)
+        note -= 12;
+    while (note < 0)
+        note += 12;
+    return note;
+}
+/* key k at the current octave, in the song's key/scale (the host test reads this too) */
+int live_play_note_for(int k, int octv)
+{
+    return live_play_note_scale(k, octv, song_io_key(), live_song_scale());
+}
+
 static int live_handle_key(int k, int down)
 {
     if (!down && mapped_fx[k]) {
@@ -337,33 +410,34 @@ static int live_handle_key(int k, int down)
         return 1;
     }
     /* an FX key's release is ours even if the layer closed while it was held */
-    if (k >= 0 && k < 6 && !down && fx_key_used[k] && fx_owner_key[k] == (uint8_t)(k + 1)) {
-        live_fx_key(k, 0, k);
-        return 1;
+    if (!down) {
+        int f = live_fx_slot(k);
+        if (f >= 0 && fx_key_used[f] && fx_owner_key[f] == (uint8_t)(k + 1)) {
+            live_fx_key(f, 0, k);
+            return 1;
+        }
     }
     if (live_setup_key(k, down)) return 1;
     if (live_bridge_take_playing())
         return 1;                          /* T9i: LIVE input is ignored while the take plays */
-    if (fx_layer_active()) {              /* T10i: FX held: keys 0-5 punch, upper keys mute */
-        if (k >= 0 && k < 6) {
+    if (fx_layer_active()) {              /* T10i: FX held: the first six lower keys punch, the
+                                           * first five upper keys mute (TFIXU 4: by position) */
+        int f = live_fx_slot(k);
+        if (f >= 0) {
             if (down)
-                live_fx_key(k, 1, k);
-        } else if (k >= 16 && k < 16 + LIVE_NROLES) {
-            if (down)
-                live_fx_mute(k - 16);
+                live_fx_key(f, 1, k);
+        } else {
+            int r = live_fx_role(k);
+            if (r >= 0 && down)
+                live_fx_mute(r);
         }
         return 1;                          /* the other keys are inert while FX is showing */
     }
     if (!down)
         return 1;                         /* the release is done by the shared table (ui.c) */
-    if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, chromatically */
-        int note = 41 + k + 12 * live.octv;
-        if (note < 0)
-            note = 0;
-        if (note > 127)
-            note = 127;
-        note_key_down(k, live.focus, (uint8_t)note);   /* the layer/focus may change while it is held */
-        return 1;
+    if (live.layer == LIVE_PLAY) {        /* the keys play the focused role, in the song's scale */
+        note_key_down(k, live.focus, (uint8_t)live_play_note_for(k, live.octv));
+        return 1;                          /* the layer/focus may change while it is held */
     }
     {                                     /* PADS: each key is a clip in its zone (press only) */
         int clip = live_bridge_key_clip(k);
@@ -380,9 +454,8 @@ static int live_handle_key(int k, int down)
             return 1;
         }
         if (clip == LIVE_ASSIGN_NOTE) {
-            int note = 41 + k + 12 * live.octv;
-            note_key_down(k, live.focus, (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note));
-            return 1;
+            note_key_down(k, live.focus, (uint8_t)live_play_note_for(k, live.octv));
+            return 1;                      /* a mapped Live note: the same key/scale mapping */
         }
         role = live_bridge_role_of(clip);
         if (clip < 0 || role < 0)
@@ -477,30 +550,60 @@ static void live_fx_button(void)
 {
     int down = (ui.btn & (1u << B_FX)) != 0;
     uint32_t now = plat_ms();
-    if (down && !fx_held) {
-        fx_held = 1;
-        ui.btn_used |= 1u << B_FX;                 /* the release must not also act */
-        if (ui.btn & (1u << B_HOME)) {
-            ui.btn_used |= 1u << B_HOME;
-            engine_perform_reset();                /* HOME + FX: every effect off */
-            fx_held = 0;                           /* the reset press does not open the layer */
-            say("FX RESET", 0);
-        } else {
-            fx_press_t = now;                      /* the header chip shows the layer; no toast (T10i review) */
-        }
-    } else if (!down && fx_held) {
-        uint32_t dt = now - fx_press_t;
-        fx_held = 0;
-        live_fx_release_held();                    /* a held (momentary) effect ends with the layer */
-        if (dt < LIVE_FX_TAP_MS) {                 /* a tap */
-            if (now - fx_last_tap < LIVE_FX_DBL_MS) {
-                fx_layer_latch = (uint8_t)!fx_layer_latch;   /* a double tap latches the layer */
-                fx_last_tap = 0;                   /* the header chip shows it; no toast */
-            } else {
-                fx_last_tap = now;
+    if (!down) {
+        if (fx_press) {                            /* the FX release */
+            uint32_t dt = now - fx_press_t;
+            int consumed = fx_consumed;
+            fx_press = fx_consumed = 0;                /* r1: clear the static too, not just the local */
+            if (fx_held) {                         /* a press that opened the layer */
+                fx_held = 0;
+                live_fx_release_held();            /* a held (momentary) effect ends with the layer */
+                if (!consumed && dt < LIVE_FX_TAP_MS) {      /* a tap */
+                    if (now - fx_last_tap < LIVE_FX_DBL_MS) {
+                        fx_layer_latch = (uint8_t)!fx_layer_latch;   /* a double tap latches the layer */
+                        fx_last_tap = 0;       /* the header chip shows it; no toast */
+                        if (fx_layer_latch)
+                            note_release_all();          /* TFIXU 6: latching the layer releases notes */
+                    } else {
+                        fx_last_tap = now;
+                    }
+                }
             }
         }
+        return;
     }
+    if (fx_press)
+        return;                                    /* only the down edge acts */
+    fx_press = 1;
+    fx_press_t = now;
+    if (live_help_owns(ui.btn)) {                  /* TFIXU 2: GLO + FX shows a card, no layer */
+        fx_consumed = 1;                           /* the release must not act */
+        return;
+    }
+    if (ui.btn & (1u << B_HOME)) {                 /* HOME + FX: every effect and every mute off */
+        int i;
+        ui.btn_used |= 1u << B_FX;
+        ui.btn_used |= 1u << B_HOME;
+        /* r1: the reset must be recorded in the take. Release every active effect and unmute
+         * every muted role through the recorded paths (engine_perform_release ->
+         * live_bridge_take_fx, live_bridge_mute), so a replay ends as silent as the reset left
+         * it. engine_perform_reset() then sweeps any state a release does not cover (a filter
+         * still sweeping back, the echo base). */
+        for (i = 0; i < 6; i++)
+            if (engine_perform_latched(i) || engine_perform_active(i))
+                engine_perform_release(i);
+        for (i = 0; i < LIVE_NROLES; i++)
+            if (live_bridge_muted((uint8_t)i))
+                live_bridge_mute((uint8_t)i, 0);
+        engine_perform_reset();
+        fx_consumed = 1;                           /* the reset press is not a layer press */
+        say("FX RESET", 0);
+        return;
+    }
+    fx_consumed = 0;
+    fx_held = 1;                                   /* the FX layer opens */
+    ui.btn_used |= 1u << B_FX;                     /* the release must not also act */
+    note_release_all();                            /* TFIXU 6: opening the layer releases PLAY notes */
 }
 
 static void live_input(void)
@@ -535,17 +638,17 @@ static void live_leds(uint32_t *btn, uint32_t *key, uint32_t *dim)
         *btn |= 1u << B_PLAY;
     if (fx_layer_active()) {                           /* T10i: the six punches and the role mutes */
         int i;
-        for (i = 0; i < 6; i++) {
+        for (i = 0; i < 6; i++) {                      /* TFIXU 4: the lower keys, by position */
             if (engine_perform_latched(i) || fx_key_dn[i])
-                *key |= 1u << i;                       /* active: latched or held */
+                *key |= 1u << WHITE_KEY[i];            /* active: latched or held */
             else
-                *dim |= 1u << i;
+                *dim |= 1u << WHITE_KEY[i];
         }
-        for (i = 0; i < LIVE_NROLES; i++) {
+        for (i = 0; i < LIVE_NROLES; i++) {            /* the upper keys, by position */
             if (live_bridge_muted((uint8_t)i))
-                *key |= 1u << (16 + i);                /* the upper keys: a muted role lit */
+                *key |= 1u << BLACK_KEY[i];            /* a muted role lit */
             else
-                *dim |= 1u << (16 + i);
+                *dim |= 1u << BLACK_KEY[i];
         }
         return;
     }
@@ -762,7 +865,11 @@ static void live_draw_play(int band)
         put_s(q, LV_SOUND[r]);
         cv_text(8, vc(&AF_M, 36, 18), &AF_M, t, TOK_TEXT);
         q = put_s(t, "octave ");
-        put_i(q, live.octv);
+        q = put_i(q, live.octv);
+        q = put_s(q, " - ");
+        q = put_s(q, LV_KEY[song_io_key() % 12]);
+        *q++ = ' ';
+        put_s(q, LV_SCALE[live_song_scale()]);              /* TFIXU 9: the song's key and scale */
         cv_text(8, vc(&AF_S, 54, 14), &AF_S, t, TOK_MID);   /* fully inside the band */
     } else {
         int i;

@@ -377,17 +377,32 @@ static void nm_draw_head(void)
     cv_text(x + 4, 5, &AF_S, "NAME", TOK_MID);
     nm_battery(240 - 5 - 18, 7);
 }
+/* TFIXU 13: the face the field draws at — AF_L normally, a smaller one when the whole name would
+ * run past the field. The maximum-length name (eleven Ws) otherwise reached x=260. */
+static const aafont_t *nm_face(const name_edit_t *e)
+{
+    if (text_w(&AF_L, e->s) <= NAME_FIELD_W)
+        return &AF_L;
+    if (text_w(&AF_M, e->s) <= NAME_FIELD_W)
+        return &AF_M;
+    return &AF_S;
+}
+int name_edit_width(const name_edit_t *e) { return (int)text_w(nm_face(e), e->s); }
+
 static void nm_draw_card(const name_edit_t *e, uint32_t ms)
 {
     char b[24], one[2], left[NAME_BUF], right[NAME_BUF], n[4];
     int x = 14, y = 60, curx, cw = 0, i, on = ((ms / NAME_BLINK_MS) & 1u) == 0u;
+    const aafont_t *f = nm_face(e);
 
     nm_rrect(4, 30, 232, 76, 6, TOK_SURF);
     b[0] = 0;
     nm_cat(b, sizeof b, "RENAME SONG ");
     nm_utoa((int)e->len, n);
     nm_cat(b, sizeof b, n);
-    nm_cat(b, sizeof b, " OF 12");
+    nm_cat(b, sizeof b, " OF ");                              /* TFIXU 17: the real capacity, not 12 */
+    nm_utoa((int)NAME_MAX, n);
+    nm_cat(b, sizeof b, n);
     cv_text(x, 38, &AF_S, b, TOK_MID);
 
     if (e->cur < e->len) {                                    /* the character being edited */
@@ -396,22 +411,22 @@ static void nm_draw_card(const name_edit_t *e, uint32_t ms)
         left[i] = 0;
         one[0] = e->s[e->cur];
         one[1] = 0;
-        curx = x + text_w(&AF_L, left);
-        cw = text_w(&AF_L, one);
-        nm_rrect(curx - 1, y - 2, cw + 2, AF_L.h, 3, TOK_RAISE);
+        curx = x + text_w(f, left);
+        cw = text_w(f, one);
+        nm_rrect(curx - 1, y - 2, cw + 2, f->h, 3, TOK_RAISE);
         for (i = 0; i < (int)e->len - (int)e->cur - 1; i++)
             right[i] = e->s[e->cur + 1 + i];
         right[i] = 0;
-        cv_text(x, y, &AF_L, left, TOK_THEME);
-        cv_text(curx, y, &AF_L, one, TOK_ACCENT);
-        cv_text(curx + cw, y, &AF_L, right, TOK_THEME);
+        cv_text(x, y, f, left, TOK_THEME);
+        cv_text(curx, y, f, one, TOK_ACCENT);
+        cv_text(curx + cw, y, f, right, TOK_THEME);
         curx += cw;
     } else {                                                  /* the cursor is past the end */
-        cv_text(x, y, &AF_L, e->s, TOK_THEME);
-        curx = x + text_w(&AF_L, e->s);
+        cv_text(x, y, f, e->s, TOK_THEME);
+        curx = x + text_w(f, e->s);
     }
     if (on)                                                   /* the blinking cursor bar */
-        cv_rect(curx + 2, y + 1, 2, AF_L.h - 2, TOK_ACCENT);
+        cv_rect(curx + 2, y + 1, 2, f->h - 2, TOK_ACCENT);
 }
 static void nm_hint(int x, int y, const char *lbl, const char *val, const aafont_t *vf)
 {
