@@ -224,6 +224,7 @@ static void clip_next_page(void)
         set_view(V_CLIPSET);
     } else {
         set_view(V_STUDIO);
+        st.tap_key = 0xFF;                 /* TPOL: a held HOME+key must not launch after this hop */
     }
     build_pages();
 }
