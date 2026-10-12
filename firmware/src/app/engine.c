@@ -934,6 +934,9 @@ static void live_apply(const live_ev_t *e, live_ctx_t *c)
         }
         break;
     }
+    case LIVE_EV_ALL_OFF:
+        all_off_now();
+        break;
     case LIVE_EV_MOTION:
         apply_param((int)(e->b >> 4), (int)(e->b & 15u), (int)e->a, (int)e->c);
         live_tap(abs, ((uint32_t)(e->b >> 4) << 28) | ((uint32_t)(e->b & 15u) << 20) |

@@ -38,6 +38,8 @@ static uint32_t g_take_block_end;                     /* the block's end: the T2
                                                        * first frame (drain logs it there too) */
 static uint8_t g_take_live;                           /* T9i: LIVE is active: the take may record */
 static volatile uint8_t g_take_end_req;               /* the ISR's natural take end, polled by the main loop */
+static uint8_t g_take_window_end;
+static uint32_t g_take_window_frames;
 static uint8_t g_take_reload_req;                     /* an arm was cancelled: reload the song's take (NIT) */
 static uint16_t g_take_stage_i[NROLES];               /* T9i r4: the next take event index to stage per role */
 #ifdef X0X_HOST
@@ -448,6 +450,7 @@ void live_bridge_take_init(void)
     g_take_arm_at_start = 0;
     g_take_live = 0;
     g_take_end_req = 0;
+    g_take_window_end = 0;
     g_take_reload_req = 0;
     tp_h = tp_t = 0;
     {
@@ -517,19 +520,11 @@ void live_bridge_take_block(uint32_t base, uint32_t nframes)
     g_take_block_end = base + nframes;
     sink.ev = take_sink_ev;
     sink.ctx = 0;
-    take_render(&g_take, nframes, &sink);
+    g_take_window_frames = g_take.hdr.length_samples - g_take.play_pos;
+    if (g_take_window_frames > nframes) g_take_window_frames = nframes;
+    take_render(&g_take, g_take_window_frames, &sink);
     if ((int32_t)(g_take.play_pos - g_take.hdr.length_samples) >= 0) {   /* the take ran out */
-        /* B1: the natural end must not push onto a main-loop ring. Stop the transport directly
-         * (the next clip render releases every role), clear what the take set, and let the main
-         * loop notice through g_take_end_req. */
-        take_stop_play(&g_take);
-        clip_engine_take_bpm_clear(&g_eng);              /* B2: the song's tempo comes back */
-        clip_engine_take_stage_clear(&g_eng);            /* T9i r4: drop the staged take copies */
-        g_eng.playing = 0;
-        clip_engine_take_mute_clear(&g_eng);
-        engine_take_perform_reset();
-        engine_all_off();
-        g_take_end_req = 1;
+        g_take_window_end = 1; /* clip/audio render consumes the final interval first */
     }
 }
 
@@ -660,6 +655,7 @@ void live_bridge_take_play(void)
             g_take_stage_i[r] = (uint16_t)(i + 1u);
         }
     }
+    engine_all_off();
     g_eng.playing = 1;
     engine_crit_exit(f);
 #ifdef X0X_HOST
@@ -667,11 +663,11 @@ void live_bridge_take_play(void)
                                                            * point, where a real IRQ can run */
         live_bridge_test_hook();
 #endif
-    engine_all_off();
 }
 
 void live_bridge_take_stop_play(void)
 {
+    g_take_window_end = 0;
     take_stop_play(&g_take);
     clip_engine_transport_stop(&g_eng);                   /* main loop: the ring is fine here */
     {
@@ -975,11 +971,14 @@ int live_bridge_active(void) { return g_active; }
 
 /* ----- audio: the clip engine's events, handed to engine.c in plain terms ----- */
 
+typedef struct { const live_sink_t *sink; uint32_t offset; } bridge_render_ctx_t;
+
 static void bridge_ev(void *ctx, const clip_event_t *e)
 {
-    const live_sink_t *s = (const live_sink_t *)ctx;
+    const bridge_render_ctx_t *render = (const bridge_render_ctx_t *)ctx;
+    const live_sink_t *s = render->sink;
     live_ev_t o;
-    o.sample = e->sample;
+    o.sample = render->offset + e->sample;
     o.role = e->role;
     o.a = e->a;
     o.b = e->b;
@@ -997,8 +996,27 @@ static void bridge_ev(void *ctx, const clip_event_t *e)
 
 void live_bridge_render(uint32_t nframes, const live_sink_t *sink)
 {
-    clip_sink_t cs = {bridge_ev, (void *)sink};
-    clip_engine_render(&g_eng, nframes, &cs);
+    bridge_render_ctx_t ctx = {sink, 0};
+    clip_sink_t cs = {bridge_ev, &ctx};
+    if (!g_take_window_end) {
+        clip_engine_render(&g_eng, nframes, &cs);
+        return;
+    }
+    clip_engine_render(&g_eng, g_take_window_frames, &cs);
+    ctx.offset = g_take_window_frames;
+    g_eng.playing = 0;
+    clip_engine_render(&g_eng, 1, &cs); /* release at the end, without advancing stopped time */
+    if (sink && sink->ev) {
+        live_ev_t end = {g_take_window_frames, LIVE_EV_ALL_OFF, 0, 0, 0, 0};
+        sink->ev(sink->ctx, &end);
+    }
+    take_stop_play(&g_take);
+    clip_engine_take_bpm_clear(&g_eng);
+    clip_engine_take_stage_clear(&g_eng);
+    clip_engine_take_mute_clear(&g_eng);
+    engine_take_perform_reset();
+    g_take_window_end = 0;
+    g_take_end_req = 1;
 }
 
 /* ----- transport and launching (main loop) ----- */
@@ -1067,9 +1085,9 @@ void live_bridge_launch(uint8_t clip)
                                                         * back from a since-overwritten staged copy */
     f = engine_crit_enter();
     g_stop_q[clip_role(clip) % NROLES] = 0;
-    clip_engine_launch(&g_eng, clip);                  /* stages next[] under the mask */
-    engine_crit_exit(f);
-    tp_post(TP_LAUNCH_Q, clip, q);                        /* T9i: record it from the ISR */
+    if (clip_engine_launch(&g_eng, clip) == 0)
+        tp_post(TP_LAUNCH_Q, clip, q);
+    engine_crit_exit(f);                        /* T9i: record it from the ISR */
 }
 
 /* T11i: Program Change launches a clip at the song's PC quantize (not the clip's own). Kept in its
@@ -1084,17 +1102,17 @@ void live_bridge_launch_quant(uint8_t clip, uint8_t quant)
         return;                                       /* S7: a Program Change does not fight a take */
     f = engine_crit_enter();
     g_stop_q[clip_role(clip) % NROLES] = 0;
-    clip_engine_launch_quant(&g_eng, clip, quant);
-    engine_crit_exit(f);
-    tp_post(TP_LAUNCH_Q, clip, (uint8_t)(quant & 3u));    /* S1: remember the quantize for replay */
+    if (clip_engine_launch_quant(&g_eng, clip, quant) == 0)
+        tp_post(TP_LAUNCH_Q, clip, (uint8_t)(quant & 3u));
+    engine_crit_exit(f);    /* S1: remember the quantize for replay */
 }
 void live_bridge_launch_now(uint8_t clip)
 {
     uint32_t f = engine_crit_enter();
     g_stop_q[clip_role(clip) % NROLES] = 0;
-    clip_engine_launch_now(&g_eng, clip);
+    if (clip_engine_launch_now(&g_eng, clip) == 0)
+        tp_post(TP_LAUNCH_NOW, clip, (uint8_t)clip_role(clip));
     engine_crit_exit(f);
-    tp_post(TP_LAUNCH_NOW, clip, (uint8_t)clip_role(clip));
 }
 void live_bridge_launch_at(uint8_t clip, uint32_t at_step)
 {

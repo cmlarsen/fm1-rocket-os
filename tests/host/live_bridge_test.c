@@ -39,7 +39,8 @@ int engine_bass_off(int p) { (void)p;  return 0; }
 int engine_note_on(int part, int note, int vel) { (void)part; (void)note; (void)vel;  return 0; }
 int engine_note_off(int part, int note) { (void)part; (void)note;  return 0; }
 int engine_set(int t, int v, int i, int val) { (void)t; (void)v; (void)i; (void)val;  return 0; }
-void engine_all_off(void) {}
+static int all_off_posts;
+void engine_all_off(void) { all_off_posts++; }
 /* T9i: the take hooks the bridge links against */
 void (*engine_tap)(uint32_t sample, uint32_t cmd);
 void engine_take_cmd(uint32_t cmd) { (void)cmd; }
@@ -619,6 +620,50 @@ static void r5_drop_recovery_test(void)
     live_bridge_exit();
 }
 
+static int order_expected;
+static void order_irq(void)
+{
+    CHECK(!plat_crit_active());
+    CHECK(all_off_posts == order_expected);
+    run_isr_block(0, 128);
+}
+static void tfixa_take_tests(void)
+{
+    uint32_t *ev;
+    int i, found;
+    live_bridge_take_init(); live_bridge_enter(); g_now = 0;
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    ev[0] = 0; ev[1] = TAKE_LAUNCH(0, TAKE_LAUNCH_NOW, LIVE_DRUMS);
+    ev[2] = 128; ev[3] = TAKE_MARK_END;
+    live_bridge_take_loaded(2, 128, 1200);
+    order_expected = all_off_posts + 1;
+    live_bridge_test_hook = order_irq;
+    ncap = 0;
+    live_bridge_take_play();
+    live_bridge_test_hook = test_hook;
+    found = 0;
+    for (i = 0; i < ncap; i++) if (cap[i].kind == LIVE_EV_DRUM && cap[i].sample < 128) found++;
+    CHECK(found > 0); /* the final take window must render before natural Stop */
+    CHECK(!live_bridge_take_playing());
+    live_bridge_exit();
+
+    live_bridge_take_init(); live_bridge_enter(); g_now = 0;
+    live_bridge_take_arm(); live_bridge_transport_start(); run_isr_block(0, 128);
+    {
+        live_song_t *song = (live_song_t *)live_bridge_song();
+        song->clip[13].used = 0;
+    }
+    live_bridge_launch_quant(13, Q_BEAT);
+    run_isr_block(128, 128);
+    g_now = 256; live_bridge_take_finish();
+    ev = (uint32_t *)live_bridge_take_events_mut();
+    found = 0;
+    for (i = 0; i < live_bridge_take_nevents(); i++)
+        if (TAKE_CMD_TYPE(ev[i*2+1]) == TAKE_T_LAUNCH && TAKE_CMD_A(ev[i*2+1]) == 13) found++;
+    CHECK(found == 0);
+    live_bridge_exit();
+}
+
 int main(void)
 {
     int i;
@@ -793,6 +838,7 @@ int main(void)
     r5_drop_recovery_test();
     r5_tempo_restore_test();
     r5_scan_test();
+    tfixa_take_tests();
 
     if (fails) {
         printf("live_bridge: %d check(s) failed\n", fails);
