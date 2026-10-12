@@ -27,12 +27,13 @@ typedef struct {
     uint8_t clear_clip;                   /* the clip being cleared, 0xFF none */
     uint8_t clear_sel;                    /* the clear is SEL-on-cursor, not HOME+key */
     uint8_t clear_key;                    /* the key held for the clear, 0xFF for SEL */
+    uint8_t tap_key;                      /* HOME + this key: launch it now if released early, 0xFF none */
     uint32_t clear_t0;
     char tag[8], msg[26];                 /* the toast (UNDO / REDO / CLEAR / COPY) */
     uint32_t toast_until;
 } studio_t;
 
-static studio_t st = {.copy_src = 0xFF, .clear_clip = 0xFF, .clear_key = 0xFF};
+static studio_t st = {.copy_src = 0xFF, .clear_clip = 0xFF, .clear_key = 0xFF, .tap_key = 0xFF};
 
 /* ---- helpers ---- */
 static int st_role_n(int r) { return live_bridge_role_nclips(r); }
@@ -131,6 +132,7 @@ void studio_enter(void)
     if (st.col >= (uint8_t)st_role_n(st.role))
         st.col = 0;
     st.copy_src = 0xFF;
+    st.tap_key = 0xFF;
     build_pages();
 }
 
@@ -148,6 +150,7 @@ static void st_finish_clear(void)
     if (st.clear_sel)
         ui.btn_used |= 1u << B_SEL;   /* suppress the SEL release */
     st.clear_clip = 0xFF;
+    st.tap_key = 0xFF;                /* a completed clear is not a launch-now tap */
 }
 
 static int st_key_clip(int k) { return k >= 0 && k < (int)LIVE_NCLIPS ? k : -1; }
@@ -242,13 +245,20 @@ static void studio_handle_key(int k, int down)
         if (st.copy_src == clip)
             st.copy_src = 0xFF;                          /* the source let go: the copy ends */
         if (st.clear_clip == clip && !st.clear_sel)
-            st.clear_clip = 0xFF;                        /* HOME + a released pad: cancel */
+            st.clear_clip = 0xFF;                        /* HOME + a released pad: cancel the clear */
+        if (st.tap_key == (uint8_t)k) {                  /* HOME + a tap: launch it now, not quantized */
+            st.tap_key = 0xFF;
+            if ((ui.btn & (1u << B_HOME)) && live_bridge_clip_used(clip))
+                live_bridge_launch_now((uint8_t)clip);
+        }
         return;
     }
     if (clip < 0 || role < 0)
         return;
-    if (ui.btn & (1u << B_HOME)) {                       /* HOME + a pad: hold to clear */
+    if (ui.btn & (1u << B_HOME)) {                       /* HOME + a pad: tap launches now, hold clears */
         ui.btn_used |= 1u << B_HOME;
+        if (used)
+            st.tap_key = (uint8_t)k;
         st_clear_start(clip, 0, k);
         return;
     }

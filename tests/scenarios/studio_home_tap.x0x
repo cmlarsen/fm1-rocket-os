@@ -1,0 +1,20 @@
+# TPOL: HOME + tap launches now in STUDIO too, immediate (not the clip's quantize), as it does in
+# LIVE. A plain tap still queues at the clip's launch setting.
+wait 300
+expect liveused1 1
+tap PLAY
+wait 200
+# a plain tap queues at the clip's own quantize (bar), so it is not playing yet
+tapkey 1
+expect liveque0 1
+expect liveclip0 -1
+# HOME + tap launches it now
+press HOME
+key 1 down
+wait 30
+key 1 up
+release HOME
+wait 120
+expect liveclip0 1
+expect liveque0 -1
+dump studio_home_tap.json

@@ -60,11 +60,12 @@ views. Its header names the song, the transport, BPM and bar.beat; below it sit 
 the role × clip grid with its cursor, and the K1–K4 strip (the cursor clip's length, mode, launch
 and swing). SELECT moves the cursor between roles, ALGORITHM along a row, SEL launches the clip
 under the cursor; the keys mirror the grid. SEQ opens the cursor clip's settings (STUDIO 5),
-creating an empty clip first if the slot is empty; HOME + hold a pad (or SEL on the cursor) clears
-with a ring (STUDIO 9); holding a loaded pad copies onto a blinking empty same-role slot
-(STUDIO 14); HOME+REC undoes and HOME+PLAY redoes with a toast (STUDIO 10). **The clip engine is
-the only audio source in every normal view** (the song home, the sound/FX/MIX/GLOBAL pages and
-LIVE), so tweaking a sound never stops the clips.
+creating an empty clip first if the slot is empty; a plain tap on a key selects and launches that
+clip at its own quantize, and **HOME + tap launches it now** (immediate, as in LIVE); HOME + hold a
+pad (or SEL on the cursor) clears with a ring (STUDIO 9); holding a loaded pad copies onto a blinking
+empty same-role slot (STUDIO 14); HOME+REC undoes and HOME+PLAY redoes with a toast (STUDIO 10). **The
+clip engine is the only audio source in every normal view** (the song home, the sound/FX/MIX/GLOBAL
+pages and LIVE), so tweaking a sound never stops the clips.
 
 ### Classic patterns: removed
 X0X's pattern editors, its pattern sequencer and its song arranger are **gone** (TCLS, owner
@@ -160,6 +161,7 @@ Role mutes and punch FX are performance state (decided 2026-10-11). They reset w
 | Task | Gesture |
 |---|---|
 | New song | SAVE held → SONGS → `+ New song` → Empty, Starter or Copy current |
+| Launch a clip now | HOME + tap a pad: immediate, not quantized (a plain tap uses the clip's own launch setting) |
 | Open, copy, rename or delete a song | SONGS → EDIT on the song → menu. Delete is hold-to-confirm and undoable. |
 | New clip | Cursor on an empty slot. REC records from the next bar (pressing REC again closes the loop), or SEQ opens step entry. |
 | Edit a clip | SEQ cycles NOTES (or the DRUM grid) → MOTION → SETTINGS |
