@@ -2307,8 +2307,10 @@ static int songs_op_open(void *ctx, int slot)
     if (!songs_stop_wait())
         return -1;                            /* the ISR did not settle: refuse the swap */
     /* TFIXS r1: keep unsaved edits and a failed/pending take until an explicit SAVE or the
-     * hold-to-discard gesture; a refused switch shows the SAVE FAILED toast. */
-    if ((song_io_dirty() && song_io_failed()) || song_io_take_failed())
+     * hold-to-discard gesture; a refused switch shows the SAVE FAILED toast. A pending take
+     * with no stored song to flush it (the project seed) would be dropped, so refuse that too. */
+    if ((song_io_dirty() && song_io_failed()) || song_io_take_failed() ||
+        (song_io_take_pending() && song_io_songs_current_slot(0) < 0))
         return -2;
     if (song_io_songs_current_slot(0) >= 0) {
         int fr = song_io_flush();             /* keep a stored song; never auto-save the project seed */

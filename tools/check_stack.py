@@ -28,6 +28,7 @@ CALLBACKS = {
     'fl_write': ('fl_prog_ram',), 'fm1_cstart': ('fl_jedec_ram',),
     'ui_songs_refresh': ('song_io_songs_list', 'song_io_songs_current_slot'),
     'sr_current_slot': ('song_io_songs_current_slot',), 'ui_songs_input': SONGS,
+    'sr_try_open': SONGS,               # the shared open helper (TFIXS r1/B1)
     'motion_release': ('mot_base', 'mot_apply'),
     'do_step': ('bridge_ev',), 'clip_engine_render': ('bridge_ev',),
     'bridge_ev': ('live_sink',), 'take_arm': ('bridge_bar_fn', 'bridge_prelude'),
