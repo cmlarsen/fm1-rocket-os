@@ -774,19 +774,22 @@ int song_io_songs_open(void *ctx, int slot)
 
 int song_io_songs_create(void *ctx, int kind, uint16_t bpm_x10, int key)
 {
-    song_t s;
-    int slot;
+    song_t *s;
+    int slot, rc;
     (void)ctx;
     if (!store_quiet())
         return -1;
     slot = first_free_slot();
     if (slot < 0)
         return -2;                                      /* all slots taken */
+    s = song_store_scratch_acquire();
     if (kind == 1)
-        song_template_starter(&s, bpm_x10, key);
+        song_template_starter(s, bpm_x10, key);
     else
-        song_template_empty(&s, bpm_x10, key);
-    if (song_store_save_tag(&store, slot, &s, 0u) != 0)
+        song_template_empty(s, bpm_x10, key);
+    rc = song_store_save_tag(&store, slot, s, 0u);
+    song_store_scratch_release();
+    if (rc != 0)
         return -1;
     clip_undo_clear();                                  /* creating a song clears the clip undo */
     return slot;
@@ -794,30 +797,35 @@ int song_io_songs_create(void *ctx, int kind, uint16_t bpm_x10, int key)
 
 int song_io_songs_copy(void *ctx, int src)
 {
-    song_t s;
-    int slot, i;
+    song_t *s;
+    int slot, i, rc;
     char nm[SONG_NAME_LEN];
     (void)ctx;
     if (!store_quiet())
         return -1;
     if (src < 0 || src >= (int)SONG_STORE_SLOTS)
         return -1;
-    if (song_store_load(&store, src, &s) != 0)
-        return -1;
     slot = first_free_slot();
     if (slot < 0)
         return -2;
+    s = song_store_scratch_acquire();
+    if (song_store_load(&store, src, s) != 0) {
+        song_store_scratch_release();
+        return -1;
+    }
     /* a copy gets a new name: the source's, truncated to leave room for " 2" */
     for (i = 0; i < (int)SONG_NAME_LEN; i++)
         nm[i] = 0;
-    for (i = 0; i < (int)SONG_NAME_LEN - 3 && s.name[i]; i++)
-        nm[i] = s.name[i];
+    for (i = 0; i < (int)SONG_NAME_LEN - 3 && s->name[i]; i++)
+        nm[i] = s->name[i];
     nm[i] = ' ';
     nm[i + 1] = '2';
     for (i = 0; i < (int)SONG_NAME_LEN; i++)
-        s.name[i] = nm[i];
-    s.has_take = 0;                                     /* the take is not copied with the song record */
-    if (song_store_save_tag(&store, slot, &s, 0u) != 0)
+        s->name[i] = nm[i];
+    s->has_take = 0;                                     /* the take is not copied with the song record */
+    rc = song_store_save_tag(&store, slot, s, 0u);
+    song_store_scratch_release();
+    if (rc != 0)
         return -1;
     clip_undo_clear();                                  /* copying a song clears the clip undo */
     return slot;
